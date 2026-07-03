@@ -15,6 +15,7 @@ interface ActionMenuSheetProps {
   canSpeak: boolean;
   styles: any;
   onCopy: () => void;
+  onRemember?: () => void;
   onEdit: () => void;
   onRetry: () => void;
   onGenerateImage: () => void;
@@ -33,6 +34,7 @@ export function ActionMenuSheet({
   canSpeak,
   styles,
   onCopy,
+  onRemember,
   onEdit,
   onRetry,
   onGenerateImage,
@@ -68,6 +70,18 @@ export function ActionMenuSheet({
           >
             <Icon name="type" size={18} color={colors.textSecondary} />
             <Text style={styles.actionSheetText}>Select text</Text>
+          </AnimatedPressable>
+        )}
+
+        {onRemember && (
+          <AnimatedPressable
+            testID="action-remember"
+            hapticType="selection"
+            style={styles.actionSheetItem}
+            onPress={onRemember}
+          >
+            <Icon name="bookmark" size={18} color={colors.textSecondary} />
+            <Text style={styles.actionSheetText}>Save to Memory</Text>
           </AnimatedPressable>
         )}
 
