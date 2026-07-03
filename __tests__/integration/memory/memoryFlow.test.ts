@@ -453,6 +453,106 @@ describe('Memory Flow Integration', () => {
     expect(memories).toHaveLength(1);
   });
 
+  it('deduplicates repeated explicit memory commands by extracted content', async () => {
+    const first = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-1',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for plots',
+      },
+      sourceType: 'chat_command',
+    });
+    const second = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-2',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for Plots.',
+      },
+      sourceType: 'chat_command',
+    });
+    const listed = await memoryService.listMemories();
+
+    expect(first?.id).toBe(1);
+    expect(second?.id).toBe(1);
+    expect(listed).toHaveLength(1);
+    expect(memories).toHaveLength(1);
+  });
+
+  it('keeps project and global memories separate when content matches', async () => {
+    const global = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-global',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for plots',
+      },
+      sourceType: 'chat_command',
+    });
+    const project = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-project',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for plots',
+      },
+      projectId: 'proj-tax',
+      sourceType: 'chat_command',
+    });
+
+    expect(global?.id).toBe(1);
+    expect(project?.id).toBe(2);
+    expect(memories).toHaveLength(2);
+    expect(memories.map(memory => memory.scope)).toEqual(['global', 'project']);
+  });
+
+  it('explicit save replaces a matching pending candidate with active memory', async () => {
+    const candidate = await memoryService.captureCandidateFromMessage({
+      message: {
+        id: 'msg-candidate',
+        role: 'user',
+        content: 'Remember that the county solar permit office closes at 3 PM on Fridays.',
+      },
+      projectId: 'proj-tax',
+    });
+    const saved = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-save',
+        role: 'user',
+        content: 'remember: the county solar permit office closes at 3 PM on Fridays.',
+      },
+      projectId: 'proj-tax',
+      sourceType: 'chat_command',
+    });
+
+    expect(candidate?.id).toBe(1);
+    expect(saved?.id).toBe(1);
+    expect(candidates).toHaveLength(0);
+    expect(memories).toHaveLength(1);
+    expect(memories[0].source_type).toBe('chat_command');
+  });
+
+  it('removes legacy duplicate memory rows when listing memories', async () => {
+    const first = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-1',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for plots',
+      },
+      sourceType: 'chat_command',
+    });
+    memories.push({
+      ...memories[0],
+      id: 99,
+      source_id: 'legacy-duplicate',
+      created_at: '2026-07-03T00:00:00.000Z',
+      updated_at: '2026-07-03T00:00:00.000Z',
+    });
+
+    const listed = await memoryService.listMemories();
+
+    expect(first?.id).toBe(1);
+    expect(listed.map(memory => memory.id)).toEqual([1]);
+    expect(memories.map(memory => memory.id)).toEqual([1]);
+  });
+
   it('saves direct always directives as command-sourced preferences', async () => {
     const saved = await memoryService.captureMemoryFromMessage({
       message: {
@@ -508,6 +608,31 @@ describe('Memory Flow Integration', () => {
     }));
     expect(JSON.stringify(memories)).not.toContain('Private document text');
     expect(memories).toHaveLength(1);
+  });
+
+  it('deduplicates review candidates by extracted content', async () => {
+    const first = await memoryService.captureCandidateFromMessage({
+      message: {
+        id: 'msg-candidate-1',
+        role: 'user',
+        content: 'Remember that the county solar permit office closes at 3 PM on Fridays.',
+      },
+      projectId: 'proj-tax',
+    });
+    const second = await memoryService.captureCandidateFromMessage({
+      message: {
+        id: 'msg-candidate-2',
+        role: 'user',
+        content: 'Remember that the county solar permit office closes at 3 PM on Fridays.',
+      },
+      projectId: 'proj-tax',
+    });
+    const pending = await memoryService.listPendingCandidates('proj-tax');
+
+    expect(first?.id).toBe(1);
+    expect(second?.id).toBe(1);
+    expect(pending).toHaveLength(1);
+    expect(candidates).toHaveLength(1);
   });
 
   it('saves a chat message once when remembered repeatedly', async () => {
