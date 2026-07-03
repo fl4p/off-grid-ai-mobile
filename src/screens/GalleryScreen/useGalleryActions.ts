@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Platform, PermissionsAndroid, Share } from 'react-native';
-import RNFS from 'react-native-fs';
 import { showAlert, hideAlert, AlertState, initialAlertState } from '../../components/CustomAlert';
 import { useAppStore, useChatStore } from '../../stores';
 import { imageGenerationService, onnxImageGeneratorService } from '../../services';
 import type { ImageGenerationState } from '../../services';
+import { saveImageToGallery } from '../ChatScreen/useSaveImage';
 import { GeneratedImage } from '../../types';
 
 export const formatDate = (dateStr: string): string => {
@@ -153,33 +152,10 @@ export const useGalleryActions = (conversationId: string | undefined) => {
     setSelectedIds(new Set(displayImages.map(img => img.id)));
   }, [displayImages]);
 
+  // Reuse the single gallery-save implementation (real Photos/MediaStore) rather
+  // than a divergent copy — keeps behaviour identical to the chat image viewer.
   const handleSaveImage = useCallback(async (image: GeneratedImage) => {
-    try {
-      if (Platform.OS === 'ios') {
-        await Share.share({ url: `file://${image.imagePath}` });
-        return;
-      }
-      await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-        {
-          title: 'Storage Permission',
-          message: 'App needs access to save images',
-          buttonNeutral: 'Ask Later',
-          buttonNegative: 'Cancel',
-          buttonPositive: 'OK',
-        }
-      );
-      const picturesDir = `${RNFS.ExternalStorageDirectoryPath}/Pictures/OffgridMobile`;
-      if (!(await RNFS.exists(picturesDir))) {
-        await RNFS.mkdir(picturesDir);
-      }
-      const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-');
-      const fileName = `generated_${timestamp}.png`;
-      await RNFS.copyFile(image.imagePath, `${picturesDir}/${fileName}`);
-      setAlertState(showAlert('Image Saved', `Saved to Pictures/OffgridMobile/${fileName}`));
-    } catch (error: any) {
-      setAlertState(showAlert('Error', `Failed to save image: ${error?.message || 'Unknown error'}`));
-    }
+    await saveImageToGallery(image.imagePath, setAlertState);
   }, []);
 
   const handleCancelGeneration = useCallback(() => {

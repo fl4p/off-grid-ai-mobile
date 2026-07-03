@@ -74,9 +74,9 @@ describe('saveImageToGallery', () => {
     );
   });
 
-  it('requests WRITE_EXTERNAL_STORAGE on Android below API 33', async () => {
+  it('requests WRITE_EXTERNAL_STORAGE only on Android <= API 28 (legacy storage)', async () => {
     (Platform as any).OS = 'android';
-    (Platform as any).Version = 30;
+    (Platform as any).Version = 28;
     await saveImageToGallery('file:///tmp/img.png', setAlertState);
     expect(mockRequest).toHaveBeenCalledWith(
       'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -85,22 +85,27 @@ describe('saveImageToGallery', () => {
     expect(mockSaveAsset).toHaveBeenCalled();
   });
 
-  it('skips the permission prompt on Android 33+ (scoped media)', async () => {
+  it('skips the permission prompt on Android 29+ (scoped storage, permission capped at API 28)', async () => {
     (Platform as any).OS = 'android';
-    (Platform as any).Version = 34;
+    (Platform as any).Version = 30;
     await saveImageToGallery('file:///tmp/img.png', setAlertState);
     expect(mockRequest).not.toHaveBeenCalled();
     expect(mockSaveAsset).toHaveBeenCalled();
   });
 
-  it('does not save and warns when Android permission is denied', async () => {
+  it('does not save and warns when a legacy-Android permission is denied', async () => {
     (Platform as any).OS = 'android';
-    (Platform as any).Version = 30;
+    (Platform as any).Version = 28;
     mockRequest.mockResolvedValue('denied');
     await saveImageToGallery('file:///tmp/img.png', setAlertState);
     expect(mockSaveAsset).not.toHaveBeenCalled();
     expect(setAlertState).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Permission needed' }),
     );
+  });
+
+  it('prefixes a bare path (gallery imagePath) with file:// for CameraRoll', async () => {
+    await saveImageToGallery('/data/img/plot.png', setAlertState);
+    expect(mockSaveAsset).toHaveBeenCalledWith('file:///data/img/plot.png', { type: 'photo', album: 'OffgridMobile' });
   });
 });

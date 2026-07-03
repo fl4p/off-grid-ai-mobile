@@ -9,12 +9,14 @@ const ALBUM_NAME = 'OffgridMobile';
 /**
  * Request the runtime permission needed to write to the device gallery.
  * iOS uses the NSPhotoLibraryAdd* Info.plist string (CameraRoll prompts itself).
- * Android only needs WRITE_EXTERNAL_STORAGE on API < 33; newer versions let apps
- * add to the media store without it, so a denial there isn't fatal.
+ * Android: from API 29 (scoped storage) CameraRoll.saveAsset writes via the
+ * media store and needs no permission — and WRITE_EXTERNAL_STORAGE is capped at
+ * maxSdkVersion=28 in the manifest, so requesting it on API 29-32 would just
+ * auto-deny (permission stripped) and block the save. Only API <= 28 asks.
  */
 async function ensureGalleryPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
-  if (Number(Platform.Version) >= 33) return true;
+  if (Number(Platform.Version) >= 29) return true;
   const result = await PermissionsAndroid.request(
     PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
     {
@@ -44,7 +46,10 @@ export async function saveImageToGallery(
       setAlertState(showAlert('Permission needed', 'Allow storage access to save images to your gallery.'));
       return;
     }
-    await CameraRoll.saveAsset(viewerImageUri, { type: 'photo', album: ALBUM_NAME });
+    // Callers pass either a file:// uri (chat viewer) or a bare path (gallery);
+    // CameraRoll wants a uri, so prefix a bare path.
+    const uri = viewerImageUri.includes('://') ? viewerImageUri : `file://${viewerImageUri}`;
+    await CameraRoll.saveAsset(uri, { type: 'photo', album: ALBUM_NAME });
     setAlertState(showAlert('Image Saved', `Saved to your ${ALBUM_NAME} album.`));
   } catch (error: any) {
     logger.error('[ChatScreen] Failed to save image:', error);

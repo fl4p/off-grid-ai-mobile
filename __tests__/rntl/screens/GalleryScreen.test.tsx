@@ -40,6 +40,10 @@ jest.mock('../../../src/components', () => ({
       </Btn>
     );
   },
+  // saveImageToGallery (reused by the gallery save path) pulls showAlert from the barrel.
+  showAlert: (title: string, message: string) => ({ visible: true, title, message, buttons: [] }),
+  hideAlert: () => ({ visible: false, title: '', message: '', buttons: [] }),
+  initialAlertState: { visible: false, title: '', message: '', buttons: [] },
 }));
 
 jest.mock('../../../src/components/AnimatedEntry', () => ({
@@ -159,7 +163,6 @@ jest.mock('../../../src/services', () => ({
 }));
 
 import { GalleryScreen } from '../../../src/screens/GalleryScreen';
-import { Share } from 'react-native';
 
 const sampleImages = [
   {
@@ -523,11 +526,10 @@ describe('GalleryScreen', () => {
     expect(mockGetGeneratedImages).toHaveBeenCalled();
   });
 
-  it('handles save image on iOS using Share', async () => {
+  it('saves the image to the device gallery via CameraRoll', async () => {
+    const { CameraRoll } = require('@react-native-camera-roll/camera-roll');
     const originalPlatform = Platform.OS;
     Object.defineProperty(Platform, 'OS', { value: 'ios', writable: true });
-
-    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
 
     mockGeneratedImages.push(...sampleImages);
 
@@ -536,16 +538,17 @@ describe('GalleryScreen', () => {
 
     // Open viewer
     fireEvent.press(gridItems[0]);
-    // Press Save
+    // Press Save — goes through the shared saveImageToGallery (real Photos/gallery),
+    // not the old Share-sheet path.
     await act(async () => {
       fireEvent.press(result.getByText('Save'));
     });
 
-    expect(shareSpy).toHaveBeenCalledWith({
-      url: 'file:///mock/generated/sunset.png',
-    });
+    expect(CameraRoll.saveAsset).toHaveBeenCalledWith(
+      'file:///mock/generated/sunset.png',
+      { type: 'photo', album: 'OffgridMobile' },
+    );
 
-    shareSpy.mockRestore();
     Object.defineProperty(Platform, 'OS', { value: originalPlatform, writable: true });
   });
 

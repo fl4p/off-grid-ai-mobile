@@ -2074,7 +2074,7 @@ React Native Testing Library tests:
 | Navigation | `home-screen`, `chat-screen`, `models-screen`, `tab-bar`, `home-tab`, `chats-tab`, `models-tab`, `settings-tab` |
 | Chat | `chat-input`, `send-button`, `stop-button`, `thinking-indicator`, `streaming-message`, `assistant-message` |
 | Models | `model-selector`, `model-list`, `model-item-{index}`, `download-button`, `download-progress`, `download-complete` |
-| Image | `image-mode-toggle`, `image-generation-progress`, `generated-image`, `image-message` |
+| Image | `image-mode-toggle`, `image-generation-progress`, `generated-image-{index}`, `image-message` |
 | Conversations | `conversation-list-button`, `conversation-list`, `conversation-item-{index}` |
 | Auth | `lock-screen` |
 
