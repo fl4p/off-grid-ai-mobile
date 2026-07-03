@@ -15,10 +15,17 @@ jest.mock('../../../src/services/rag', () => ({
   ragService: { deleteProjectDocuments: (id: string) => mockDeleteProjectDocuments(id) },
 }));
 
+const mockDeleteProjectMemories = jest.fn<Promise<void>, [string]>(() => Promise.resolve());
+jest.mock('../../../src/services/memory', () => ({
+  memoryService: { deleteProjectMemories: (id: string) => mockDeleteProjectMemories(id) },
+}));
+
 import { useProjectStore } from '../../../src/stores/projectStore';
 
 describe('projectStore', () => {
   beforeEach(() => {
+    mockDeleteProjectDocuments.mockClear();
+    mockDeleteProjectMemories.mockClear();
     // Reset to default projects
     useProjectStore.setState({
       projects: [
@@ -486,8 +493,23 @@ describe('projectStore', () => {
       expect(mockDeleteProjectDocuments).toHaveBeenCalledWith('default-assistant');
     });
 
+    it('calls memoryService.deleteProjectMemories when deleting a project', () => {
+      const { deleteProject } = useProjectStore.getState();
+      deleteProject('default-assistant');
+      expect(mockDeleteProjectMemories).toHaveBeenCalledWith('default-assistant');
+    });
+
     it('removes the project even if RAG cleanup fails', () => {
       mockDeleteProjectDocuments.mockRejectedValueOnce(new Error('DB error'));
+      const { deleteProject } = useProjectStore.getState();
+      const beforeCount = useProjectStore.getState().projects.length;
+      deleteProject('default-assistant');
+      const afterCount = useProjectStore.getState().projects.length;
+      expect(afterCount).toBe(beforeCount - 1);
+    });
+
+    it('removes the project even if memory cleanup fails', () => {
+      mockDeleteProjectMemories.mockRejectedValueOnce(new Error('DB error'));
       const { deleteProject } = useProjectStore.getState();
       const beforeCount = useProjectStore.getState().projects.length;
       deleteProject('default-assistant');

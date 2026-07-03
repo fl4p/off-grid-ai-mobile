@@ -40,6 +40,15 @@ async function dispatchTool(call: ToolCall): Promise<string> {
       if (!q) throw new Error('Missing required parameter: query');
       return handleSearchKnowledgeBase(q, call.context?.projectId);
     }
+    case 'search_memory': {
+      const q = requireString(call, 'query');
+      if (!q) throw new Error('Missing required parameter: query');
+      return handleSearchMemory(q, call.context?.projectId);
+    }
+    case 'save_memory':
+      return handleSaveMemory(call, call.context?.projectId);
+    case 'forget_memory':
+      return handleForgetMemory(call, call.context?.projectId);
     case 'read_url': {
       const url = requireString(call, 'url');
       if (!url) throw new Error('Missing required parameter: url');
@@ -383,6 +392,53 @@ async function handleSearchKnowledgeBase(query: string, projectId?: string): Pro
   return result.chunks
     .map((c: import('../rag').RagSearchResult, i: number) => `[${i + 1}] ${c.name} (part ${c.position + 1}):\n${c.content}`)
     .join('\n\n---\n\n');
+}
+
+async function handleSearchMemory(query: string, projectId?: string): Promise<string> {
+  const { memoryService } = require('../memory'); // NOSONAR
+  const result = await memoryService.searchMemory({ projectId, query });
+  return memoryService.formatForTool(result);
+}
+
+function parseTags(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((tag): tag is string => typeof tag === 'string');
+  if (typeof raw !== 'string') return [];
+  return raw.split(',').map(tag => tag.trim()).filter(Boolean);
+}
+
+function parseMemoryId(raw: unknown): number {
+  const id = typeof raw === 'number' ? raw : Number.parseInt(String(raw ?? ''), 10);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Missing required parameter: memory_id');
+  return id;
+}
+
+async function handleSaveMemory(call: ToolCall, projectId?: string): Promise<string> {
+  const title = requireString(call, 'title');
+  const body = requireString(call, 'body');
+  if (!title) throw new Error('Missing required parameter: title');
+  if (!body) throw new Error('Missing required parameter: body');
+  const requestedScope = call.arguments.scope === 'global' ? 'global' : 'project';
+  const scope = requestedScope === 'project' && projectId ? 'project' : 'global';
+  const { memoryService } = require('../memory'); // NOSONAR
+  const memory = await memoryService.saveMemory({
+    title,
+    body,
+    scope,
+    projectId: scope === 'project' ? projectId : undefined,
+    kind: call.arguments.kind,
+    tags: parseTags(call.arguments.tags),
+    jurisdiction: typeof call.arguments.jurisdiction === 'string' ? call.arguments.jurisdiction : undefined,
+    asOfDate: typeof call.arguments.as_of_date === 'string' ? call.arguments.as_of_date : undefined,
+    sourceType: 'assistant_tool',
+  });
+  return `Saved memory #${memory.id}: ${memory.title}`;
+}
+
+async function handleForgetMemory(call: ToolCall, projectId?: string): Promise<string> {
+  const memoryId = parseMemoryId(call.arguments.memory_id);
+  const { memoryService } = require('../memory'); // NOSONAR
+  const deleted = await memoryService.forgetMemory(memoryId, projectId);
+  return deleted ? `Forgot memory #${memoryId}.` : `Memory #${memoryId} was not found or could not be removed.`;
 }
 
 function formatBytes(bytes: number): string {

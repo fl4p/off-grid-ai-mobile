@@ -72,6 +72,75 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    id: 'search_memory',
+    name: 'search_memory',
+    displayName: 'Memory Search',
+    description: 'Search the user-approved local memory store. Use this for personal preferences, prior research notes, decisions, open questions, and project context before guessing.',
+    icon: 'database',
+    parameters: {
+      query: {
+        type: 'string',
+        description: 'Search query',
+        required: true,
+      },
+    },
+  },
+  {
+    id: 'save_memory',
+    name: 'save_memory',
+    displayName: 'Save Memory',
+    description: 'Save a durable local memory only when the user explicitly asks you to remember something, or when a stable preference, decision, or research note will clearly help later. For laws, taxes, finance, medicine, or other time-sensitive topics, include jurisdiction and as_of_date when known.',
+    icon: 'save',
+    parameters: {
+      title: {
+        type: 'string',
+        description: 'Short title for the memory',
+        required: true,
+      },
+      body: {
+        type: 'string',
+        description: 'Precise memory content to save',
+        required: true,
+      },
+      kind: {
+        type: 'string',
+        description: 'Memory kind',
+        enum: ['preference', 'research_note', 'source_backed_fact', 'decision', 'open_question', 'procedure', 'personal_context'],
+      },
+      scope: {
+        type: 'string',
+        description: 'Memory scope. Use project when tied to the active project; use global for cross-project user preferences.',
+        enum: ['project', 'global'],
+      },
+      tags: {
+        type: 'string',
+        description: 'Comma-separated tags',
+      },
+      jurisdiction: {
+        type: 'string',
+        description: 'Jurisdiction when relevant, for example United States, California, Portugal, or EU',
+      },
+      as_of_date: {
+        type: 'string',
+        description: 'Date the claim was known or researched, in YYYY-MM-DD when possible',
+      },
+    },
+  },
+  {
+    id: 'forget_memory',
+    name: 'forget_memory',
+    displayName: 'Forget Memory',
+    description: 'Delete a saved local memory by id when the user asks you to forget or remove it.',
+    icon: 'trash-2',
+    parameters: {
+      memory_id: {
+        type: 'string',
+        description: 'Memory id to delete',
+        required: true,
+      },
+    },
+  },
+  {
     id: 'read_url',
     name: 'read_url',
     displayName: 'URL Reader',

@@ -16,6 +16,19 @@ jest.mock('../../../src/services/rag', () => ({
   ragService: { searchProject: (...args: any[]) => mockSearchProject(...args) },
 }));
 
+const mockSearchMemory = jest.fn();
+const mockSaveMemory = jest.fn();
+const mockForgetMemory = jest.fn();
+const mockFormatForTool = jest.fn();
+jest.mock('../../../src/services/memory', () => ({
+  memoryService: {
+    searchMemory: (...args: any[]) => mockSearchMemory(...args),
+    saveMemory: (...args: any[]) => mockSaveMemory(...args),
+    forgetMemory: (...args: any[]) => mockForgetMemory(...args),
+    formatForTool: (...args: any[]) => mockFormatForTool(...args),
+  },
+}));
+
 describe('read_url handler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -273,6 +286,122 @@ describe('search_knowledge_base handler', () => {
 
     expect(result.durationMs).toBeDefined();
     expect(typeof result.durationMs).toBe('number');
+  });
+});
+
+describe('memory tool handlers', () => {
+  beforeEach(() => {
+    mockSearchMemory.mockReset();
+    mockSaveMemory.mockReset();
+    mockForgetMemory.mockReset();
+    mockFormatForTool.mockReset();
+  });
+
+  it('search_memory searches local memory and formats results', async () => {
+    const rows = [{ memory: { id: 1, title: 'Tax research' }, score: 1 }];
+    mockSearchMemory.mockResolvedValue(rows);
+    mockFormatForTool.mockReturnValue('Memory #1: Tax research');
+
+    const result = await executeToolCall({
+      id: 'memory_search_1',
+      name: 'search_memory',
+      arguments: { query: 'tax' },
+      context: { projectId: 'proj-1' },
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toContain('Tax research');
+    expect(mockSearchMemory).toHaveBeenCalledWith({ projectId: 'proj-1', query: 'tax' });
+    expect(mockFormatForTool).toHaveBeenCalledWith(rows);
+  });
+
+  it('search_memory validates query', async () => {
+    const result = await executeToolCall({
+      id: 'memory_search_2',
+      name: 'search_memory',
+      arguments: {},
+    });
+
+    expect(result.error).toContain('Missing required parameter: query');
+  });
+
+  it('save_memory stores project-scoped memories with metadata', async () => {
+    mockSaveMemory.mockResolvedValue({ id: 5, title: 'Solar permit rule' });
+
+    const result = await executeToolCall({
+      id: 'memory_save_1',
+      name: 'save_memory',
+      arguments: {
+        title: 'Solar permit rule',
+        body: 'Research county permit requirements before installation.',
+        kind: 'research_note',
+        tags: 'solar, permits',
+        jurisdiction: 'California',
+        as_of_date: '2026-07-03',
+      },
+      context: { projectId: 'proj-1' },
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toContain('Saved memory #5');
+    expect(mockSaveMemory).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'project',
+      projectId: 'proj-1',
+      title: 'Solar permit rule',
+      tags: ['solar', 'permits'],
+      jurisdiction: 'California',
+      asOfDate: '2026-07-03',
+    }));
+  });
+
+  it('save_memory falls back to global scope without a project', async () => {
+    mockSaveMemory.mockResolvedValue({ id: 6, title: 'Terse style' });
+
+    await executeToolCall({
+      id: 'memory_save_2',
+      name: 'save_memory',
+      arguments: { title: 'Terse style', body: 'User prefers terse answers.', scope: 'project' },
+    });
+
+    expect(mockSaveMemory).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'global',
+      projectId: undefined,
+    }));
+  });
+
+  it('save_memory validates title and body', async () => {
+    const result = await executeToolCall({
+      id: 'memory_save_3',
+      name: 'save_memory',
+      arguments: { title: 'Only title' },
+    });
+
+    expect(result.error).toContain('Missing required parameter: body');
+  });
+
+  it('forget_memory removes a memory by id', async () => {
+    mockForgetMemory.mockResolvedValue(true);
+
+    const result = await executeToolCall({
+      id: 'memory_forget_1',
+      name: 'forget_memory',
+      arguments: { memory_id: '9' },
+      context: { projectId: 'proj-1' },
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toContain('Forgot memory #9');
+    expect(mockForgetMemory).toHaveBeenCalledWith(9, 'proj-1');
+  });
+
+  it('forget_memory validates id', async () => {
+    const result = await executeToolCall({
+      id: 'memory_forget_2',
+      name: 'forget_memory',
+      arguments: { memory_id: 'abc' },
+    });
+
+    expect(result.error).toContain('Missing required parameter: memory_id');
   });
 });
 

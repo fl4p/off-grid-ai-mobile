@@ -25,6 +25,8 @@ export type { ToolDefinition, ToolCall, ToolResult } from './tools';
 export { contextCompactionService } from './contextCompaction';
 export { ragService, retrievalService } from './rag';
 export type { RagDocument, RagSearchResult, SearchResult, IndexProgress } from './rag';
+export { memoryService, memoryRetrievalService } from './memory';
+export type { MemoryItem, MemoryKind, MemoryScope, MemorySearchResult } from './memory';
 // Providers
 export { providerRegistry, getProviderForServer, localProvider } from './providers';
 export type { LLMProvider, ProviderType, ProviderCapabilities, GenerationOptions, StreamCallbacks, CompletionResult } from './providers';

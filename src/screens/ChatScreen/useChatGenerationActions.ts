@@ -4,19 +4,20 @@ import { APP_CONFIG } from '../../constants';
 import {
   llmService, intentClassifier, generationService, imageGenerationService,
   onnxImageGeneratorService, ImageGenerationState, buildToolSystemPromptHint,
-  contextCompactionService, ragService, retrievalService,
+  contextCompactionService,
 } from '../../services';
 import { getToolExtensions } from '../../services/tools/extensions';
 import { liteRTService } from '../../services/litert';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
 import { abortPreload } from '../../services/modelPreloader';
-import { embeddingService } from '../../services/rag/embedding';
 import { useChatStore, useProjectStore, useRemoteServerStore } from '../../stores';
 import { callHook, HOOKS } from '../../bootstrap/hookRegistry';
 import { Message, MediaAttachment, Project, DownloadedModel, RemoteModel, CacheType } from '../../types';
 import logger from '../../utils/logger';
+import { injectChatContext } from './contextInjection';
 type SetState<T> = Dispatch<SetStateAction<T>>;
 const FALLBACK_RECENT_MESSAGE_COUNT = 2;
+const MEMORY_TOOL_IDS = ['search_memory', 'save_memory', 'forget_memory'];
 
 export type GenerationDeps = {
   activeModelId: string | null;
@@ -220,29 +221,6 @@ async function generateWithCompactionRetry(
     await gen(compacted);
   }
 }
-async function injectRagContext(projectId: string | undefined, query: string, prompt: string): Promise<string> {
-  if (!projectId) return prompt;
-  try {
-    const docs = await ragService.getDocumentsByProject(projectId);
-    const enabledDocs = docs.filter((d: import('../../services/rag').RagDocument) => d.enabled);
-    if (enabledDocs.length === 0) return prompt;
-    // Warm up embedding model in background (non-blocking)
-    if (!embeddingService.isLoaded()) {
-      embeddingService.load().catch(err => logger.error('[RAG] Embedding warmup failed', err));
-    }
-    const docList = enabledDocs.map((d: import('../../services/rag').RagDocument) => `- ${d.name}`).join('\n');
-    let kbPrompt = `\n\nYou have a knowledge base with these documents:\n${docList}`;
-    kbPrompt += '\nUse the search_knowledge_base tool to look up specific information from these documents.';
-    const r = await ragService.searchProject(projectId, query);
-    if (r.chunks.length > 0) {
-      kbPrompt += `\n\n${retrievalService.formatForPrompt(r)}`;
-    }
-    return prompt + kbPrompt;
-  } catch (err) {
-    logger.error('[RAG] Context injection failed', err);
-  }
-  return prompt;
-}
 /** Gemma 4 E2B/E4B need <|think|> prepended to activate thinking mode — both llama.cpp and LiteRT. */
 const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLiteRT?: boolean; thinkingEnabled?: boolean }): string => {
   const { isLiteRT = false, thinkingEnabled = false } = opts ?? {};
@@ -254,14 +232,21 @@ function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _message
   const project = conversation?.projectId ? useProjectStore.getState().getProject(conversation.projectId) : null;
   const { activeServerId, activeRemoteTextModelId } = useRemoteServerStore.getState();
   const isLiteRT = deps.activeModel?.engine === 'litert' && liteRTService.isModelLoaded();
+  const isRemote = deps.activeModelInfo?.isRemote === true || !!(activeServerId && activeRemoteTextModelId);
   // Honour the UI gate: "N/A" (supportsToolCalling === false) means the picker is unreachable, so don't inject tools the user can't disable.
   const canUseTools = deps.supportsToolCalling !== false && (llmService.supportsToolCalling() || !!(activeServerId && activeRemoteTextModelId) || isLiteRT);
 
   let enabledTools = canUseTools ? (deps.settings.enabledTools || []) : [];
+  if (isRemote) {
+    enabledTools = enabledTools.filter(toolId => !MEMORY_TOOL_IDS.includes(toolId));
+  }
 
   // Auto-add search_knowledge_base for project chats even if not in user's enabled list
   if (conversation?.projectId && !enabledTools.includes('search_knowledge_base')) {
     enabledTools = [...enabledTools, 'search_knowledge_base'];
+  }
+  if (canUseTools && !isRemote && conversation?.projectId && !enabledTools.includes('search_memory')) {
+    enabledTools = [...enabledTools, 'search_memory'];
   }
 
   const rawPrompt = project?.systemPrompt || deps.settings.systemPrompt || APP_CONFIG.defaultSystemPrompt;
@@ -283,13 +268,18 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
   }
   const conversation = useChatStore.getState().conversations.find(c => c.id === targetConversationId);
   const { enabledTools, rawPrompt, isLiteRT } = resolveToolsAndPrompt(deps, conversation, messageText);
-  let basePrompt = await injectRagContext(conversation?.projectId, messageText, rawPrompt);
+  const isRemote = deps.activeModelInfo?.isRemote === true || !!useRemoteServerStore.getState().activeRemoteTextModelId;
+  let basePrompt = await injectChatContext({
+    projectId: conversation?.projectId,
+    query: messageText,
+    prompt: rawPrompt,
+    includeMemory: !isRemote,
+  });
 
   // In voice/audio mode the pro audio feature augments the prompt for spoken
   // output. No-op (returns undefined) in free builds.
   basePrompt = callHook<string>(HOOKS.audioAugmentPrompt, basePrompt) ?? basePrompt;
 
-  const isRemote = !!useRemoteServerStore.getState().activeRemoteTextModelId;
   const activeTools = enabledTools;
   // LiteRT passes tools natively via ConversationConfig — text hint would double-inject.
   // llama.cpp uses text hint only when it lacks native Jinja tool calling support.
@@ -444,9 +434,14 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   const messagesUpToUser = messages.slice(0, messages.findIndex((m: Message) => m.id === userMessage.id) + 1)
     .map(m => m.id === userMessage.id ? { ...m, content: messageText } : m);
   const { enabledTools, rawPrompt, isLiteRT: isLiteRTRegen } = resolveToolsAndPrompt(deps, conversation, messageText);
-  const isRemote = !!useRemoteServerStore.getState().activeRemoteTextModelId;
+  const isRemote = deps.activeModelInfo?.isRemote === true || !!useRemoteServerStore.getState().activeRemoteTextModelId;
   const activeTools = enabledTools;
-  const basePrompt = await injectRagContext(conversation?.projectId, messageText, rawPrompt);
+  const basePrompt = await injectChatContext({
+    projectId: conversation?.projectId,
+    query: messageText,
+    prompt: rawPrompt,
+    includeMemory: !isRemote,
+  });
   const useTextHint = !isRemote && !isLiteRTRegen && activeTools.length > 0 && !llmService.supportsToolCalling();
   // MCP/extension hints come solely from augmentSystemPromptForTools in the tool loop
   // (see the send path above) — adding them here too would double-inject.

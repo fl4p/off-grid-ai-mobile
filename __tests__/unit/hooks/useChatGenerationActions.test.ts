@@ -91,6 +91,13 @@ jest.mock('../../../src/services/rag/embedding', () => ({
   },
 }));
 
+jest.mock('../../../src/services/memory', () => ({
+  memoryService: {
+    searchMemory: jest.fn(() => Promise.resolve([])),
+    formatForPrompt: jest.fn(() => '<memory_context>mock memory context</memory_context>'),
+  },
+}));
+
 jest.mock('../../../src/services/contextCompaction', () => ({
   contextCompactionService: {
     isContextFullError: jest.fn(() => false),
@@ -125,9 +132,12 @@ const mockDeleteGeneratedImage = localDreamGeneratorService.deleteGeneratedImage
 
 const { ragService } = require('../../../src/services/rag');
 const { retrievalService } = require('../../../src/services/rag');
+const { memoryService } = require('../../../src/services/memory');
 const mockSearchProject = ragService.searchProject as jest.Mock;
 const mockGetDocsByProject = ragService.getDocumentsByProject as jest.Mock;
 const mockFormatForPrompt = retrievalService.formatForPrompt as jest.Mock;
+const mockSearchMemory = memoryService.searchMemory as jest.Mock;
+const mockFormatMemoryForPrompt = memoryService.formatForPrompt as jest.Mock;
 
 
 const mockChatStoreGetState = jest.fn(() => ({ conversations: [] as any[], updateCompactionState: jest.fn() }));
@@ -177,6 +187,8 @@ beforeEach(() => {
   mockSearchProject.mockResolvedValue({ chunks: [], truncated: false });
   mockGetDocsByProject.mockResolvedValue([]);
   mockFormatForPrompt.mockReturnValue('<knowledge_base>mock RAG context</knowledge_base>');
+  mockSearchMemory.mockResolvedValue([]);
+  mockFormatMemoryForPrompt.mockReturnValue('<memory_context>mock memory context</memory_context>');
   mockChatStoreGetState.mockReturnValue({ conversations: [], updateCompactionState: jest.fn() });
   mockProjectStoreGetProject.mockReturnValue(null);
 });
@@ -793,6 +805,36 @@ describe('UI tool gate (supportsToolCalling) gates generation', () => {
 // ─────────────────────────────────────────────
 
 describe('RAG context injection in startGenerationFn', () => {
+  it('injects local memory context for local generation', async () => {
+    const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 1, title: 'Preference', body: 'Use terse answers.' }, score: 1 }]);
+    const deps = makeGenerationDeps();
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockSearchMemory).toHaveBeenCalledWith({ projectId: undefined, query: 'hello', topK: 6 });
+    const messagesForDebug = mockGetContextDebugInfo.mock.calls[0][0];
+    expect(messagesForDebug[0].content).toContain('<memory_context>');
+  });
+
+  it('does not inject memory context for remote generation', async () => {
+    useRemoteServerStore.setState({ activeServerId: 'srv-1', activeRemoteTextModelId: 'gpt-4' });
+    const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 1, title: 'Private tax note' }, score: 1 }]);
+    const deps = makeGenerationDeps({
+      activeModelInfo: { isRemote: true, model: null, modelId: 'gpt-4', modelName: 'GPT-4' },
+      activeModel: null,
+    });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockSearchMemory).not.toHaveBeenCalled();
+    const messagesForDebug = mockGetContextDebugInfo.mock.calls[0][0];
+    expect(messagesForDebug[0].content).not.toContain('<memory_context>');
+  });
+
   it('injects doc list and RAG context when conversation has a projectId and search returns chunks', async () => {
     const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
     mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
@@ -876,6 +918,20 @@ describe('RAG context injection in startGenerationFn', () => {
     const { generationService: genSvc } = require('../../../src/services/generationService');
     // The generation should include search_knowledge_base in the tool list
     expect(genSvc.generateWithTools || genSvc.generateResponse).toBeDefined();
+  });
+
+  it('auto-enables read-only memory search for local project conversations', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_knowledge_base', 'search_memory'],
+    }));
   });
 });
 
@@ -1101,6 +1157,27 @@ describe('startGenerationFn — remote model path', () => {
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'Hi' });
     // Remote: isRemote=true → all tools used regardless of heuristic
     expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({ enabledToolIds: ['get_current_datetime'] }));
+  });
+
+  it('filters memory tools from remote generation', async () => {
+    useRemoteServerStore.setState({ activeServerId: 'srv-1', activeRemoteTextModelId: 'gpt-4' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(false);
+    const deps = makeGenerationDeps({
+      activeModelInfo: { isRemote: true, model: null, modelId: 'gpt-4', modelName: 'GPT-4' },
+      activeModel: null,
+      settings: {
+        ...makeGenerationDeps().settings,
+        enabledTools: ['get_current_datetime', 'search_memory', 'save_memory', 'forget_memory'],
+      },
+    });
+    const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'Hi', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'Hi' });
+
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['get_current_datetime'],
+    }));
   });
 });
 

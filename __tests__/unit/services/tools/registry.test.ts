@@ -16,10 +16,10 @@ describe('Tool Registry', () => {
   // AVAILABLE_TOOLS
   // ========================================================================
   describe('AVAILABLE_TOOLS', () => {
-    it('has exactly 6 tools with correct IDs', () => {
+    it('has core tools with correct IDs', () => {
       // Email + calendar tools are pro-gated and live in the pro package
       // (EmailCalendarExtension), so they are not part of the core registry.
-      expect(AVAILABLE_TOOLS).toHaveLength(6);
+      expect(AVAILABLE_TOOLS).toHaveLength(9);
 
       const ids = AVAILABLE_TOOLS.map(t => t.id);
       expect(ids).toEqual([
@@ -28,6 +28,9 @@ describe('Tool Registry', () => {
         'get_current_datetime',
         'get_device_info',
         'search_knowledge_base',
+        'search_memory',
+        'save_memory',
+        'forget_memory',
         'read_url',
       ]);
     });
