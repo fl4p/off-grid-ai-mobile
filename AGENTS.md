@@ -56,3 +56,14 @@ The repo has three automated reviewers on every PR. After pushing, loop until al
 4. Re-run local quality gates (`npm run lint && npm test && npx tsc --noEmit`)
 5. Push fixes, comment `/gemini review` on the PR to re-trigger Gemini
 6. Repeat until all three reviewers pass with no blocking issues
+
+## Multi-Agent Coordination
+
+Several agent sessions work on this repo simultaneously. Rules to avoid stepping on each other:
+
+1. **One worktree per agent.** Never work directly in the primary checkout unless you own it. Create your own: `git worktree add ../offgrid-<task> <your-branch>` (then symlink node_modules: `ln -s <primary>/node_modules <worktree>/node_modules` so lint/tsc/jest run). Never `git checkout`/`git switch` in a tree another session is using.
+2. **Never commit to main.** Enforced by `.githooks/pre-commit` (core.hooksPath). Branch first: `feat/`, `fix/`, `docs/`, `chore/`, `test/`. Everything merges via PR.
+3. **Do not stage or commit files you did not change.** Before committing, check `git status` for other agents' work-in-progress and stage only your own paths. Never use `git add -A`/`git add .` in a shared tree.
+4. **The primary checkout owns the live app.** Only one session runs Metro (port 8081) and deploys to the simulator/device. Saving files in the primary tree hot-refreshes the running app - mid-edit saves tear it. If you only need tests, use your own worktree.
+5. **Serialize native builds.** Do not run gradle/xcodebuild against the same tree concurrently with another session, and never kill a native build mid-write (this corrupts .cxx/intermediates and costs an hour of rebuilds). Check `ps` for running builds first.
+6. **Coordinate over channels.** Use the channel skill (`/tmp/claude-channels`) to hand off findings, claim files, or request a deploy from the primary-tree owner, instead of editing the same files.
