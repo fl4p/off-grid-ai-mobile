@@ -162,6 +162,45 @@ describe('ModelCard', () => {
       );
       expect(getByText('100%')).toBeTruthy();
     });
+
+    it('shows download speed alongside bytes when downloading', () => {
+      const { getByText } = render(
+        <ModelCard
+          model={baseModel}
+          isDownloading={true}
+          downloadProgress={0.5}
+          downloadBytes={{ downloaded: 500 * 1024 * 1024, total: 1024 * 1024 * 1024 }}
+          downloadSpeed={2.5 * 1024 * 1024}
+        />
+      );
+      expect(getByText(/2\.5 MB\/s/)).toBeTruthy();
+    });
+
+    it('does not show speed when downloadSpeed is 0', () => {
+      const { queryByText } = render(
+        <ModelCard
+          model={baseModel}
+          isDownloading={true}
+          downloadProgress={0.5}
+          downloadBytes={{ downloaded: 500 * 1024 * 1024, total: 1024 * 1024 * 1024 }}
+          downloadSpeed={0}
+        />
+      );
+      expect(queryByText(/MB\/s/)).toBeNull();
+      expect(queryByText(/KB\/s/)).toBeNull();
+    });
+
+    it('does not show speed when downloadSpeed is undefined', () => {
+      const { queryByText } = render(
+        <ModelCard
+          model={baseModel}
+          isDownloading={true}
+          downloadProgress={0.5}
+          downloadBytes={{ downloaded: 500 * 1024 * 1024, total: 1024 * 1024 * 1024 }}
+        />
+      );
+      expect(queryByText(/MB\/s/)).toBeNull();
+    });
   });
 
   // ============================================================================

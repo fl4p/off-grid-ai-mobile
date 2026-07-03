@@ -111,6 +111,33 @@ describe('updateProgress', () => {
     useDownloadStore.getState().updateProgress('unknown', 100, 1000);
     expect(useDownloadStore.getState().downloads).toBe(before);
   });
+
+  it('sets downloadSpeed to 0 on first progress update', () => {
+    useDownloadStore.getState().add(makeEntry());
+    useDownloadStore.getState().updateProgress('dl-1', 100, 1000);
+    const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(entry.downloadSpeed).toBe(0);
+    expect(entry.lastSpeedUpdate).toBeDefined();
+  });
+
+  it('computes smoothed downloadSpeed on subsequent updates', () => {
+    useDownloadStore.getState().add(makeEntry());
+    useDownloadStore.getState().updateProgress('dl-1', 100, 1000);
+    const ts1 = useDownloadStore.getState().downloads['author/model/model.gguf'].lastSpeedUpdate!;
+    // Simulate 500ms passing, 200 bytes downloaded
+    const entry1 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    // Manually advance lastSpeedUpdate to simulate time passing
+    useDownloadStore.setState({
+      downloads: {
+        ...useDownloadStore.getState().downloads,
+        'author/model/model.gguf': { ...entry1, lastSpeedUpdate: ts1 - 500 },
+      },
+    });
+    useDownloadStore.getState().updateProgress('dl-1', 300, 1000);
+    const entry2 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    // 200 bytes in ~500ms = ~400 bytes/sec instant; EMA with prev=0 gives instant
+    expect(entry2.downloadSpeed).toBeCloseTo(400, 1);
+  });
 });
 
 describe('updateMmProjProgress', () => {
@@ -127,6 +154,53 @@ describe('updateMmProjProgress', () => {
     const before = useDownloadStore.getState().downloads;
     useDownloadStore.getState().updateMmProjProgress('unknown', 100);
     expect(useDownloadStore.getState().downloads).toBe(before);
+  });
+
+  it('computes downloadSpeed from combined bytes delta', () => {
+    const entry = makeEntry({ combinedTotalBytes: 2000, mmProjDownloadId: 'dl-mm', bytesDownloaded: 500 });
+    useDownloadStore.getState().add(entry);
+    // First update sets lastSpeedUpdate
+    useDownloadStore.getState().updateMmProjProgress('dl-mm', 100);
+    const ts1 = useDownloadStore.getState().downloads['author/model/model.gguf'].lastSpeedUpdate!;
+    // Advance time by 1000ms and add 200 bytes
+    const e1 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    useDownloadStore.setState({
+      downloads: {
+        ...useDownloadStore.getState().downloads,
+        'author/model/model.gguf': { ...e1, lastSpeedUpdate: ts1 - 1000 },
+      },
+    });
+    useDownloadStore.getState().updateMmProjProgress('dl-mm', 300);
+    const updated = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    // 200 bytes in ~1000ms = ~200 bytes/sec
+    expect(updated.downloadSpeed).toBeCloseTo(200, 0);
+  });
+
+  it('smooths speed via EMA on third update', () => {
+    useDownloadStore.getState().add(makeEntry({ combinedTotalBytes: 100000 }));
+    // First update — establishes baseline, speed = 0
+    useDownloadStore.getState().updateProgress('dl-1', 1000, 100000);
+    const e1 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    // Second update — 4000 bytes in 1000ms = 4000 B/s, prevSpeed=0 → speed=4000
+    useDownloadStore.setState({
+      downloads: {
+        ...useDownloadStore.getState().downloads,
+        'author/model/model.gguf': { ...e1, lastSpeedUpdate: e1.lastSpeedUpdate! - 1000 },
+      },
+    });
+    useDownloadStore.getState().updateProgress('dl-1', 5000, 100000);
+    const e2 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(e2.downloadSpeed).toBeCloseTo(4000, 0);
+    // Third update — 2000 bytes in 1000ms = 2000 B/s, EMA: 4000*0.7 + 2000*0.3 = 3400
+    useDownloadStore.setState({
+      downloads: {
+        ...useDownloadStore.getState().downloads,
+        'author/model/model.gguf': { ...e2, lastSpeedUpdate: e2.lastSpeedUpdate! - 1000 },
+      },
+    });
+    useDownloadStore.getState().updateProgress('dl-1', 7000, 100000);
+    const e3 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(e3.downloadSpeed).toBeCloseTo(3400, 0);
   });
 });
 
@@ -153,6 +227,14 @@ describe('setStatus', () => {
     useDownloadStore.getState().setStatus('unknown', 'failed');
     expect(useDownloadStore.getState().downloads).toBe(before);
   });
+
+  it('clears downloadSpeed on failed status', () => {
+    useDownloadStore.getState().add(makeEntry({ status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345 }));
+    useDownloadStore.getState().setStatus('dl-1', 'failed', { message: 'err' });
+    const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(entry.downloadSpeed).toBe(0);
+    expect(entry.lastSpeedUpdate).toBeUndefined();
+  });
 });
 
 describe('setProcessing / setCompleted', () => {
@@ -168,6 +250,22 @@ describe('setProcessing / setCompleted', () => {
     const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
     expect(entry.status).toBe('completed');
     expect(entry.progress).toBe(1);
+  });
+
+  it('setProcessing clears downloadSpeed', () => {
+    useDownloadStore.getState().add(makeEntry({ status: 'running', downloadSpeed: 3000, lastSpeedUpdate: 999 }));
+    useDownloadStore.getState().setProcessing('dl-1');
+    const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(entry.downloadSpeed).toBe(0);
+    expect(entry.lastSpeedUpdate).toBeUndefined();
+  });
+
+  it('setCompleted clears downloadSpeed', () => {
+    useDownloadStore.getState().add(makeEntry({ status: 'running', downloadSpeed: 3000, lastSpeedUpdate: 999 }));
+    useDownloadStore.getState().setCompleted('dl-1');
+    const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(entry.downloadSpeed).toBe(0);
+    expect(entry.lastSpeedUpdate).toBeUndefined();
   });
 });
 
@@ -198,6 +296,14 @@ describe('retryEntry', () => {
     expect(entry.bytesDownloaded).toBe(0);
     expect(state.downloadIdIndex['dl-retry']).toBe('author/model/model.gguf');
     expect(state.downloadIdIndex['dl-1']).toBeUndefined();
+  });
+
+  it('resets downloadSpeed and lastSpeedUpdate', () => {
+    useDownloadStore.getState().add(makeEntry({ status: 'failed', bytesDownloaded: 500, downloadSpeed: 999, lastSpeedUpdate: 12345 }));
+    useDownloadStore.getState().retryEntry('author/model/model.gguf', 'dl-retry');
+    const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(entry.downloadSpeed).toBe(0);
+    expect(entry.lastSpeedUpdate).toBeUndefined();
   });
 });
 

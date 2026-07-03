@@ -98,7 +98,6 @@ function getActiveItemQuantization(
 function entryToActiveItem(entry: DownloadEntry): DownloadItem {
   const metadata = parseEntryMetadata(entry);
   const isImage = entry.modelType === 'image';
-
   return {
     type: 'active',
     modelType: entry.modelType,
@@ -111,6 +110,7 @@ function entryToActiveItem(entry: DownloadEntry): DownloadItem {
     fileSize: entry.combinedTotalBytes || entry.totalBytes,
     bytesDownloaded: entry.bytesDownloaded + (entry.mmProjBytesDownloaded ?? 0),
     progress: entry.progress,
+    downloadSpeed: entry.downloadSpeed,
     status: entry.status,
     reason: entry.errorMessage,
     reasonCode: entry.errorCode as import('../../types').BackgroundDownloadReasonCode | undefined,

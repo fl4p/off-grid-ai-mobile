@@ -26,6 +26,8 @@ export interface DownloadEntry {
   totalBytes: number
   combinedTotalBytes: number
   progress: number
+  downloadSpeed?: number
+  lastSpeedUpdate?: number
   mmProjDownloadId?: string
   mmProjBytesDownloaded?: number
   mmProjStatus?: DownloadStatus
@@ -48,6 +50,29 @@ const ACTIVE_STATUSES = new Set<DownloadStatus>([
 
 export function isActiveStatus(status: DownloadStatus): boolean {
   return ACTIVE_STATUSES.has(status);
+}
+
+/**
+ * Compute a smoothed download speed (bytes/sec) using an exponential moving
+ * average. Returns 0 on the first sample (no baseline to diff against).
+ */
+function computeDownloadSpeed(opts: {
+  prevCombined: number;
+  newCombined: number;
+  prevTimestamp: number | undefined;
+  now: number;
+  prevSpeed: number | undefined;
+}): number {
+  const { prevCombined, newCombined, prevTimestamp, now, prevSpeed } = opts;
+  if (!prevTimestamp) return 0;
+  const deltaBytes = newCombined - prevCombined;
+  const deltaMs = now - prevTimestamp;
+  if (deltaMs <= 0 || deltaBytes < 0) return prevSpeed ?? 0;
+  const instantSpeed = (deltaBytes / deltaMs) * 1000;
+  const alpha = 0.3;
+  return prevSpeed && prevSpeed > 0
+    ? prevSpeed * (1 - alpha) + instantSpeed * alpha
+    : instantSpeed;
 }
 
 interface DownloadStoreState {
@@ -167,6 +192,10 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     const combinedTotal = entry.combinedTotalBytes || total;
     const mmProjBytes = entry.mmProjBytesDownloaded ?? 0;
     const progress = combinedTotal > 0 ? (bytes + mmProjBytes) / combinedTotal : 0;
+    const now = Date.now();
+    const prevCombined = entry.bytesDownloaded + (entry.mmProjBytesDownloaded ?? 0);
+    const newCombined = bytes + mmProjBytes;
+    const speed = computeDownloadSpeed({ prevCombined, newCombined, prevTimestamp: entry.lastSpeedUpdate, now, prevSpeed: entry.downloadSpeed });
     return {
       downloads: {
         ...state.downloads,
@@ -176,6 +205,8 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
           totalBytes: total,
           progress,
           status: 'running',
+          downloadSpeed: speed,
+          lastSpeedUpdate: now,
         },
       },
     };
@@ -198,6 +229,10 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     }
     const combinedTotal = entry.combinedTotalBytes || entry.totalBytes;
     const progress = combinedTotal > 0 ? (entry.bytesDownloaded + bytes) / combinedTotal : 0;
+    const now = Date.now();
+    const prevCombined = entry.bytesDownloaded + (entry.mmProjBytesDownloaded ?? 0);
+    const newCombined = entry.bytesDownloaded + bytes;
+    const speed = computeDownloadSpeed({ prevCombined, newCombined, prevTimestamp: entry.lastSpeedUpdate, now, prevSpeed: entry.downloadSpeed });
     return {
       downloads: {
         ...state.downloads,
@@ -206,6 +241,8 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
           mmProjBytesDownloaded: bytes,
           mmProjStatus: 'running',
           progress,
+          downloadSpeed: speed,
+          lastSpeedUpdate: now,
         },
       },
     };
@@ -239,7 +276,10 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     return {
       downloads: {
         ...state.downloads,
-        [modelKey]: { ...entry, status, errorMessage: error?.message, errorCode: error?.code },
+        [modelKey]: {
+          ...entry, status, errorMessage: error?.message, errorCode: error?.code,
+          ...(status === 'failed' || status === 'cancelled' ? { downloadSpeed: 0, lastSpeedUpdate: undefined } : {}),
+        },
       },
     };
   }),
@@ -250,7 +290,7 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     const entry = state.downloads[modelKey];
     if (!entry) return state;
     return {
-      downloads: { ...state.downloads, [modelKey]: { ...entry, status: 'processing' } },
+      downloads: { ...state.downloads, [modelKey]: { ...entry, status: 'processing', downloadSpeed: 0, lastSpeedUpdate: undefined } },
     };
   }),
 
@@ -262,7 +302,7 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     return {
       downloads: {
         ...state.downloads,
-        [modelKey]: { ...entry, status: 'completed', progress: 1 },
+        [modelKey]: { ...entry, status: 'completed', progress: 1, downloadSpeed: 0, lastSpeedUpdate: undefined },
       },
     };
   }),
@@ -304,6 +344,8 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
           status: 'pending',
           bytesDownloaded: 0,
           progress: 0,
+          downloadSpeed: 0,
+          lastSpeedUpdate: undefined,
           errorMessage: undefined,
           errorCode: undefined,
           // Preserve mmproj identity fields so the UI still knows this is a
