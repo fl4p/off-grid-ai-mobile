@@ -11,6 +11,7 @@ import React from 'react';
 import { render } from '@testing-library/react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { useAppStore } from '../../../src/stores/appStore';
+import { useRemoteServerStore } from '../../../src/stores/remoteServerStore';
 import { resetStores, setupWithActiveModel } from '../../utils/testHelpers';
 import { createDeviceInfo } from '../../utils/factories';
 
@@ -90,6 +91,7 @@ jest.mock('../../../src/services/hardware', () => ({
     })),
     formatBytes: jest.fn((bytes: number) => `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`),
     formatModelSize: jest.fn(() => '4.0 GB'),
+    getTotalMemoryGB: jest.fn(() => 8),
   },
 }));
 
@@ -175,6 +177,53 @@ describe('AppNavigator', () => {
     useAppStore.setState({
       hasCompletedOnboarding: true,
       deviceInfo: createDeviceInfo(),
+    });
+  });
+
+  describe('Initial route after onboarding', () => {
+    const addRemoteServer = () => {
+      useRemoteServerStore.setState({
+        servers: [
+          {
+            id: 'server-1',
+            name: 'Home Server',
+            endpoint: 'http://192.168.1.50:11434',
+            providerType: 'openai-compatible',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      });
+    };
+
+    it('lands on ModelDownload ("Set Up Your AI") when there are no local models and no remote servers', () => {
+      resetStores();
+      useAppStore.setState({
+        hasCompletedOnboarding: true,
+        downloadedModels: [],
+        deviceInfo: createDeviceInfo(),
+      });
+
+      const { getByTestId, queryByTestId } = renderAppNavigator();
+
+      // ModelDownload ("Set Up Your AI") screen mounts in its device-analysis
+      // loading state; the Main tab bar is absent.
+      expect(getByTestId('model-download-loading')).toBeTruthy();
+      expect(queryByTestId('home-tab')).toBeNull();
+    });
+
+    it('lands on Main for a remote-only user (no local models, one configured server)', () => {
+      resetStores();
+      useAppStore.setState({
+        hasCompletedOnboarding: true,
+        downloadedModels: [],
+        deviceInfo: createDeviceInfo(),
+      });
+      addRemoteServer();
+
+      const { getByTestId, queryByText } = renderAppNavigator();
+
+      expect(getByTestId('home-tab')).toBeTruthy();
+      expect(queryByText('Set Up Your AI')).toBeNull();
     });
   });
 
