@@ -44,8 +44,14 @@ describe('Serper provider', () => {
   const originalFetch = (globalThis as any).fetch;
   const signal = new AbortController().signal;
 
+  // Restore fetch precisely so a mock never leaks to another suite sharing this
+  // jest worker: delete it when there was no global fetch to begin with.
   afterEach(() => {
-    (globalThis as any).fetch = originalFetch;
+    if (originalFetch === undefined) {
+      delete (globalThis as any).fetch;
+    } else {
+      (globalThis as any).fetch = originalFetch;
+    }
   });
 
   it('throws before fetching when the key is blank', async () => {
