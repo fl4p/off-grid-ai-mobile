@@ -121,6 +121,11 @@ interface ChatState {
   isStreaming: boolean;
   isThinking: boolean;
   createConversation: (modelId: string, title?: string, projectId?: string, serverId?: string) => string;
+  /** Create a new conversation containing a copy of all messages BEFORE `beforeMessageId`
+   *  (the branch point), and make it active. Returns the new id, or null if the source
+   *  conversation / message can't be found. Compaction state is dropped (the full prior
+   *  history is copied, so no summary is needed). */
+  forkConversation: (sourceConversationId: string, beforeMessageId: string) => string | null;
   deleteConversation: (conversationId: string) => void;
   setActiveConversation: (conversationId: string | null) => void;
   getActiveConversation: () => Conversation | null;
@@ -175,6 +180,34 @@ export const useChatStore = create<ChatState>()(
           activeConversationId: id,
         }));
 
+        return id;
+      },
+
+      forkConversation: (sourceConversationId, beforeMessageId) => {
+        const source = get().conversations.find((c) => c.id === sourceConversationId);
+        if (!source) return null;
+        const cutoff = source.messages.findIndex((m) => m.id === beforeMessageId);
+        if (cutoff === -1) return null;
+        const id = generateId();
+        const now = new Date().toISOString();
+        // Copy the messages before the branch point with fresh ids so the fork and its
+        // source never share message identity. Compaction refs point at original ids, so
+        // they are intentionally dropped — the full prior history is present regardless.
+        const messages: Message[] = source.messages.slice(0, cutoff).map((m) => ({ ...m, id: generateId() }));
+        const conversation: Conversation = {
+          id,
+          title: source.title,
+          modelId: source.modelId,
+          ...(source.serverId ? { serverId: source.serverId } : {}),
+          messages,
+          createdAt: now,
+          updatedAt: now,
+          projectId: source.projectId,
+        };
+        set((state) => ({
+          conversations: [conversation, ...state.conversations],
+          activeConversationId: id,
+        }));
         return id;
       },
 

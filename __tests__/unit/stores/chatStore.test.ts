@@ -61,6 +61,50 @@ describe('chatStore', () => {
 
       expect(getChatState().conversations[0].projectId).toBe('project-123');
     });
+  });
+
+  describe('forkConversation', () => {
+    function seedConversation(): { convId: string; msgIds: string[] } {
+      const { createConversation, addMessage } = useChatStore.getState();
+      const convId = createConversation('m1', 'Source', 'proj-1');
+      const m1 = addMessage(convId, { role: 'user', content: 'first' });
+      const m2 = addMessage(convId, { role: 'assistant', content: 'answer one' });
+      const m3 = addMessage(convId, { role: 'user', content: 'second' });
+      return { convId, msgIds: [m1.id, m2.id, m3.id] };
+    }
+
+    it('creates a new conversation with only the messages before the branch point', () => {
+      const { convId, msgIds } = seedConversation();
+
+      const forkedId = useChatStore.getState().forkConversation(convId, msgIds[2]);
+
+      expect(forkedId).toBeTruthy();
+      const fork = getChatState().conversations.find(c => c.id === forkedId)!;
+      expect(fork.messages.map(m => m.content)).toEqual(['first', 'answer one']);
+      // Model + project are inherited; the fork becomes active.
+      expect(fork.modelId).toBe('m1');
+      expect(fork.projectId).toBe('proj-1');
+      expect(getChatState().activeConversationId).toBe(forkedId);
+    });
+
+    it('gives copied messages fresh ids so the fork and source never share identity', () => {
+      const { convId, msgIds } = seedConversation();
+      const forkedId = useChatStore.getState().forkConversation(convId, msgIds[2]);
+      const fork = getChatState().conversations.find(c => c.id === forkedId)!;
+      const source = getChatState().conversations.find(c => c.id === convId)!;
+
+      const forkIds = fork.messages.map(m => m.id);
+      expect(forkIds).not.toContain(msgIds[0]);
+      expect(forkIds).not.toContain(msgIds[1]);
+      // Source is left untouched.
+      expect(source.messages).toHaveLength(3);
+    });
+
+    it('returns null when the source conversation or message does not exist', () => {
+      const { convId } = seedConversation();
+      expect(useChatStore.getState().forkConversation('nope', 'x')).toBeNull();
+      expect(useChatStore.getState().forkConversation(convId, 'missing-msg')).toBeNull();
+    });
 
     it('preserves streaming state when creating conversation', () => {
       const store = useChatStore.getState();

@@ -205,6 +205,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onCopy,
   onRetry,
   onEdit,
+  onFork,
   onRemember,
   onGenerateImage,
   showActions = true,
@@ -246,6 +247,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
   const handleRetry = () => {
     onRetry?.(message);
+    setShowActionMenu(false);
+  };
+
+  const handleFork = () => {
+    onFork?.(message);
     setShowActionMenu(false);
   };
 
@@ -386,6 +392,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         onGenerateImage={handleGenerateImage}
         onSpeak={handleSpeak}
         onSelectText={interfaceMode === 'chat' ? handleSelectText : undefined}
+        onFork={onFork ? handleFork : undefined}
       />
       <SelectTextSheet
         visible={showSelectText}

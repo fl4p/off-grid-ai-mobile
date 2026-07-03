@@ -55,6 +55,22 @@ export async function handleEditMessageFn(genDeps: GenerationDeps, p: EditParams
   await regenerateResponseFn(genDeps, { setDebugInfo: p.setDebugInfo, userMessage: { ...p.message, content: p.newContent } });
 }
 
+export function handleForkMessageFn(
+  message: Message,
+  p: {
+    activeConversationId: string | null | undefined;
+    forkConversation: (sourceConversationId: string, beforeMessageId: string) => string | null;
+    seedInput: (text: string) => void;
+  },
+): void {
+  if (!p.activeConversationId) return;
+  // Branch before this message (forkConversation makes the fork active), then seed
+  // its text into the input so the user can tweak and resend from the new branch.
+  const forkedId = p.forkConversation(p.activeConversationId, message.id);
+  if (!forkedId) return;
+  p.seedInput(message.content);
+}
+
 export function handleDeleteConversationFn(
   genDeps: GenerationDeps,
   p: { activeConversationId: string | null | undefined; activeConversation: any; setAlertState: SetState<AlertState> },

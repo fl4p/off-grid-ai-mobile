@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, TextInput, TouchableOpacity, Animated, StyleSheet, Platform, ActionSheetIOS } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useTheme, useThemedStyles } from '../../theme';
@@ -16,6 +16,7 @@ import { useKeyboardAwarePopover } from './useKeyboardAwarePopover';
 import { useAppStore } from '../../stores';
 import { useUiModeStore } from '../../stores';
 import { getSlot, SLOTS } from '../../bootstrap/slotRegistry';
+import { useApplyDraft } from '../../hooks/useInputDraft';
 
 interface ChatInputProps {
   onSend: (message: string, attachments?: MediaAttachment[], imageMode?: ImageModeState) => void;
@@ -40,6 +41,9 @@ interface ChatInputProps {
   onRepairVision?: () => void;
   activeSpotlight?: number | null;
   showSettingsDot?: boolean;
+  /** Externally-seeded input text (e.g. fork-message action). The `token` forces
+   *  re-application even when the same text is seeded again. */
+  draftText?: { text: string; token: number } | null;
 }
 
 const IMAGE_MODE_CYCLE: ImageModeState[] = ['auto', 'force', 'disabled'];
@@ -79,6 +83,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onRepairVision,
   activeSpotlight = null,
   showSettingsDot = false,
+  draftText = null,
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -100,6 +105,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       useNativeDriver: false,
     }).start();
   }, [hasText, iconsAnim]);
+  useApplyDraft(draftText, useCallback((t: string) => { setMessage(t); inputRef.current?.focus(); }, []));
 
   const { attachments, removeAttachment, clearAttachments, handlePickImage, handlePickDocument, addAudioAttachment } = useAttachments(setAlertState);
   attachmentsRef.current = attachments;

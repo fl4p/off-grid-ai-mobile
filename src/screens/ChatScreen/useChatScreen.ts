@@ -15,7 +15,8 @@ import { Message, MediaAttachment, Project, DownloadedModel, DebugInfo, RemoteMo
 import { RootStackParamList } from '../../navigation/types';
 import { ensureModelLoadedFn, ensureTextModelForChatFn, handleModelSelectFn, handleUnloadModelFn, initiateModelLoad, restoreConversationModelFn, useChatImageModelEffects, useChatModelStateSync } from './useChatModelActions';
 import { startGenerationFn, handleSendFn, handleStopFn, handleSelectProjectFn, dispatchGenerationFn } from './useChatGenerationActions';
-import { handleRetryMessageFn, handleEditMessageFn, handleDeleteConversationFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
+import { handleRetryMessageFn, handleEditMessageFn, handleForkMessageFn, handleDeleteConversationFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
+import { useInputDraft } from '../../hooks/useInputDraft';
 import { getDisplayMessages, getPlaceholderText, ChatMessageItem, StreamingState } from './types';
 import { saveImageToGallery } from './useSaveImage';
 import {
@@ -60,6 +61,7 @@ export const useChatScreen = () => {
   const [supportsThinking, setSupportsThinking] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
   const [pendingProjectId, setPendingProjectId] = useState<string | undefined>(route.params?.projectId);
+  const { inputDraft, seedInput } = useInputDraft();
   const lastMessageCountRef = useRef(0);
   const generatingForConversationRef = useRef<string | null>(null);
   // Stashed when the model selector opens with no text model; replayed on pick.
@@ -112,7 +114,7 @@ export const useChatScreen = () => {
     activeConversationId, conversations, createConversation, addMessage,
     updateMessageContent, deleteMessagesAfter, streamingMessage, streamingReasoningContent,
     streamingForConversationId, isStreaming, isThinking, clearStreamingMessage,
-    deleteConversation, setActiveConversation, setConversationProject,
+    deleteConversation, forkConversation, setActiveConversation, setConversationProject,
   } = useChatStore();
 
   const { projects, getProject } = useProjectStore();
@@ -347,7 +349,7 @@ export const useChatScreen = () => {
     showModelSelector, setShowModelSelector,
     showSettingsPanel, setShowSettingsPanel,
     supportsToolCalling, supportsThinking,
-    debugInfo, alertState, setAlertState,
+    debugInfo, alertState, setAlertState, inputDraft,
     showScrollToBottom, setShowScrollToBottom,
     isClassifying, animateLastN, queueCount, queuedTexts,
     viewerImageUri, setViewerImageUri, imageGenState,
@@ -371,6 +373,7 @@ export const useChatScreen = () => {
       handleRetryMessageFn(message, genDeps, { activeConversationId, hasActiveModel, activeConversation, deleteMessagesAfter, setDebugInfo }),
     handleEditMessage: (message: Message, newContent: string) =>
       handleEditMessageFn(genDeps, { message, newContent, activeConversationId, hasActiveModel, updateMessageContent, deleteMessagesAfter, setDebugInfo }),
+    handleForkMessage: (message: Message) => handleForkMessageFn(message, { activeConversationId, forkConversation, seedInput }),
     handleSelectProject: (project: Project | null) => {
       setPendingProjectId(project?.id);
       if (!activeConversationId) {

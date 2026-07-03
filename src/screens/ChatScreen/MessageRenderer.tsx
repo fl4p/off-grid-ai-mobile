@@ -18,6 +18,7 @@ type MessageRendererProps = {
   onCopy: (content: string) => void;
   onRetry: (message: Message) => void;
   onEdit: (message: Message, newContent: string) => void;
+  onFork: (message: Message) => void;
   onGenerateImage: (prompt: string) => void;
   onImagePress: (uri: string) => void;
 };
@@ -35,6 +36,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
     onCopy,
     onRetry,
     onEdit,
+    onFork,
     onGenerateImage,
     onImagePress,
   } = props;
@@ -80,6 +82,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
       onCopy={onCopy}
       onRetry={onRetry}
       onEdit={onEdit}
+      onFork={onFork}
       onGenerateImage={onGenerateImage}
       onImagePress={onImagePress}
       canGenerateImage={imageModelLoaded && !isStreaming && !isGeneratingImage}

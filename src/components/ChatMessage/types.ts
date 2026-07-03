@@ -7,6 +7,8 @@ export interface ChatMessageProps {
   onCopy?: (content: string) => void;
   onRetry?: (message: Message) => void;
   onEdit?: (message: Message, newContent: string) => void;
+  /** Fork the conversation before this message and seed its text into the input. */
+  onFork?: (message: Message) => void;
   onRemember?: (message: Message) => Promise<void> | void;
   onGenerateImage?: (prompt: string) => void;
   showActions?: boolean;

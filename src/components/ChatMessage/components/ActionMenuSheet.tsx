@@ -22,6 +22,8 @@ interface ActionMenuSheetProps {
   onSpeak: () => void;
   /** When provided, shows a "Select text" item (chat mode) for partial copy. */
   onSelectText?: () => void;
+  /** When provided, shows a "Fork from here" item that branches the conversation. */
+  onFork?: () => void;
 }
 
 export function ActionMenuSheet({
@@ -40,6 +42,7 @@ export function ActionMenuSheet({
   onGenerateImage,
   onSpeak,
   onSelectText,
+  onFork,
 }: ActionMenuSheetProps) {
   const { colors } = useTheme();
 
@@ -108,6 +111,18 @@ export function ActionMenuSheet({
             <Text style={styles.actionSheetText}>
               {isUser ? 'Resend' : 'Regenerate'}
             </Text>
+          </AnimatedPressable>
+        )}
+
+        {onFork && (
+          <AnimatedPressable
+            testID="action-fork"
+            hapticType="selection"
+            style={styles.actionSheetItem}
+            onPress={onFork}
+          >
+            <Icon name="git-branch" size={18} color={colors.textSecondary} />
+            <Text style={styles.actionSheetText}>Fork from here</Text>
           </AnimatedPressable>
         )}
 

@@ -267,6 +267,7 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
             supportsThinking={chat.supportsThinking}
             onRepairVision={handleRepairVision}
             activeSpotlight={chatSpotlight === 12 ? chatSpotlight : null}
+            draftText={chat.inputDraft}
           />
         </AttachStep>
       </View>
