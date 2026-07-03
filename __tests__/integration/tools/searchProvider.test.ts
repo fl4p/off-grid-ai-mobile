@@ -84,7 +84,7 @@ describe('web_search provider selection (integration)', () => {
         <p class="snippet-description">From brave</p>
       </div>
     </body></html>`;
-    const fetchSpy = jest.fn().mockResolvedValue({ text: jest.fn().mockResolvedValue(html) });
+    const fetchSpy = jest.fn().mockResolvedValue({ ok: true, status: 200, text: jest.fn().mockResolvedValue(html) });
     (globalThis as any).fetch = fetchSpy;
 
     const result = await webSearch('react native');
@@ -98,6 +98,8 @@ describe('web_search provider selection (integration)', () => {
     (mockedKeychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
 
     const fetchSpy = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
       text: jest.fn().mockResolvedValue('<html><body>No matching documents</body></html>'),
     });
     (globalThis as any).fetch = fetchSpy;
