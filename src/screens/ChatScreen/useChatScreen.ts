@@ -11,6 +11,7 @@ import {
   contextCompactionService,
 } from '../../services';
 import { liteRTService } from '../../services/litert';
+import { memoryService } from '../../services/memory';
 import { Message, MediaAttachment, Project, DownloadedModel, DebugInfo, RemoteModel, INFERENCE_BACKENDS } from '../../types';
 import { RootStackParamList } from '../../navigation/types';
 import { ensureModelLoadedFn, ensureTextModelForChatFn, handleModelSelectFn, handleUnloadModelFn, initiateModelLoad, useChatImageModelEffects, useChatModelStateSync } from './useChatModelActions';
@@ -321,6 +322,10 @@ export const useChatScreen = () => {
   const handleSend = (text: string, attachments?: MediaAttachment[], imageMode?: 'auto' | 'force' | 'disabled') =>
     handleSendFn(genDeps, { text, attachments, imageMode, startGeneration, setDebugInfo });
 
+  const handleRememberMessage = useCallback(async (message: Message) => {
+    await memoryService.rememberMessage({ message, projectId: effectiveProjectId });
+  }, [effectiveProjectId]);
+
   // After picking a text model, replay the stashed message (no retype needed).
   const handleModelSelect = async (model: DownloadedModel) => {
     await handleModelSelectFn(modelDeps, model);
@@ -352,6 +357,7 @@ export const useChatScreen = () => {
     isStreaming, isThinking, isCompacting, isGeneratingForThisConversation, hasPendingSettings, handleReloadTextModel, displayMessages, downloadedModels, hasAvailableModels, projects, settings,
     navigation, hardwareService,
     handleSend,
+    handleRememberMessage,
     handleStop: () => handleStopFn(genDeps),
     handleModelSelect,
     handleUnloadModel: () => handleUnloadModelFn(modelDeps),

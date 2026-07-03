@@ -649,6 +649,59 @@ describe('OpenAICompatibleProvider', () => {
       expect(assistantMsg).toBeDefined();
       expect(assistantMsg.tool_calls[0].function.name).toBe('web_search');
     });
+
+    it('scrubs persisted memory tool calls and results before remote requests', async () => {
+      const mockStream = httpClient.createStreamingRequest as jest.Mock;
+      let capturedBody: any;
+      mockStream.mockImplementation((_url, _req, onEvent) => {
+        capturedBody = _req.body;
+        onEvent({ data: '{"choices":[{"delta":{},"finish_reason":"stop"}]}' });
+        return Promise.resolve();
+      });
+
+      await provider.generate(
+        [
+          { id: '1', role: 'user', content: 'search memory and web', timestamp: 0 },
+          {
+            id: '2',
+            role: 'assistant',
+            content: '',
+            timestamp: 0,
+            toolCalls: [
+              { id: 'tc-memory', name: 'search_memory', arguments: '{"query":"tax"}' },
+              { id: 'tc-web', name: 'web_search', arguments: '{"query":"public"}' },
+            ],
+          },
+          {
+            id: '3',
+            role: 'tool',
+            content: 'PRIVATE TAX MEMORY',
+            toolCallId: 'tc-memory',
+            toolName: 'search_memory',
+            timestamp: 0,
+          },
+          {
+            id: '4',
+            role: 'tool',
+            content: 'PUBLIC WEB RESULT',
+            toolCallId: 'tc-web',
+            toolName: 'web_search',
+            timestamp: 0,
+          },
+          { id: '5', role: 'user', content: 'continue', timestamp: 0 },
+        ],
+        {},
+        { onToken: jest.fn(), onComplete: jest.fn(), onError: jest.fn() }
+      );
+
+      const payload = JSON.stringify(capturedBody.messages);
+      expect(payload).not.toContain('PRIVATE TAX MEMORY');
+      expect(payload).not.toContain('search_memory');
+      expect(payload).not.toContain('tc-memory');
+      expect(payload).toContain('PUBLIC WEB RESULT');
+      expect(payload).toContain('web_search');
+      expect(payload).toContain('tc-web');
+    });
   });
 
   describe('stopGeneration — no-op when no controller', () => {

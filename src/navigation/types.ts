@@ -11,6 +11,8 @@ export type RootStackParamList = {
   ProjectEdit: { projectId?: string };
   ProjectChats: { projectId: string };
   KnowledgeBase: { projectId: string };
+  Memory: { projectId?: string } | undefined;
+  MemoryEditor: { projectId?: string; candidateId?: number } | undefined;
   DocumentPreview: { filePath: string; fileName: string; fileSize: number };
   // Former SettingsStack
   ModelSettings: undefined;

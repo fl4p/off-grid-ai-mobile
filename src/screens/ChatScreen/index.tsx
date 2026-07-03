@@ -224,6 +224,7 @@ export const ChatScreen: React.FC = () => {
       isGeneratingImage={chat.isGeneratingImage}
       showGenerationDetails={chat.settings.showGenerationDetails}
       onCopy={chat.handleCopyMessage}
+      onRemember={chat.handleRememberMessage}
       onRetry={chat.handleRetryMessage}
       onEdit={chat.handleEditMessage}
       onGenerateImage={chat.handleGenerateImageFromMessage}

@@ -568,6 +568,47 @@ describe('ChatMessage', () => {
       expect(onRetry).toHaveBeenCalledWith(message);
     });
 
+    it('calls onRemember when Save to Memory is pressed', async () => {
+      const onRemember = jest.fn(() => Promise.resolve());
+      const message = createAssistantMessage('Remember this research note');
+
+      const { getByTestId, getByText } = render(
+        <ChatMessage message={message} onRemember={onRemember} showActions={true} />
+      );
+
+      fireEvent(getByTestId('assistant-message'), 'longPress');
+
+      expect(getByText('Save to Memory')).toBeTruthy();
+      await act(async () => {
+        fireEvent.press(getByTestId('action-remember'));
+        await Promise.resolve();
+      });
+
+      expect(onRemember).toHaveBeenCalledWith(message);
+    });
+
+    it('saves only visible assistant response text to memory', async () => {
+      const onRemember = jest.fn(() => Promise.resolve());
+      const message = createAssistantMessage(
+        '<|channel|>analysis<|message|>hidden reasoning<|channel|>final<|message|>Visible answer',
+      );
+
+      const { getByTestId } = render(
+        <ChatMessage message={message} onRemember={onRemember} showActions={true} />
+      );
+
+      fireEvent(getByTestId('assistant-message'), 'longPress');
+      await act(async () => {
+        fireEvent.press(getByTestId('action-remember'));
+        await Promise.resolve();
+      });
+
+      expect(onRemember).toHaveBeenCalledWith(expect.objectContaining({
+        id: message.id,
+        content: 'Visible answer',
+      }));
+    });
+
     it('shows edit option for user messages', () => {
       const onEdit = jest.fn();
       const message = createUserMessage('Edit me');

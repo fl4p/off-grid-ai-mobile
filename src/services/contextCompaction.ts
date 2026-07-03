@@ -16,6 +16,7 @@ import { llmService } from './llm';
 import { useChatStore } from '../stores/chatStore';
 import { Message } from '../types';
 import logger from '../utils/logger';
+import { scrubMemoryToolMessages } from './memory/toolPrivacy';
 
 const CONTEXT_FULL_PATTERNS = [
   'context is full',
@@ -99,7 +100,7 @@ class ContextCompactionService {
       const systemTokens = await this.countTokens(systemPrompt);
       const recentTokenBudget = Math.max(0, Math.floor(ctxLength * PROMPT_BUDGET_RATIO) - summaryTokenBudget - systemTokens);
 
-      const nonSystem = allMessages.filter(m => m.role !== 'system');
+      const nonSystem = scrubMemoryToolMessages(allMessages.filter(m => m.role !== 'system'));
       logger.log(`[ContextCompaction] ${nonSystem.length} messages, ctx=${ctxLength}, summaryBudget=${summaryTokenBudget}, recentBudget=${recentTokenBudget}`);
 
       // Walk backwards — keep recent messages that fit in the recent budget

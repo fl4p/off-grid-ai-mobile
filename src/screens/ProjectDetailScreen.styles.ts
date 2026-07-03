@@ -117,6 +117,10 @@ export const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  memorySection: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
   sectionContent: {
     flex: 1,
   },

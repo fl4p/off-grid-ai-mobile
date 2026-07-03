@@ -65,6 +65,19 @@ describe('RetrievalService', () => {
       expect(result.chunks[0].content).toBe('similar');
     });
 
+    it('drops zero-score semantic results instead of returning arbitrary chunks', async () => {
+      mockIsLoaded.mockReturnValue(true);
+      mockEmbed.mockResolvedValue([1, 0, 0]);
+
+      mockGetEmbeddings.mockReturnValue([
+        { chunk_rowid: 1, doc_id: 1, name: 'doc.txt', content: 'mismatched', position: 0, embedding: [1, 0] },
+        { chunk_rowid: 2, doc_id: 1, name: 'doc.txt', content: 'orthogonal', position: 1, embedding: [0, 1, 0] },
+      ]);
+
+      const result = await retrievalService.search('proj1', 'test', 5);
+      expect(result.chunks).toEqual([]);
+    });
+
     it('loads embedding model if not loaded', async () => {
       mockIsLoaded.mockReturnValue(false);
       mockEmbed.mockResolvedValue([1, 0]);
