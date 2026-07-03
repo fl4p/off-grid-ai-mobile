@@ -132,6 +132,7 @@ describe('GenerationSettingsModal', () => {
   it('shows conversation actions when callbacks are provided', () => {
     const onOpenProject = jest.fn();
     const onOpenGallery = jest.fn();
+    const onOpenMemory = jest.fn();
     const onDeleteConversation = jest.fn();
 
     const { getByText } = render(
@@ -139,6 +140,7 @@ describe('GenerationSettingsModal', () => {
         {...defaultProps}
         onOpenProject={onOpenProject}
         onOpenGallery={onOpenGallery}
+        onOpenMemory={onOpenMemory}
         onDeleteConversation={onDeleteConversation}
         conversationImageCount={3}
       />,
@@ -146,6 +148,7 @@ describe('GenerationSettingsModal', () => {
 
     expect(getByText(/Project:/)).toBeTruthy();
     expect(getByText('Gallery (3)')).toBeTruthy();
+    expect(getByText('Manage Memory')).toBeTruthy();
     expect(getByText('Delete Conversation')).toBeTruthy();
   });
 
@@ -802,6 +805,27 @@ describe('GenerationSettingsModal', () => {
 
     fireEvent.press(getByTestId('app-sheet-closed'));
     expect(onOpenGallery).toHaveBeenCalled();
+  });
+
+  it('closes first and runs onOpenMemory only after the sheet has closed', () => {
+    const onClose = jest.fn();
+    const onOpenMemory = jest.fn();
+
+    const { getByText, getByTestId } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onClose={onClose}
+        onOpenMemory={onOpenMemory}
+      />,
+    );
+
+    fireEvent.press(getByText('Manage Memory'));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(onOpenMemory).not.toHaveBeenCalled();
+
+    fireEvent.press(getByTestId('app-sheet-closed'));
+    expect(onOpenMemory).toHaveBeenCalled();
   });
 
   it('shows "Default" when activeProjectName is null', () => {

@@ -317,7 +317,7 @@ jest.mock('../../../src/components', () => ({
       </View>
     );
   },
-  GenerationSettingsModal: ({ visible, onClose, onDeleteConversation, onOpenProject, onOpenGallery, conversationImageCount, activeProjectName }: any) => {
+  GenerationSettingsModal: ({ visible, onClose, onDeleteConversation, onOpenProject, onOpenGallery, onOpenMemory, conversationImageCount, activeProjectName }: any) => {
     const { View, Text, TouchableOpacity } = require('react-native');
     if (!visible) return null;
     return (
@@ -336,6 +336,11 @@ jest.mock('../../../src/components', () => ({
         {onOpenGallery && (
           <TouchableOpacity testID="open-gallery-btn" onPress={onOpenGallery}>
             <Text>Open Gallery</Text>
+          </TouchableOpacity>
+        )}
+        {onOpenMemory && (
+          <TouchableOpacity testID="open-memory-btn" onPress={onOpenMemory}>
+            <Text>Manage Memory</Text>
           </TouchableOpacity>
         )}
         {conversationImageCount > 0 && <Text testID="image-count">{conversationImageCount} images</Text>}
@@ -1363,6 +1368,41 @@ describe('ChatScreen', () => {
       fireEvent.press(getByTestId('open-project-btn'));
 
       expect(queryByTestId('project-selector-sheet')).toBeTruthy();
+    });
+
+    it('opens shared memory from settings when the chat has no project', () => {
+      const { conversationId } = setupFullChat();
+      mockRoute.params = { conversationId };
+
+      const { getByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+      mockNavigate.mockClear();
+      fireEvent.press(getByTestId('open-memory-btn'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('Memory', undefined);
+    });
+
+    it('opens project memory from settings when the chat has a project', () => {
+      const { modelId, conversationId } = setupFullChat();
+      const project = createProject({ name: 'Memory Project' });
+      useProjectStore.setState({ projects: [project] });
+      useChatStore.setState({
+        conversations: [createConversation({
+          id: conversationId,
+          modelId,
+          projectId: project.id,
+          messages: [createUserMessage('Hi')],
+        })],
+        activeConversationId: conversationId,
+      });
+      mockRoute.params = { conversationId };
+
+      const { getByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+      mockNavigate.mockClear();
+      fireEvent.press(getByTestId('open-memory-btn'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('Memory', { projectId: project.id });
     });
 
     it('assigns project to conversation when selected', () => {
