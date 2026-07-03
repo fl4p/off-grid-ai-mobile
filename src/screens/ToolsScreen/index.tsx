@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Switch, TouchableOpacity, ScrollView, Share, ActivityIndicator } from 'react-native';
+import { View, Text, Switch, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import RNFS from 'react-native-fs';
+import { shareLocalFile } from '../../utils/shareFile';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -77,7 +78,7 @@ export const ToolsScreen: React.FC = () => {
       const base64 = await pythonRuntimeService.exportProjectZip();
       const path = `${RNFS.DocumentDirectoryPath}/python-workspace.zip`;
       await RNFS.writeFile(path, base64, 'base64');
-      await Share.share({ url: `file://${path}`, title: 'Python workspace' });
+      await shareLocalFile(path, { title: 'Python workspace', mimeType: 'application/zip' });
     } catch (error) {
       setAlertState(showAlert(
         'Export Failed',
