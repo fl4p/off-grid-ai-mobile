@@ -965,6 +965,72 @@ describe('generationService', () => {
       const state = generationService.getState();
       expect(state.isGenerating).toBe(false);
     });
+
+    // Regression for Issue #9: the remote tool loop had no error handling, so a
+    // failed request left isGenerating/isThinking stuck true — the "thinking…"
+    // spinner span forever and, because isGenerating is a single global flag,
+    // every other conversation was blocked from generating.
+    describe('generateWithTools (remote) error handling', () => {
+      beforeEach(() => {
+        mockedRunToolLoop.mockReset();
+        useRemoteServerStore.setState({ activeServerId: 'test-remote', servers: [] });
+        mockedProviderRegistry.getProvider.mockReturnValue(mockRemoteProvider as any);
+      });
+
+      it('clears generation state and rethrows when the tool loop fails', async () => {
+        const convId = setupWithConversation();
+        mockedRunToolLoop.mockRejectedValue(new Error('remote tool loop failed'));
+
+        await expect(
+          generationService.generateWithTools(convId, [
+            createMessage({ role: 'user', content: 'use tools' }),
+          ], { enabledToolIds: ['calculator'] }),
+        ).rejects.toThrow('remote tool loop failed');
+
+        const state = generationService.getState();
+        expect(state.isGenerating).toBe(false);
+        expect(state.isThinking).toBe(false);
+      });
+
+      it('marks the failed server offline', async () => {
+        const convId = setupWithConversation();
+        const updateServerHealth = jest.fn();
+        useRemoteServerStore.setState({ activeServerId: 'test-remote', updateServerHealth } as any);
+        mockedRunToolLoop.mockRejectedValue(new Error('boom'));
+
+        await expect(
+          generationService.generateWithTools(convId, [
+            createMessage({ role: 'user', content: 'hi' }),
+          ], { enabledToolIds: [] }),
+        ).rejects.toThrow('boom');
+
+        expect(updateServerHealth).toHaveBeenCalledWith('test-remote', false);
+      });
+
+      it('does not block a later generation for another conversation', async () => {
+        const failedConv = setupWithConversation();
+        mockedRunToolLoop.mockRejectedValueOnce(new Error('first fails'));
+
+        await expect(
+          generationService.generateWithTools(failedConv, [
+            createMessage({ role: 'user', content: 'first' }),
+          ], { enabledToolIds: ['calculator'] }),
+        ).rejects.toThrow('first fails');
+
+        // A second, healthy generation must be able to start (was wedged before).
+        mockRemoteProvider.generate.mockImplementation(async (_msgs: any, _opts: any, callbacks: any) => {
+          callbacks.onToken('recovered');
+          callbacks.onComplete({ content: 'recovered' });
+        });
+        const otherConv = setupWithConversation();
+        await generationService.generateResponse(otherConv, [
+          createMessage({ role: 'user', content: 'second' }),
+        ]);
+
+        expect(mockRemoteProvider.generate).toHaveBeenCalled();
+        expect(generationService.getState().isGenerating).toBe(false);
+      });
+    });
   });
 
   // ============================================================================

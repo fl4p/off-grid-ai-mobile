@@ -1241,12 +1241,21 @@ describe('generateWithCompactionRetry — context full error path', () => {
     mockCompact.mockResolvedValue([]);
   });
 
-  it('rethrows non-context-full errors', async () => {
+  it('adds an inline error message (with request details) for non-context-full errors', async () => {
+    // Issue #9/#11: a generic failure surfaces inline in the chat, not as a modal alert.
     mockGenerateResponse.mockRejectedValueOnce(new Error('GPU crashed'));
     mockIsContextFullError.mockReturnValue(false);
     const deps = makeGenerationDeps();
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
-    expect(deps.setAlertState).toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.setAlertState).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.addMessage).toHaveBeenCalledWith('conv-1', expect.objectContaining({
+      role: 'assistant',
+      isError: true,
+      isSystemInfo: true,
+      content: expect.stringContaining('Generation failed: GPU crashed'),
+      errorDetails: expect.stringContaining('Request:'),
+    }));
+    expect(deps.generatingForConversationRef.current).toBeNull();
   });
 
   it('retries with compacted messages on context full error', async () => {

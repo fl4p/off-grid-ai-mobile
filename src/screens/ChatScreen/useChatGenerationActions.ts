@@ -10,11 +10,12 @@ import { getToolExtensions } from '../../services/tools/extensions';
 import { liteRTService } from '../../services/litert';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
 import { abortPreload } from '../../services/modelPreloader';
-import { useChatStore, useProjectStore, useRemoteServerStore } from '../../stores';
+import { useAppStore, useChatStore, useProjectStore, useRemoteServerStore } from '../../stores';
 import { callHook, HOOKS } from '../../bootstrap/hookRegistry';
 import { Message, MediaAttachment, Project, DownloadedModel, RemoteModel, CacheType } from '../../types';
 import logger from '../../utils/logger';
 import { injectChatContext } from './contextInjection';
+import { buildGenerationRequestDebugInfo, buildGenerationErrorMessage } from './generationErrorDetails';
 type SetState<T> = Dispatch<SetStateAction<T>>;
 const FALLBACK_RECENT_MESSAGE_COUNT = 2;
 const MEMORY_TOOL_IDS = ['search_memory', 'save_memory', 'forget_memory'];
@@ -327,7 +328,14 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
         prominentMessage: true,
       });
     } else {
-      deps.setAlertState(showAlert('Generation Error', msg));
+      // Inline failure in the chat (Issue #9) with request details collapsed
+      // underneath (Issue #11), rather than a modal that hides the "…" indicator.
+      const project = conversation?.projectId ? useProjectStore.getState().getProject(conversation.projectId) : null;
+      const requestDebugInfo = buildGenerationRequestDebugInfo(
+        { activeModelInfo: deps.activeModelInfo, activeModel: deps.activeModel ?? null, settings: useAppStore.getState().settings },
+        { conversationId: targetConversationId, prompt: messageText, tools: activeTools, projectId: conversation?.projectId, projectName: project?.name },
+      );
+      deps.addMessage(targetConversationId, buildGenerationErrorMessage(msg, requestDebugInfo));
     }
     deps.generatingForConversationRef.current = null;
     return;

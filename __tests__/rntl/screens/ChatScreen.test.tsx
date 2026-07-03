@@ -3724,8 +3724,8 @@ describe('ChatScreen', () => {
   // ============================================================================
   // generateResponse error handling — line 768
   // ============================================================================
-  describe('generateResponse error shows alert', () => {
-    it('shows Generation Error alert when generateResponse throws', async () => {
+  describe('generateResponse error shows inline error message', () => {
+    it('renders an inline error message (Issue #9/#11) when generateResponse throws', async () => {
       const { conversationId } = setupFullChat();
       mockRoute.params = { conversationId };
       (llmService.isModelLoaded as jest.Mock).mockReturnValue(true);
@@ -3733,7 +3733,7 @@ describe('ChatScreen', () => {
       (llmService.getLoadedModelPath as jest.Mock).mockReturnValue('/mock/models/test-model.gguf');
       mockGenerateResponse.mockRejectedValue(new Error('Generation service down'));
 
-      const { getByTestId, queryByTestId } = renderChatScreen();
+      const { getByTestId, queryByTestId, queryByText } = renderChatScreen();
       await act(async () => { await new Promise<void>(r => setTimeout(() => r(), 50)); });
 
       await act(async () => {
@@ -3744,11 +3744,17 @@ describe('ChatScreen', () => {
       });
       await act(async () => { await new Promise<void>(r => setTimeout(() => r(), 500)); });
 
-      // The generation error should show an alert
+      // The failure surfaces as an inline message in the transcript, not behind a
+      // modal alert (Issue #9). (ChatMessage is mocked here to render its content.)
       await waitFor(() => {
-        expect(queryByTestId('custom-alert')).toBeTruthy();
+        expect(queryByText(/^Generation failed:/)).toBeTruthy();
       }, { timeout: 3000 });
-      expect(getByTestId('alert-title').props.children).toBe('Generation Error');
+      // The inline message is flagged as an error and kept out of LLM context.
+      const conv = useChatStore.getState().conversations.find((c) => c.id === conversationId);
+      const errorMsg = conv?.messages.find((m) => m.isError);
+      expect(errorMsg).toMatchObject({ role: 'assistant', isError: true, isSystemInfo: true });
+      expect(errorMsg?.errorDetails).toContain('Request:');
+      expect(queryByTestId('alert-title')).toBeNull();
     });
   });
 
