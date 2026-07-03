@@ -419,6 +419,7 @@ describe('Memory Flow Integration', () => {
       id: 1,
       scope: 'project',
       project_id: 'proj-tax',
+      kind: 'preference',
       source_type: 'auto_capture',
       source_id: 'msg-auto-save-1',
       body: 'when I ask you to plot, use line width 2 unless I say otherwise.',
@@ -443,11 +444,69 @@ describe('Memory Flow Integration', () => {
     expect(saved).toEqual(expect.objectContaining({
       id: 1,
       scope: 'global',
+      kind: 'preference',
       source_type: 'chat_command',
       source_id: 'msg-command-1',
       body: 'when I ask you to plot, use line width 2 unless I say otherwise.',
     }));
     expect(candidates).toHaveLength(0);
+    expect(memories).toHaveLength(1);
+  });
+
+  it('saves direct always directives as command-sourced preferences', async () => {
+    const saved = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-2',
+        role: 'user',
+        content: 'always use linewidth=2 by default when plotting line charts',
+      },
+      sourceType: 'chat_command',
+    });
+
+    expect(saved).toEqual(expect.objectContaining({
+      id: 1,
+      scope: 'global',
+      kind: 'preference',
+      title: 'Always use linewidth=2 by default when plotting line charts',
+      source_type: 'chat_command',
+      source_id: 'msg-command-2',
+      body: 'always use linewidth=2 by default when plotting line charts',
+    }));
+    expect(candidates).toHaveLength(0);
+    expect(memories).toHaveLength(1);
+  });
+
+  it('does not persist document text for explicit non-retention commands', async () => {
+    const saved = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-doc-opt-out',
+        role: 'user',
+        content: 'remember: never use this document after this chat\n\nAttached document: notes.pdf\nPrivate document text.',
+      },
+      sourceType: 'chat_command',
+    });
+
+    expect(saved).toBeNull();
+    expect(candidates).toHaveLength(0);
+    expect(memories).toHaveLength(0);
+  });
+
+  it('does not append unrelated document text to inline memory directives', async () => {
+    const saved = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-inline-doc',
+        role: 'user',
+        content: 'remember: never use semicolons\n\nAttached document: notes.pdf\nPrivate document text.',
+      },
+      sourceType: 'chat_command',
+    });
+
+    expect(saved).toEqual(expect.objectContaining({
+      kind: 'preference',
+      body: 'never use semicolons',
+      source_excerpt: 'remember: never use semicolons',
+    }));
+    expect(JSON.stringify(memories)).not.toContain('Private document text');
     expect(memories).toHaveLength(1);
   });
 

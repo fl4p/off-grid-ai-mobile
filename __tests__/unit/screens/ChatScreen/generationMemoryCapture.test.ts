@@ -145,6 +145,23 @@ describe('generationMemoryCapture', () => {
     });
   });
 
+  it('saves direct standing directives without requiring auto-capture settings', async () => {
+    const message = { id: 'msg-command-2', role: 'user' as const, content: 'always use linewidth=2 for plots' };
+
+    const result = await maybeHandleExplicitMemoryCommand({
+      memoryEnabled: true,
+      projectId: 'proj-1',
+      userMessage: message,
+    });
+
+    expect(result).toEqual({ handled: true, assistantMessage: 'Saved to memory.' });
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message,
+      projectId: 'proj-1',
+      sourceType: 'chat_command',
+    });
+  });
+
   it('does not save explicit memory commands when chat memory is disabled', async () => {
     const result = await maybeHandleExplicitMemoryCommand({
       memoryEnabled: false,

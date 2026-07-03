@@ -215,7 +215,7 @@ class MemoryService {
       projectId: params.projectId,
       sourceType: 'auto_capture',
       sourceId: params.message.id,
-      sourceExcerpt: content,
+      sourceExcerpt: extracted.sourceExcerpt ?? content,
     });
   }
 
@@ -237,7 +237,7 @@ class MemoryService {
       projectId: params.projectId,
       sourceType,
       sourceId: params.message.id,
-      sourceExcerpt: content,
+      sourceExcerpt: extracted.sourceExcerpt ?? content,
     });
   }
 
