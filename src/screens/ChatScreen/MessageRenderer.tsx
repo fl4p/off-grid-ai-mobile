@@ -21,6 +21,7 @@ type MessageRendererProps = {
   onEdit: (message: Message, newContent: string) => void;
   onGenerateImage: (prompt: string) => void;
   onImagePress: (uri: string) => void;
+  onOpenHtml: (path: string) => void;
 };
 
 export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
@@ -39,6 +40,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
     onEdit,
     onGenerateImage,
     onImagePress,
+    onOpenHtml,
   } = props;
 
   const interfaceMode = useUiModeStore((s) => s.interfaceMode);
@@ -85,6 +87,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
       onEdit={onEdit}
       onGenerateImage={onGenerateImage}
       onImagePress={onImagePress}
+      onOpenHtml={onOpenHtml}
       canGenerateImage={imageModelLoaded && !isStreaming && !isGeneratingImage}
       showGenerationDetails={showGenerationDetails}
       animateEntry={animateEntry}

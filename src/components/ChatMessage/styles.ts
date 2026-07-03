@@ -61,6 +61,22 @@ const createBubbleStyles = (colors: ThemeColors) => ({
     color: colors.textMuted,
     marginBottom: 4,
   },
+  openHtmlButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'flex-start' as const,
+    gap: 6,
+    marginTop: 6,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: SPACING.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  openHtmlText: {
+    fontSize: 12,
+    color: colors.primary,
+  },
   memoryRecallItem: {
     gap: 2,
     paddingVertical: 4,

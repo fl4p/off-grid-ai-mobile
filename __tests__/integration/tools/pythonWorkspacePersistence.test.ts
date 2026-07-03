@@ -49,15 +49,17 @@ function post(msg: Record<string, unknown>) {
   pythonRuntimeService.handleWebViewMessage(JSON.stringify(msg), TRUSTED_URL);
 }
 
-interface FakeState { restores: string[]; snapshotData: string; zipData: string; runs: string[] }
+interface FakeState { restores: string[]; snapshotData: string; zipData: string; runs: string[]; reads: string[]; readData: string }
 
-/** Register a fake executor that answers run/snapshot/restore/zip injects, and signal ready. */
+/** Register a fake executor that answers run/snapshot/restore/zip/read injects, and signal ready. */
 function attachControlFake(): FakeState {
   const state: FakeState = {
     restores: [],
     snapshotData: '{"files":[{"path":"a.py","b64":"eA=="}]}',
     zipData: 'UEsDBBQAAAA=',
     runs: [],
+    reads: [],
+    readData: '<!doctype html><title>game</title>',
   };
   pythonRuntimeService.registerExecutor({
     inject: (js: string) => {
@@ -76,6 +78,10 @@ function attachControlFake(): FakeState {
       } else if ((m = /window\.__fsZip\((".*?")\); true;/.exec(js))) {
         const id = JSON.parse(m[1]);
         setTimeout(() => post({ type: 'fs_snapshot', id, ok: true, data: state.zipData }), 0);
+      } else if ((m = /window\.__fsReadFile\((".*?"), (.*)\); true;/.exec(js))) {
+        const id = JSON.parse(m[1]);
+        state.reads.push(JSON.parse(m[2]));
+        setTimeout(() => post({ type: 'fs_snapshot', id, ok: true, data: state.readData }), 0);
       } else {
         throw new Error(`Unexpected inject: ${js}`);
       }
@@ -157,5 +163,21 @@ describe('per-project workspace persistence', () => {
     await runInProject('proj1');
     const base64 = await pythonRuntimeService.exportProjectZip('proj1');
     expect(base64).toBe(fake!.zipData);
+  });
+
+  it('reads a workspace file for the HTML preview, loading the right project first', async () => {
+    const saved = '{"files":[{"path":"game.html","b64":"eA=="}]}';
+    mockFiles[wsPath('proj1')] = saved;
+
+    // Read with no prior run, so the fake attaches mid-flight (like runInProject).
+    const p = pythonRuntimeService.readWorkspaceFile('game.html', 'proj1');
+    await tick();
+    fake = attachControlFake();
+    const content = await p;
+
+    expect(content).toBe(fake.readData);
+    expect(fake.reads).toEqual(['game.html']);
+    // The project's saved workspace was restored before the read.
+    expect(fake.restores).toContain(saved);
   });
 });

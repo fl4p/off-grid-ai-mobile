@@ -14,6 +14,7 @@ export type RootStackParamList = {
   Memory: { projectId?: string } | undefined;
   MemoryEditor: { projectId?: string; candidateId?: number } | undefined;
   DocumentPreview: { filePath: string; fileName: string; fileSize: number };
+  HtmlPreview: { path: string; projectId?: string; title?: string };
   // Former SettingsStack
   ModelSettings: undefined;
   RemoteServers: undefined;

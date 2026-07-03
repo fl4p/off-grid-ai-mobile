@@ -220,6 +220,24 @@ export function buildPythonPageHtml(): string {
     '                    full = _os.path.join(dp, fn)\\n' +
     '                    z.write(full, _os.path.relpath(full, root))\\n' +
     '    return _b64.b64encode(buf.getvalue()).decode()\\n';
+  // Read one workspace file's full text for the in-app HTML preview. Unlike the
+  // read_file tool (which caps output for the model), this returns the whole file
+  // over the dedicated control channel so a large self-contained game HTML is not
+  // clipped by the stdout ceiling. The path is confined to the workspace and the
+  // size capped so a runaway file can not build a giant postMessage payload.
+  var FS_READFILE_SRC =
+    'import os as _os\\n' +
+    'def _fs_readfile(rel):\\n' +
+    '    root = ' + JSON.stringify(WORKSPACE) + '\\n' +
+    '    full = _os.path.realpath(_os.path.join(root, rel))\\n' +
+    '    if full != root and not full.startswith(root + "/"):\\n' +
+    '        raise ValueError("path escapes the workspace: " + rel)\\n' +
+    '    if not _os.path.isfile(full):\\n' +
+    '        raise ValueError("file not found: " + rel)\\n' +
+    '    if _os.path.getsize(full) > 8 * 1024 * 1024:\\n' +
+    '        raise ValueError("file too large to preview (over 8 MB)")\\n' +
+    '    with open(full, "r", errors="replace") as f:\\n' +
+    '        return f.read()\\n';
 
   // Boot heartbeats: 'script' proves the page loaded and this script ran (rules
   // out a blank WebView / failed page load); 'loading-pyodide' means we entered
@@ -257,6 +275,14 @@ export function buildPythonPageHtml(): string {
       var pyodide = await bootPromise;
       await pyodide.runPythonAsync(FS_ZIP_SRC);
       var data = pyodide.globals.get('_fs_zip')();
+      post({ type: 'fs_snapshot', id: id, ok: true, data: data });
+    } catch (e) { post({ type: 'fs_snapshot', id: id, ok: false, error: String((e && e.message) || e) }); }
+  };
+  window.__fsReadFile = async function (id, rel) {
+    try {
+      var pyodide = await bootPromise;
+      await pyodide.runPythonAsync(FS_READFILE_SRC);
+      var data = pyodide.globals.get('_fs_readfile')(rel);
       post({ type: 'fs_snapshot', id: id, ok: true, data: data });
     } catch (e) { post({ type: 'fs_snapshot', id: id, ok: false, error: String((e && e.message) || e) }); }
   };
