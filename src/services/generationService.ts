@@ -4,7 +4,7 @@ import { liteRTService } from './litert';
 import { getActiveEngineService } from './engines';
 import { useAppStore, useChatStore, useRemoteServerStore } from '../stores';
 import { Message, GenerationMeta, MediaAttachment } from '../types';
-import { runToolLoop } from './generationToolLoop';
+import { runToolLoop, type SteeringMessage } from './generationToolLoop';
 import type { ToolResult } from './tools/types';
 import { providerRegistry } from './providers';
 import logger from '../utils/logger';
@@ -19,6 +19,7 @@ import {
   generateRemoteWithToolsImpl,
   type GenerationWithToolsRequest,
 } from './generationServiceHelpers';
+import { armStallWatchdog, pokeStallWatchdog, disarmStallWatchdog, rearmStallWatchdog } from './generationStallWatchdog';
 
 const SHARE_PROMPT_DELAY_MS = 1500;
 type StreamChunk = string | { content?: string; reasoningContent?: string };
@@ -59,6 +60,10 @@ class GenerationService {
   private totalReasoningLength: number = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // No-progress watchdog for the active generation (see GENERATION_STALL_TIMEOUT_MS).
+  private stallTimer: ReturnType<typeof setTimeout> | null = null;
+  private stallReject: ((error: Error) => void) | null = null;
+
   /** Get the current provider (local or remote) */
   private getCurrentProvider() {
     const activeServerId = useRemoteServerStore.getState().activeServerId;
@@ -87,15 +92,20 @@ class GenerationService {
 
   private flushTokenBuffer(): void {
     const store = useChatStore.getState();
+    let flushed = false;
     if (this.tokenBuffer) {
       store.appendToStreamingMessage(this.tokenBuffer);
       this.tokenBuffer = '';
+      flushed = true;
     }
     if (this.reasoningBuffer) {
       store.appendToStreamingReasoningContent(this.reasoningBuffer);
       this.reasoningBuffer = '';
+      flushed = true;
     }
     this.flushTimer = null;
+    // Any content reaching the UI is a sign of life — keep the stall watchdog at bay.
+    if (flushed) pokeStallWatchdog(this);
   }
 
   private forceFlushTokens(): void {
@@ -109,6 +119,9 @@ class GenerationService {
   private normalizeStreamChunk(data: StreamChunk): { content?: string; reasoningContent?: string } {
     return typeof data === 'string' ? { content: data } : data;
   }
+
+  /** Re-arm the stall watchdog after progress. Exposed for tool-loop handlers (svc.notifyStallProgress). */
+  private notifyStallProgress(): void { pokeStallWatchdog(this); }
 
   getState(): GenerationState { return { ...this.state }; }
 
@@ -146,11 +159,13 @@ class GenerationService {
     messages: Message[],
     onFirstToken?: () => void,
   ): Promise<void> {
-    // Route to remote provider if active
-    if (this.isUsingRemoteProvider()) {
-      return this.generateRemoteResponse(conversationId, messages, onFirstToken);
-    }
-    return generateResponseImpl(this, { conversationId, messages, onFirstToken });
+    return armStallWatchdog(this, () => {
+      // Route to remote provider if active
+      if (this.isUsingRemoteProvider()) {
+        return this.generateRemoteResponse(conversationId, messages, onFirstToken);
+      }
+      return generateResponseImpl(this, { conversationId, messages, onFirstToken });
+    });
   }
 
   /** Generate a response with tool calling support (LLM → tools → repeat, max 5 iterations). */
@@ -165,10 +180,47 @@ class GenerationService {
       onFirstToken?: () => void;
     },
   ): Promise<void> {
-    // Route to remote provider if active
-    if (this.isUsingRemoteProvider()) {
-      return this.generateRemoteWithTools(conversationId, messages, options);
-    }
+    // Pause the watchdog while a (possibly slow) tool runs and resume when it
+    // returns, so a legitimate long tool call can't be misread as a model stall.
+    const guardedOptions = { ...options, ...this.withProgressCallbacks(options) };
+    return armStallWatchdog(this, () => {
+      // Route to remote provider if active
+      if (this.isUsingRemoteProvider()) {
+        return this.generateRemoteWithTools(conversationId, messages, guardedOptions);
+      }
+      return this.runLocalToolGeneration(conversationId, messages, guardedOptions);
+    });
+  }
+
+  /** Wrap the caller's tool-call callbacks to pause/resume the stall watchdog around
+   *  tool execution (a slow tool is not a model stall). */
+  private withProgressCallbacks<T extends {
+    onToolCallStart?: (name: string, args: Record<string, any>) => void;
+    onToolCallComplete?: (name: string, result: ToolResult) => void;
+  }>(callbacks: T): Pick<T, 'onToolCallStart' | 'onToolCallComplete'> {
+    return {
+      onToolCallStart: (name: string, args: Record<string, any>) => {
+        disarmStallWatchdog(this); // pause: the tool, not the model, is working now
+        callbacks.onToolCallStart?.(name, args);
+      },
+      onToolCallComplete: (name: string, result: ToolResult) => {
+        rearmStallWatchdog(this); // resume with a fresh budget for the model's next step
+        callbacks.onToolCallComplete?.(name, result);
+      },
+    } as Pick<T, 'onToolCallStart' | 'onToolCallComplete'>;
+  }
+
+  private async runLocalToolGeneration(
+    conversationId: string,
+    messages: Message[],
+    options: {
+      enabledToolIds: string[];
+      projectId?: string;
+      onToolCallStart?: (name: string, args: Record<string, any>) => void;
+      onToolCallComplete?: (name: string, result: ToolResult) => void;
+      onFirstToken?: () => void;
+    },
+  ): Promise<void> {
     // Local generation with tools
     const { enabledToolIds, projectId, ...callbacks } = options;
     if (!(await this.prepareGeneration(conversationId))) return;
@@ -299,7 +351,38 @@ class GenerationService {
 
   clearQueue(): void { this.state = { ...this.state, queuedMessages: [] }; this.notifyListeners(); }
 
-  setQueueProcessor(processor: QueueProcessor | null): void { this.queueProcessor = processor; }
+  /**
+   * Mid-turn steering: pull messages the user queued for the CURRENTLY generating
+   * conversation so the tool loop can fold them into this turn (Claude-Code style)
+   * instead of replaying them as a separate turn after it finishes. Messages for
+   * other conversations stay queued. Returns them as user messages to append.
+   */
+  drainSteeringMessages(): SteeringMessage[] {
+    const convId = this.state.conversationId;
+    if (!convId || this.state.queuedMessages.length === 0) return [];
+    const mine = this.state.queuedMessages.filter(m => m.conversationId === convId);
+    if (mine.length === 0) return [];
+    this.state = { ...this.state, queuedMessages: this.state.queuedMessages.filter(m => m.conversationId !== convId) };
+    this.notifyListeners();
+    return mine.map(m => {
+      const base = { id: `steer-${m.id}`, role: 'user' as const, attachments: m.attachments, timestamp: Date.now() };
+      // Keep the display/context split the normal send path uses: `text` renders in
+      // the bubble; `messageText` (with any appended document text) goes to the model.
+      return { display: { ...base, content: m.text }, forModel: { ...base, content: m.messageText } };
+    });
+  }
+
+  setQueueProcessor(processor: QueueProcessor | null): void {
+    this.queueProcessor = processor;
+    // A processor can be null between screen unmount and the next mount. If a
+    // generation finished during that gap, processNextInQueue bailed without
+    // draining and nothing rescheduled it — the message was stranded in the
+    // queue. When a processor (re)appears and nothing is running, drain it now so
+    // queued messages can never get stuck.
+    if (processor && !this.state.isGenerating && this.state.queuedMessages.length > 0) {
+      setTimeout(() => this.processNextInQueue(), 0);
+    }
+  }
 
   /**
    * Process queued messages now. Text generation drains its own queue on
@@ -313,21 +396,37 @@ class GenerationService {
   }
 
   private processNextInQueue(): void {
-    if (this.state.queuedMessages.length === 0 || !this.queueProcessor) return;
+    // Defensive: never evict/dispatch a queued message while a generation is in
+    // flight — prepareGeneration would reject the drained message as a no-op and
+    // it would be lost. Callers already gate on this, but the singleton state is
+    // shared, so guard here too.
+    if (this.state.isGenerating || this.state.queuedMessages.length === 0 || !this.queueProcessor) return;
     const all = this.state.queuedMessages;
-    this.state = { ...this.state, queuedMessages: [] };
+    // Only drain one conversation per pass. Messages for other chats stay queued
+    // and drain on a later pass (after this generation completes, or when their
+    // chat becomes active) — never merged into the wrong conversation.
+    const targetConversationId = all[0].conversationId;
+    const forConversation = all.filter(m => m.conversationId === targetConversationId);
+    const rest = all.filter(m => m.conversationId !== targetConversationId);
+    this.state = { ...this.state, queuedMessages: rest };
     this.notifyListeners();
-    const combined: QueuedMessage = all.length === 1 ? all[0] : {
-      id: all[0].id, conversationId: all[0].conversationId,
-      text: all.map(m => m.text).join('\n\n'),
-      attachments: all.flatMap(m => m.attachments || []),
-      messageText: all.map(m => m.messageText).join('\n\n'),
+    const combined: QueuedMessage = forConversation.length === 1 ? forConversation[0] : {
+      id: forConversation[0].id, conversationId: targetConversationId,
+      text: forConversation.map(m => m.text).join('\n\n'),
+      attachments: forConversation.flatMap(m => m.attachments || []),
+      messageText: forConversation.map(m => m.messageText).join('\n\n'),
     };
-    this.queueProcessor(combined).catch(e => { logger.error('[GenerationService] Queue processor error:', e); });
+    this.queueProcessor(combined).catch(e => {
+      logger.error('[GenerationService] Queue processor error:', e);
+      // The failed group won't self-drain via resetState (no generation started),
+      // so kick the remaining conversations along here.
+      if (rest.length > 0) setTimeout(() => this.processNextInQueue(), 100);
+    });
   }
 
   private resetState(): void {
     const hasQueuedItems = this.state.queuedMessages.length > 0;
+    disarmStallWatchdog(this);
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;

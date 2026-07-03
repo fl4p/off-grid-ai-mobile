@@ -17,6 +17,10 @@ import type { GenerationOptions, CompletionResult } from './providers/types';
 import logger from '../utils/logger';
 const MAX_TOOL_ITERATIONS = 3;
 const MAX_TOTAL_TOOL_CALLS = 5;
+// Upper bound on how far mid-turn steering can extend the loop, so repeated
+// steering can't spin the model indefinitely within a single turn.
+const MAX_STEERED_ITERATIONS = MAX_TOOL_ITERATIONS * 4;
+const MAX_STEERED_TOTAL_CALLS = MAX_TOTAL_TOOL_CALLS * 4;
 // On-device: above this many tools, run a fast routing pass to pick the relevant ones
 // before generating (small models can't fit many schemas in context). Tunable.
 const TOOL_SELECTION_THRESHOLD = 5;
@@ -203,6 +207,15 @@ export function parseToolCallsFromText(text: string): { cleanText: string; toolC
   for (const [start, end] of matchedRanges) { cleanText = cleanText.slice(0, start) + cleanText.slice(end); }
   return { cleanText: cleanText.trim(), toolCalls };
 }
+/**
+ * A steering message split into its two forms, mirroring the normal send path:
+ * `display` is the short user-typed text shown in the chat bubble; `forModel`
+ * carries the full context (e.g. appended document text) sent to the model.
+ */
+export interface SteeringMessage {
+  display: Message;
+  forModel: Message;
+}
 export interface ToolLoopCallbacks {
   onToolCallStart?: (name: string, args: Record<string, any>) => void;
   onToolCallComplete?: (name: string, result: ToolResult) => void;
@@ -221,6 +234,13 @@ export interface ToolLoopContext {
   onFinalResponse: (content: string) => void;
   /** Reports the tool names sent to the model this turn (built-in + routed MCP/ext). */
   onToolsRouted?: (names: string[]) => void;
+  /** Mid-turn steering: return user messages queued for this conversation while the
+   *  loop was running, so they can be folded into the current turn between tool
+   *  calls. Returns [] when there is nothing to inject. Each entry keeps the
+   *  display and model-context forms separate (see SteeringMessage). */
+  drainSteeringMessages?: () => SteeringMessage[];
+  /** Notifies that `count` steering messages were injected (e.g. to reset UI thinking state). */
+  onSteering?: (count: number) => void;
   forceRemote?: boolean;
 }
 function normalizeStreamChunk(data: StreamChunk): StreamToken {
@@ -398,6 +418,12 @@ function buildLiteRTToolCallHandler(ctx: ToolLoopContext, conversationId: string
   };
 }
 
+// NOTE: LiteRT runs the whole tool→model cycle natively inside a single
+// generateRaw() call, so runToolLoop's mid-turn steering injection point (between
+// JS iterations) is never reached for LiteRT. Steering messages sent during a
+// LiteRT turn are not lost — they fall back to the post-turn queue drain and
+// become the next turn. Folding steering into an in-flight native loop would
+// require polling drainSteeringMessages inside buildLiteRTToolCallHandler.
 async function callLiteRTForLoop(
   conversationId: string,
   messages: Message[],
@@ -698,14 +724,19 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
 
   const loopMessages = [...ctx.messages];
   let totalToolCalls = 0;
+  // Budgets grow when the user steers mid-turn: a fresh instruction deserves a
+  // fresh allowance of tool iterations/calls so the model can actually act on it.
+  // Capped so a steering storm can't loop unbounded.
+  let iterationBudget = MAX_TOOL_ITERATIONS;
+  let totalCallCap = MAX_TOTAL_TOOL_CALLS;
   const state: ToolLoopState = { firstTokenFired: false, thinkingDoneFired: false, streamedContent: '', reasoningContent: '' };
-  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+  for (let iteration = 0; iteration < iterationBudget; iteration++) {
     if (ctx.isAborted()) {
       break;
     }
 
     // Hit iteration or total-call cap — force one final text-only generation (no tools)
-    if (iteration === MAX_TOOL_ITERATIONS - 1 || totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
+    if (iteration === iterationBudget - 1 || totalToolCalls >= totalCallCap) {
       await forceFinalTextResponse(ctx, state, loopMessages);
       return;
     }
@@ -717,7 +748,7 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
     const { fullResponse, toolCalls } = await callLLMWithRetry(loopMessages, effectiveSchemas, { onStream, forceRemote: ctx.forceRemote, conversationId: ctx.conversationId, ctx });
 
     const { effectiveToolCalls, displayResponse } = resolveToolCalls(fullResponse, toolCalls);
-    const cappedToolCalls = effectiveToolCalls.slice(0, MAX_TOTAL_TOOL_CALLS - totalToolCalls);
+    const cappedToolCalls = effectiveToolCalls.slice(0, totalCallCap - totalToolCalls);
     totalToolCalls += cappedToolCalls.length;
 
     // No tool calls → model gave a final text response
@@ -750,6 +781,22 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
     chatStore.addMessage(ctx.conversationId, assistantMsg);
 
     await executeToolCalls(ctx, cappedToolCalls, loopMessages);
+
+    // Mid-turn steering: if the user sent messages for this conversation while the
+    // tools ran, fold them into the turn now so the model reacts to them on the
+    // next call (instead of them becoming a separate turn after this one). Skip when
+    // aborted so we don't persist a user turn that will never get a reply. Grant a
+    // fresh iteration/call allowance so the new instruction can actually be acted on.
+    const steeringMessages = ctx.isAborted() ? [] : (ctx.drainSteeringMessages?.() ?? []);
+    if (steeringMessages.length > 0) {
+      for (const steerMsg of steeringMessages) {
+        loopMessages.push(steerMsg.forModel); // full context (incl. attachment text) for the model
+        chatStore.addMessage(ctx.conversationId, steerMsg.display); // short user-typed text in the bubble
+      }
+      iterationBudget = Math.min(iterationBudget + MAX_TOOL_ITERATIONS, MAX_STEERED_ITERATIONS);
+      totalCallCap = Math.min(totalCallCap + MAX_TOTAL_TOOL_CALLS, MAX_STEERED_TOTAL_CALLS);
+      ctx.onSteering?.(steeringMessages.length);
+    }
 
     chatStore.setIsThinking(true);
     // The pause exists to let an on-device llama context settle between the tool

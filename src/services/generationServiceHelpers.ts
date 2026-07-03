@@ -14,12 +14,10 @@ import logger from '../utils/logger';
 
 export const FLUSH_INTERVAL_MS = 50; // ~20 updates/sec
 type StreamChunk = string | { content?: string; reasoningContent?: string };
-
 /** Returns true when the currently active model uses LiteRT engine. */
 function isLiteRTActive(): boolean {
   return getActiveEngineService() === liteRTService;
 }
-
 export interface GenerationRequest {
   conversationId: string;
   messages: Message[];
@@ -146,7 +144,9 @@ export function buildToolLoopHandlersImpl(svc: any) {
       svc.state.streamingContent = content;
       useChatStore.getState().appendToStreamingMessage(content);
     },
-    onToolsRouted: (names: string[]) => { svc.state.routedToolNames = names; },
+    onToolsRouted: (names: string[]) => { svc.state.routedToolNames = names; svc.notifyStallProgress(); },
+    drainSteeringMessages: () => svc.drainSteeringMessages(),
+    onSteering: () => svc.notifyStallProgress(), // steering is progress — poke the stall watchdog
   };
 }
 
