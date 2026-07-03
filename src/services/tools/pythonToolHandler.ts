@@ -56,20 +56,6 @@ export async function ensurePythonRuntimeReady(): Promise<string | null> {
   return null;
 }
 
-/**
- * When code tries something the WASM sandbox can't do (spawn a process, open a
- * socket, shell out, git clone), append a corrective hint so the tool loop can
- * self-recover on the next turn instead of repeating the same failing approach.
- * The interpreter is offline-capable but has no OS processes or network sockets.
- */
-function sandboxLimitationHint(errorText: string): string | null {
-  const text = errorText.toLowerCase();
-  const isProcessOrShell = /emscripten does not support processes|errno 138|\bsubprocess\b|os\.system|posix_spawn|fork\b/.test(text);
-  const isNetwork = /does not support socket|errno 138.*socket|failed to fetch|urlopen|connection refused|name or service not known|\bgetaddrinfo\b/.test(text);
-  if (!isProcessOrShell && !isNetwork) return null;
-  return '[hint] This Python sandbox has no OS processes, shell, or network sockets, so subprocess, os.system, git, pip-from-code, and requests/urllib will not work. To fetch remote code or data, call the read_url tool for the raw file URL, then write_file it into the workspace and import or exec it. To install a PyPI package, pass it in this tool\'s "packages" argument instead of pip.';
-}
-
 export async function handleRunPython(call: ToolCall, code: string): Promise<PythonDispatchResult> {
   const { pythonRuntimeService } = require('../python/pythonRuntimeService'); // NOSONAR
 
@@ -86,11 +72,7 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
   if (res.stdout) sections.push(res.stdout);
   if (res.ok && res.result !== undefined && res.result !== '') sections.push(`[result] ${res.result}`);
   if (res.stderr) sections.push(`[stderr]\n${res.stderr}`);
-  if (!res.ok) {
-    sections.push(`[error]\n${res.error || 'Execution failed'}`);
-    const hint = sandboxLimitationHint(`${res.error || ''}\n${res.stderr || ''}`);
-    if (hint) sections.push(hint);
-  }
+  if (!res.ok) sections.push(`[error]\n${res.error || 'Execution failed'}`);
   // Tell the model a plot was produced (it can't see the image) so it can refer to it.
   if (attachments.length) sections.push(`[${attachments.length} plot${attachments.length > 1 ? 's' : ''} shown to the user]`);
   if (sections.length === 0) sections.push('(no output — use print() to see values)');
