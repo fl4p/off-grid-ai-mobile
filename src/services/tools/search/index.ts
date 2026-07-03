@@ -1,8 +1,8 @@
-import { braveProvider, createBraveProvider, BRAVE_LABEL } from './braveProvider';
-import { createSerperProvider, SERPER_LABEL } from './serperProvider';
-import type { SearchProvider, SearchProviderId, SearchResult } from './types';
+import { braveProvider, createBraveProvider, validateBraveKey, BRAVE_LABEL } from './braveProvider';
+import { createSerperProvider, validateSerperKey, SERPER_LABEL } from './serperProvider';
+import type { KeyValidationResult, SearchProvider, SearchProviderId, SearchResult } from './types';
 
-export type { SearchProvider, SearchProviderId, SearchResult };
+export type { KeyValidationResult, SearchProvider, SearchProviderId, SearchResult };
 
 /** Config the selector needs: the chosen provider and its (optional) key. */
 export type SearchProviderConfig = {
@@ -55,4 +55,24 @@ const PROVIDER_FACTORIES: Record<SearchProviderId, (apiKey: string) => SearchPro
 export function getActiveSearchProvider(config: SearchProviderConfig): SearchProvider {
   const factory = PROVIDER_FACTORIES[config.searchProvider];
   return factory?.(config.apiKey ?? '') ?? braveProvider;
+}
+
+/**
+ * Per-provider key validators. Both Brave (optional key) and Serper (required
+ * key) verify against their API. Adding a provider means adding one entry here -
+ * callers just call validateSearchProviderKey().
+ */
+const KEY_VALIDATORS: Record<SearchProviderId, (apiKey: string, signal?: AbortSignal) => Promise<KeyValidationResult>> = {
+  brave: validateBraveKey,
+  serper: validateSerperKey,
+};
+
+/** Validate a candidate API key for the given provider (see KeyValidationResult). */
+export function validateSearchProviderKey(
+  providerId: SearchProviderId,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<KeyValidationResult> {
+  const validator = KEY_VALIDATORS[providerId];
+  return validator ? validator(apiKey, signal) : Promise.resolve({ status: 'valid' });
 }

@@ -8,10 +8,11 @@
 
 import {
   getActiveSearchProvider,
+  validateSearchProviderKey,
   SEARCH_PROVIDER_OPTIONS,
 } from '../../../../../src/services/tools/search';
-import { braveProvider, createBraveProvider } from '../../../../../src/services/tools/search/braveProvider';
-import { createSerperProvider } from '../../../../../src/services/tools/search/serperProvider';
+import { braveProvider, createBraveProvider, validateBraveKey } from '../../../../../src/services/tools/search/braveProvider';
+import { createSerperProvider, validateSerperKey } from '../../../../../src/services/tools/search/serperProvider';
 
 describe('getActiveSearchProvider', () => {
   it('returns the Brave provider by default', () => {
@@ -263,5 +264,112 @@ describe('Brave official API provider (createBraveProvider)', () => {
   it('throws a status message on other non-2xx responses', async () => {
     (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: jest.fn() });
     await expect(createBraveProvider('bk').search('q', signal)).rejects.toThrow(/failed \(500\)/);
+  });
+});
+
+describe('validateSearchProviderKey', () => {
+  const originalFetch = (globalThis as any).fetch;
+
+  afterEach(() => {
+    if (originalFetch === undefined) delete (globalThis as any).fetch;
+    else (globalThis as any).fetch = originalFetch;
+  });
+
+  describe('Serper', () => {
+    it('treats a blank key as invalid without a request', async () => {
+      const fetchSpy = jest.fn();
+      (globalThis as any).fetch = fetchSpy;
+      const result = await validateSerperKey('   ');
+      expect(result).toEqual({ status: 'invalid', message: expect.stringMatching(/enter an api key/i) });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('reports valid when Serper accepts the key (200)', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: jest.fn().mockResolvedValue({}) });
+      await expect(validateSerperKey('good-key')).resolves.toEqual({ status: 'valid' });
+    });
+
+    it('sends a minimal (num:1) validation query with the key header', async () => {
+      const fetchSpy = jest.fn().mockResolvedValue({ ok: true, status: 200, json: jest.fn().mockResolvedValue({}) });
+      (globalThis as any).fetch = fetchSpy;
+      await validateSerperKey('secret-key');
+      const [url, init] = fetchSpy.mock.calls[0];
+      expect(url).toBe('https://google.serper.dev/search');
+      expect(init.headers['X-API-KEY']).toBe('secret-key');
+      expect(JSON.parse(init.body)).toMatchObject({ num: 1 });
+    });
+
+    it.each([401, 403])('reports invalid when Serper rejects the key (%s)', async (status) => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: false, status, json: jest.fn().mockResolvedValue({}) });
+      const result = await validateSerperKey('bad-key');
+      expect(result.status).toBe('invalid');
+      expect((result as { message: string }).message).toContain(String(status));
+    });
+
+    it('reports unknown on a transient server error (5xx)', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: jest.fn().mockRejectedValue(new SyntaxError('not json')),
+      });
+      const result = await validateSerperKey('k');
+      expect(result.status).toBe('unknown');
+      expect((result as { message: string }).message).toContain('503');
+    });
+
+    it('reports unknown when the request throws (offline)', async () => {
+      (globalThis as any).fetch = jest.fn().mockRejectedValue(new Error('Network request failed'));
+      const result = await validateSerperKey('k');
+      expect(result).toEqual({ status: 'unknown', message: expect.stringMatching(/couldn't reach serper\.dev/i) });
+    });
+  });
+
+  describe('Brave', () => {
+    it('treats a blank key as valid without a request (Brave runs keyless)', async () => {
+      const fetchSpy = jest.fn();
+      (globalThis as any).fetch = fetchSpy;
+      await expect(validateBraveKey('   ')).resolves.toEqual({ status: 'valid' });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('reports valid when Brave accepts the key (200)', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: jest.fn().mockResolvedValue({}) });
+      await expect(validateBraveKey('good-key')).resolves.toEqual({ status: 'valid' });
+    });
+
+    it('sends a minimal (count=1) validation query with the subscription token', async () => {
+      const fetchSpy = jest.fn().mockResolvedValue({ ok: true, status: 200, json: jest.fn().mockResolvedValue({}) });
+      (globalThis as any).fetch = fetchSpy;
+      await validateBraveKey('secret-key');
+      const [url, init] = fetchSpy.mock.calls[0];
+      expect(url).toContain('api.search.brave.com/res/v1/web/search');
+      expect(url).toContain('count=1');
+      expect(init.headers['X-Subscription-Token']).toBe('secret-key');
+    });
+
+    it.each([401, 403])('reports invalid when Brave rejects the key (%s)', async (status) => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: false, status, json: jest.fn() });
+      const result = await validateBraveKey('bad-key');
+      expect(result.status).toBe('invalid');
+      expect((result as { message: string }).message).toContain(String(status));
+    });
+
+    it('reports unknown when the request throws (offline)', async () => {
+      (globalThis as any).fetch = jest.fn().mockRejectedValue(new Error('Network request failed'));
+      const result = await validateBraveKey('k');
+      expect(result).toEqual({ status: 'unknown', message: expect.stringMatching(/couldn't reach brave/i) });
+    });
+  });
+
+  describe('dispatch', () => {
+    it('routes serper ids through the Serper validator', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: jest.fn().mockResolvedValue({}) });
+      await expect(validateSearchProviderKey('serper', 'k')).resolves.toEqual({ status: 'valid' });
+    });
+
+    it('routes brave ids through the Brave validator', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: jest.fn().mockResolvedValue({}) });
+      await expect(validateSearchProviderKey('brave', 'k')).resolves.toEqual({ status: 'valid' });
+    });
   });
 });

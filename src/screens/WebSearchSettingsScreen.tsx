@@ -4,6 +4,7 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -13,8 +14,18 @@ import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors, ThemeShadows } from '../theme';
 import { TYPOGRAPHY, SPACING } from '../constants';
 import { useAppStore } from '../stores';
-import { SEARCH_PROVIDER_OPTIONS } from '../services/tools/search';
+import { SEARCH_PROVIDER_OPTIONS, validateSearchProviderKey } from '../services/tools/search';
+import type { KeyValidationResult } from '../services/tools/search';
 import { getSearchApiKey, storeSearchApiKey } from '../services/tools/search/searchKeychain';
+
+/** Local UI state for the key check: idle/validating plus the API outcomes. */
+type ValidationState =
+  | { status: 'idle' }
+  | { status: 'validating' }
+  | KeyValidationResult;
+
+/** Debounce before hitting the provider so we don't validate on every keystroke. */
+const VALIDATE_DEBOUNCE_MS = 700;
 
 export const WebSearchSettingsScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -32,12 +43,28 @@ export const WebSearchSettingsScreen: React.FC = () => {
 
   // The key lives in the keychain, not settings — mirror it into local state.
   const [apiKey, setApiKey] = useState('');
+  const [validation, setValidation] = useState<ValidationState>({ status: 'idle' });
   useEffect(() => {
     let active = true;
     if (!acceptsKey) { setApiKey(''); return; }
     getSearchApiKey(searchProvider).then(key => { if (active) setApiKey(key); });
     return () => { active = false; };
   }, [searchProvider, acceptsKey]);
+
+  // Debounced validation: check the key against the provider once typing settles.
+  useEffect(() => {
+    if (!acceptsKey) { setValidation({ status: 'idle' }); return; }
+    const key = apiKey.trim();
+    if (!key) { setValidation({ status: 'idle' }); return; }
+    setValidation({ status: 'validating' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      validateSearchProviderKey(searchProvider, key, controller.signal)
+        .then(result => setValidation(result))
+        .catch(() => { /* aborted by cleanup */ });
+    }, VALIDATE_DEBOUNCE_MS);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [apiKey, searchProvider, acceptsKey]);
 
   const onChangeKey = (text: string) => {
     setApiKey(text);
@@ -94,9 +121,39 @@ export const WebSearchSettingsScreen: React.FC = () => {
               toggleStyle={styles.apiKeyToggle}
             />
             {apiKey.trim() ? (
-              <Text style={styles.settingHint}>
-                Stored on device in the keychain. Used only when this provider runs a search.
-              </Text>
+              <>
+                {validation.status === 'validating' && (
+                  <View style={styles.warningRow} testID="search-key-validating">
+                    <ActivityIndicator size="small" color={colors.textMuted} />
+                    <Text style={styles.warningText}>Checking the key with {selectedOption?.label}...</Text>
+                  </View>
+                )}
+                {validation.status === 'valid' && (
+                  <View style={styles.warningRow} testID="search-key-valid">
+                    <Icon name="check-circle" size={14} color={colors.success} />
+                    <Text style={[styles.warningText, { color: colors.success }]}>
+                      Key verified. Stored on device in the keychain, used only when this provider runs a search.
+                    </Text>
+                  </View>
+                )}
+                {validation.status === 'invalid' && (
+                  <View style={styles.warningRow} testID="search-key-invalid">
+                    <Icon name="x-circle" size={14} color={colors.error} />
+                    <Text style={[styles.warningText, { color: colors.error }]}>
+                      {validation.message}{' '}
+                      {selectedOption?.optionalApiKey
+                        ? 'Brave keeps running keyless on your device until the key works.'
+                        : 'Searches fall back to on-device Brave until the key works.'}
+                    </Text>
+                  </View>
+                )}
+                {validation.status === 'unknown' && (
+                  <View style={styles.warningRow} testID="search-key-unknown">
+                    <Icon name="alert-circle" size={14} color={colors.warning} />
+                    <Text style={styles.warningText}>{validation.message}</Text>
+                  </View>
+                )}
+              </>
             ) : (
               <View style={styles.warningRow}>
                 <Icon name="alert-circle" size={14} color={colors.textMuted} />
