@@ -1,4 +1,7 @@
-import { extractMemoryCandidateFromText } from '../../../../src/services/memory/autoCapture';
+import {
+  extractMemoryCandidateFromText,
+  isExplicitMemoryCommand,
+} from '../../../../src/services/memory/autoCapture';
 
 describe('memory auto-capture extraction', () => {
   it('extracts explicit remember cues as project candidates', () => {
@@ -15,6 +18,17 @@ describe('memory auto-capture extraction', () => {
       body: 'the county solar permit office closes at 3 PM on Fridays.',
       tags: expect.arrayContaining(['law', 'home']),
     }));
+  });
+
+  it('detects explicit memory commands without matching ordinary questions', () => {
+    expect(isExplicitMemoryCommand('remember: use linewidth=2 for plots')).toBe(true);
+    expect(isExplicitMemoryCommand('remember:')).toBe(true);
+    expect(isExplicitMemoryCommand('remember that garden soil mix is 50% compost')).toBe(true);
+    expect(isExplicitMemoryCommand('save this image to Photos')).toBe(false);
+    expect(isExplicitMemoryCommand('note the error and explain it')).toBe(false);
+    expect(isExplicitMemoryCommand('Please keep track of the garden soil mix.')).toBe(false);
+    expect(isExplicitMemoryCommand('Do you remember the plot settings?')).toBe(false);
+    expect(isExplicitMemoryCommand('Do not remember that garden note.')).toBe(false);
   });
 
   it('extracts stable user preferences without an explicit remember command', () => {

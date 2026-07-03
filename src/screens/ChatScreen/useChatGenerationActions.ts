@@ -16,11 +16,11 @@ import { Message, MediaAttachment, Project, DownloadedModel, RemoteModel, CacheT
 import logger from '../../utils/logger';
 import { buildChatContext } from './contextInjection';
 import { isRemoteGeneration, maybeCaptureMemoryCandidate } from './generationMemoryCapture';
+import { handleExplicitMemoryCommandIfNeeded } from './explicitMemoryCommand';
 import { buildMessagesForContext, buildMessagesWithCompactionPrefix } from './generationContextMessages';
 import { generateWithCompactionRetry } from './generationCompactionRetry';
 import { filterMemoryToolNames } from '../../services/memory/toolPrivacy';
 type SetState<T> = Dispatch<SetStateAction<T>>;
-
 function isMemoryEnabledForContext(conversation: any, project: any): boolean { return conversation?.memoryEnabled !== false && project?.memoryEnabled !== false; }
 
 export type GenerationDeps = {
@@ -330,6 +330,7 @@ export async function dispatchGenerationFn(
 ): Promise<void> {
   const { text, attachments, conversationId, imageMode = 'auto' } = call;
   let messageText = appendAttachmentText(text, attachments);
+  if (await handleExplicitMemoryCommandIfNeeded({ text, attachments, conversationId, addMessage: deps.addMessage })) return;
   const shouldGenerateImage = imageMode !== 'disabled' && await shouldRouteToImageGenerationFn(deps, messageText, imageMode === 'force');
   if (shouldGenerateImage && deps.activeImageModel) {
     await handleImageGenerationFn(deps, { prompt: text, conversationId, attachments }); // adds user msg (keeps voice note)

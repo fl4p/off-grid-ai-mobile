@@ -23,12 +23,14 @@ jest.mock('../../../../src/utils/logger', () => ({
 import {
   isRemoteGeneration,
   maybeCaptureMemoryCandidate,
+  maybeHandleExplicitMemoryCommand,
 } from '../../../../src/screens/ChatScreen/generationMemoryCapture';
 import { useRemoteServerStore } from '../../../../src/stores';
 
 describe('generationMemoryCapture', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCaptureMemoryFromMessage.mockResolvedValue({ id: 1 });
     useRemoteServerStore.setState({
       activeServerId: null,
       activeRemoteTextModelId: null,
@@ -124,5 +126,42 @@ describe('generationMemoryCapture', () => {
     })).resolves.toBeUndefined();
 
     expect(mockLoggerError).toHaveBeenCalledWith('[Memory] Auto-capture failed', expect.any(Error));
+  });
+
+  it('saves explicit memory commands without requiring auto-capture settings', async () => {
+    const message = { id: 'msg-command-1', role: 'user' as const, content: 'remember: use linewidth=2 for plots' };
+
+    const result = await maybeHandleExplicitMemoryCommand({
+      memoryEnabled: true,
+      projectId: 'proj-1',
+      userMessage: message,
+    });
+
+    expect(result).toEqual({ handled: true, assistantMessage: 'Saved to memory.' });
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message,
+      projectId: 'proj-1',
+      sourceType: 'chat_command',
+    });
+  });
+
+  it('does not save explicit memory commands when chat memory is disabled', async () => {
+    const result = await maybeHandleExplicitMemoryCommand({
+      memoryEnabled: false,
+      userMessage: { id: 'msg-command-1', role: 'user', content: 'remember: use linewidth=2 for plots' },
+    });
+
+    expect(result).toEqual({ handled: true, assistantMessage: 'Memory is off for this chat.' });
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not handle ordinary messages as explicit memory commands', async () => {
+    const result = await maybeHandleExplicitMemoryCommand({
+      memoryEnabled: true,
+      userMessage: { id: 'msg-ordinary-1', role: 'user', content: 'I prefer concise tax summaries.' },
+    });
+
+    expect(result).toEqual({ handled: false });
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
   });
 });

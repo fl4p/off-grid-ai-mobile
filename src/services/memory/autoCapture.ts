@@ -35,6 +35,7 @@ const SENSITIVE_PATTERNS: RegExp[] = [
 ];
 
 const NEGATED_CAPTURE_PATTERN = /\b(?:do\s+not|don't|dont|never)\s+(?:remember|save|note|keep\s+track\s+of)\b/i;
+const EXPLICIT_REMEMBER_COMMAND_PATTERN = /^(?:please\s+)?remember(?::|\s+that)\s*(.*)$/i;
 
 const TAG_KEYWORDS: Array<[string, RegExp]> = [
   ['tax', /\b(tax|irs|filing|deduction|credit|rebate)\b/i],
@@ -106,6 +107,12 @@ function inferAsOfDate(text: string): string | undefined {
 
 function containsSensitiveData(text: string): boolean {
   return SENSITIVE_PATTERNS.some(pattern => pattern.test(text));
+}
+
+export function isExplicitMemoryCommand(text: string): boolean {
+  const normalized = normalizeWhitespace(text);
+  if (NEGATED_CAPTURE_PATTERN.test(normalized)) return false;
+  return EXPLICIT_REMEMBER_COMMAND_PATTERN.test(normalized);
 }
 
 function matchPattern(text: string, patterns: CapturePattern[]): { pattern: CapturePattern; body: string } | null {

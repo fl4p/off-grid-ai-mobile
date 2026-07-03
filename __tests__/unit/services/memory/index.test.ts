@@ -292,6 +292,24 @@ describe('MemoryService', () => {
     expect(mockCreateMemory).not.toHaveBeenCalled();
   });
 
+  it('captures explicit memory commands with command source metadata', async () => {
+    await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-1',
+        role: 'user',
+        content: 'Remember: when I ask you to plot, use line width 2 unless I say otherwise.',
+      },
+      sourceType: 'chat_command',
+    });
+
+    expect(mockGetActiveMemoryBySource).toHaveBeenCalledWith('chat_command', 'msg-command-1', undefined);
+    expect(mockGetCandidateBySource).toHaveBeenCalledWith('chat_command', 'msg-command-1', undefined);
+    expect(mockCreateMemory).toHaveBeenCalledWith(expect.objectContaining({
+      sourceType: 'chat_command',
+      sourceId: 'msg-command-1',
+    }));
+  });
+
   it('does not capture assistant messages or messages that already became memories', async () => {
     await expect(memoryService.captureCandidateFromMessage({
       message: { id: 'assistant-1', role: 'assistant', content: 'Remember this note.' },

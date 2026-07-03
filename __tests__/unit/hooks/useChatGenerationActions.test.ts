@@ -680,7 +680,7 @@ describe('dispatchGenerationFn (single routing layer)', () => {
 
   it('captures a memory candidate for local text messages when enabled', async () => {
     const startText = jest.fn(() => Promise.resolve());
-    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember that the solar permit office closes at 3 PM.', timestamp: 0 };
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer solar permit updates with source links.', timestamp: 0 };
     mockChatStoreGetState.mockReturnValue({
       conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
       updateCompactionState: jest.fn(),
@@ -702,7 +702,7 @@ describe('dispatchGenerationFn (single routing layer)', () => {
 
   it('saves auto-captured memory directly when full-auto memory is enabled', async () => {
     const startText = jest.fn(() => Promise.resolve());
-    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember: when I ask you to plot, use line width 2.', timestamp: 0 };
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer line width 2 for plots by default.', timestamp: 0 };
     mockChatStoreGetState.mockReturnValue({
       conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
       updateCompactionState: jest.fn(),
@@ -726,9 +726,145 @@ describe('dispatchGenerationFn (single routing layer)', () => {
     expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
   });
 
+  it('handles explicit remember commands locally without calling the model', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'remember: if I ask you to plot sth, use linewidth=2 by default',
+      timestamp: 0,
+    };
+    const assistantMessage = { id: 'msg-command-ack', role: 'assistant' as const, content: 'Saved to memory.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const addMessage = jest.fn((_convId: string, message: any) => (
+      message.role === 'user' ? userMessage : assistantMessage
+    ));
+    const deps = makeGenerationDeps({ addMessage });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: 'proj-1',
+      sourceType: 'chat_command',
+    });
+    expect(addMessage).toHaveBeenCalledWith('conv-1', expect.objectContaining({
+      role: 'assistant',
+      content: 'Saved to memory.',
+    }));
+    expect(startText).not.toHaveBeenCalled();
+    expect(mockGenerateImage).not.toHaveBeenCalled();
+  });
+
+  it('handles explicit remember commands locally even when the active model is remote', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'remember: use linewidth=2 for plots',
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
+  it('handles remember commands with document attachments locally instead of sending them to remote generation', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const attachment = {
+      id: 'doc-1',
+      type: 'document' as const,
+      uri: 'file:///tmp/plot-defaults.md',
+      fileName: 'plot-defaults.md',
+      textContent: 'Always use linewidth=2 when plotting lines.',
+    };
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'remember:',
+      attachments: [attachment],
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, {
+      text: userMessage.content,
+      attachments: [attachment],
+      conversationId: 'conv-1',
+    }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: expect.objectContaining({
+        id: 'msg-command-1',
+        content: expect.stringContaining('Always use linewidth=2'),
+      }),
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
+  it('does not treat combined queued messages as a single explicit remember command', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-queued-1',
+      role: 'user' as const,
+      content: 'remember: use linewidth=2\n\nNow plot a sine wave',
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, {
+      text: userMessage.content,
+      conversationId: 'conv-1',
+    }, startText);
+
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
   it('does not auto-capture when conversation memory is disabled', async () => {
     const startText = jest.fn(() => Promise.resolve());
-    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember that project memory is off.', timestamp: 0 };
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer project memory to stay off here.', timestamp: 0 };
     mockChatStoreGetState.mockReturnValue({
       conversations: [{ id: 'conv-1', projectId: 'proj-1', memoryEnabled: false, messages: [userMessage] }],
       updateCompactionState: jest.fn(),
@@ -747,7 +883,7 @@ describe('dispatchGenerationFn (single routing layer)', () => {
 
   it('does not auto-capture memory candidates for remote text messages', async () => {
     const startText = jest.fn(() => Promise.resolve());
-    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember this private note.', timestamp: 0 };
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer this private note to stay local.', timestamp: 0 };
     mockChatStoreGetState.mockReturnValue({
       conversations: [{ id: 'conv-1', messages: [userMessage] }],
       updateCompactionState: jest.fn(),

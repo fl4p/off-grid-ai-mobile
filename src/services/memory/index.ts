@@ -168,6 +168,9 @@ type CaptureMessageParams = {
   message: Pick<Message, 'id' | 'role' | 'content'>;
   projectId?: string;
 };
+type CaptureMemoryFromMessageParams = CaptureMessageParams & {
+  sourceType?: string;
+};
 
 class MemoryService {
   async ensureReady(): Promise<void> {
@@ -216,14 +219,15 @@ class MemoryService {
     });
   }
 
-  async captureMemoryFromMessage(params: CaptureMessageParams): Promise<MemoryItem | null> {
+  async captureMemoryFromMessage(params: CaptureMemoryFromMessageParams): Promise<MemoryItem | null> {
     const content = stripControlTokens(params.message.content).trim();
     if (params.message.role !== 'user' || !content) return null;
     await this.ensureReady();
     const scope = params.projectId ? 'project' : 'global';
-    const existingMemory = memoryDatabase.getActiveMemoryBySource('auto_capture', params.message.id, params.projectId);
+    const sourceType = params.sourceType ?? 'auto_capture';
+    const existingMemory = memoryDatabase.getActiveMemoryBySource(sourceType, params.message.id, params.projectId);
     if (existingMemory) return existingMemory;
-    const existingCandidate = memoryDatabase.getCandidateBySource('auto_capture', params.message.id, params.projectId);
+    const existingCandidate = memoryDatabase.getCandidateBySource(sourceType, params.message.id, params.projectId);
     if (existingCandidate) return null;
     const extracted = extractMemoryCandidateFromText(content, { projectId: params.projectId });
     if (!extracted) return null;
@@ -231,7 +235,7 @@ class MemoryService {
       ...extracted,
       scope,
       projectId: params.projectId,
-      sourceType: 'auto_capture',
+      sourceType,
       sourceId: params.message.id,
       sourceExcerpt: content,
     });

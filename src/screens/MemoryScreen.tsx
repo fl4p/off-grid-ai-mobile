@@ -60,6 +60,7 @@ function sourceLabel(source?: string | null): string {
     case 'manual': return 'Manual';
     case 'chat_message': return 'Saved chat';
     case 'auto_capture': return 'Auto-captured';
+    case 'chat_command': return 'Saved command';
     case 'assistant_tool': return 'Tool saved';
     case 'tool': return 'Tool saved';
     default: return source ? source.replaceAll('_', ' ') : '';

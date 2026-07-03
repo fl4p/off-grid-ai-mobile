@@ -430,6 +430,27 @@ describe('Memory Flow Integration', () => {
     expect(events.some(event => event.action === 'candidate_created')).toBe(false);
   });
 
+  it('saves explicit memory commands as command-sourced memories', async () => {
+    const saved = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-1',
+        role: 'user',
+        content: 'Remember: when I ask you to plot, use line width 2 unless I say otherwise.',
+      },
+      sourceType: 'chat_command',
+    });
+
+    expect(saved).toEqual(expect.objectContaining({
+      id: 1,
+      scope: 'global',
+      source_type: 'chat_command',
+      source_id: 'msg-command-1',
+      body: 'when I ask you to plot, use line width 2 unless I say otherwise.',
+    }));
+    expect(candidates).toHaveLength(0);
+    expect(memories).toHaveLength(1);
+  });
+
   it('saves a chat message once when remembered repeatedly', async () => {
     const message = {
       id: 'chat-msg-1',
