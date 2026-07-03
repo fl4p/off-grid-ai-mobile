@@ -1065,6 +1065,38 @@ describe('parseToolCallsFromText', () => {
     expect(result.toolCalls[0].arguments).toEqual(args);
     if (clean !== undefined) expect(result.cleanText).toBe(clean);
   });
+
+  // DeepSeek's DSML format: <｜｜DSML｜｜invoke name="fn"><｜｜DSML｜｜parameter name="k" string="true">v...
+  // The fullwidth pipe (U+FF5C) is DeepSeek's special-token delimiter.
+  const M = '｜｜DSML｜｜';
+  it('parses DeepSeek DSML-wrapped invoke/parameter tool calls', () => {
+    const text =
+      `<${M}tool_calls>\n` +
+      `<${M}invoke name="run_python">\n` +
+      `<${M}parameter name="code" string="true">import numpy as np\nprint(np.arange(3))</${M}parameter>\n` +
+      `<${M}parameter name="packages" string="true">numpy</${M}parameter>\n` +
+      `</${M}invoke>\n` +
+      `</${M}tool_calls>`;
+    const result = parseToolCallsFromText(text);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('run_python');
+    expect(result.toolCalls[0].arguments).toEqual({
+      code: 'import numpy as np\nprint(np.arange(3))',
+      packages: 'numpy',
+    });
+    // The whole DSML block (including the outer wrapper tags) is stripped from display.
+    expect(result.cleanText).toBe('');
+  });
+
+  it('strips DSML markup from surrounding prose', () => {
+    const text = `Sure, plotting that now.\n<${M}invoke name="run_python">` +
+      `<${M}parameter name="code" string="true">print(1)</${M}parameter></${M}invoke>`;
+    const result = parseToolCallsFromText(text);
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].arguments).toEqual({ code: 'print(1)' });
+    expect(result.cleanText).toBe('Sure, plotting that now.');
+  });
 });
 
 // ===========================================================================

@@ -143,14 +143,16 @@ function parseGemmaNativeToolCalls(text: string): { cleanText: string; toolCalls
   return { cleanText: cleanText.trim(), toolCalls };
 }
 
-/** Parse <invoke name="fn"><parameter name="k">v</parameter></invoke> blocks (minimax, Anthropic-style). */
+/** Parse <invoke name="fn"><parameter name="k">v</parameter></invoke> blocks (minimax, Anthropic-style).
+ *  The `[^>]*` after name tolerates extra attributes some models add, e.g. DeepSeek's
+ *  `<parameter name="code" string="true">`. */
 function parseInvokeBlocks(text: string, toolCalls: ToolCall[], matchedRanges: [number, number][]): void {
-  const invokePattern = /<invoke\s+name="([^"]+)">([\s\S]*?)<\/invoke>/g;
+  const invokePattern = /<invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/invoke>/g;
   let match;
   while ((match = invokePattern.exec(text)) !== null) {
     const name = match[1];
     const args: Record<string, any> = {};
-    const paramPattern = /<parameter\s+name="([^"]+)">([\s\S]*?)<\/parameter>/g;
+    const paramPattern = /<parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/parameter>/g;
     let pm;
     while ((pm = paramPattern.exec(match[2])) !== null) { args[pm[1]] = pm[2].trim(); }
     toolCalls.push({ id: `text-tc-${Date.now()}-${toolCalls.length}`, name, arguments: args });
@@ -158,8 +160,25 @@ function parseInvokeBlocks(text: string, toolCalls: ToolCall[], matchedRanges: [
   }
 }
 
+/**
+ * DeepSeek wraps tool-call tags in its DSML special token using fullwidth pipes,
+ * e.g. `<｜｜DSML｜｜invoke name="run_python">…</｜｜DSML｜｜invoke>`. Strip the marker
+ * (and the now-plain outer <tool_calls> wrapper) so the tags reduce to the standard
+ * <invoke>/<parameter> forms the parser below already understands.
+ */
+const DSML_MARKER = /｜{1,2}DSML｜{1,2}/g;
+function hasDsmlMarkup(text: string): boolean {
+  return /｜{1,2}DSML/.test(text);
+}
+function stripDsmlMarker(text: string): string {
+  if (!hasDsmlMarkup(text)) return text;
+  return text.replace(DSML_MARKER, '').replace(/<\/?tool_calls>/g, '');
+}
+
 /** Parse tool calls from text output (fallback for small models). Supports JSON, XML, and invoke formats. */
 export function parseToolCallsFromText(text: string): { cleanText: string; toolCalls: ToolCall[] } {
+  // Normalize DeepSeek's DSML-wrapped tags to the standard <invoke>/<parameter> forms first.
+  text = stripDsmlMarker(text);
   const toolCalls: ToolCall[] = [];
   const matchedRanges: [number, number][] = [];
 
@@ -586,6 +605,7 @@ async function callLLMWithRetry(
 function containsToolCallMarkup(text: string): boolean {
   return text.includes('<tool_call>') ||
     text.includes('<invoke') ||
+    hasDsmlMarkup(text) ||
     /\w+:tool_call/.test(text) ||
     text.includes('<function_call>');
 }
