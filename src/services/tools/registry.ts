@@ -141,6 +141,20 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    id: 'run_python',
+    name: 'run_python',
+    displayName: 'Python',
+    description: 'Execute Python 3.12 code in a sandboxed on-device interpreter and return stdout, stderr, and the value of the last expression. numpy and pandas are preinstalled; other pure-Python packages install automatically on import when online. Write a complete script and print() what you need to see. Variables persist between calls in the same session.',
+    icon: 'terminal',
+    parameters: {
+      code: {
+        type: 'string',
+        description: 'Python source code to execute',
+        required: true,
+      },
+    },
+  },
+  {
     id: 'read_url',
     name: 'read_url',
     displayName: 'URL Reader',

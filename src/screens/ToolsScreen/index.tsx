@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Switch, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -8,7 +8,10 @@ import { useTheme, useThemedStyles } from '../../theme';
 import { FONTS, TYPOGRAPHY, SPACING } from '../../constants';
 import { AVAILABLE_TOOLS } from '../../services/tools';
 import { useAppStore } from '../../stores';
+import { usePythonRuntimeStore } from '../../stores/pythonRuntimeStore';
+import { pythonRuntimeService } from '../../services/python/pythonRuntimeService';
 import { useOpenProTools } from '../../hooks/useOpenProTools';
+import { CustomAlert, showAlert, hideAlert, AlertState, initialAlertState } from '../../components/CustomAlert';
 import type { ThemeColors, ThemeShadows } from '../../theme';
 
 const TOOL_WARNING_COLOR = '#F59E0B';
@@ -30,11 +33,57 @@ export const ToolsScreen: React.FC = () => {
   const updateSettings = useAppStore(st => st.updateSettings);
   const toolCountHintDismissed = useAppStore(st => st.toolCountHintDismissed);
   const setToolCountHintDismissed = useAppStore(st => st.setToolCountHintDismissed);
+  const pythonStatus = usePythonRuntimeStore(st => st.status);
+  const pythonProgress = usePythonRuntimeStore(st => st.downloadProgress);
+  const [alertState, setAlertState] = useState<AlertState>(initialAlertState);
+
+  useEffect(() => {
+    pythonRuntimeService.refreshStatus().catch(() => { });
+  }, []);
+
+  const enableTool = (toolId: string) => {
+    const cur = useAppStore.getState().settings.enabledTools || [];
+    if (!cur.includes(toolId)) updateSettings({ enabledTools: [...cur, toolId] });
+  };
+
+  const startPythonInstall = async () => {
+    try {
+      await pythonRuntimeService.install();
+      enableTool('run_python');
+    } catch (error) {
+      setAlertState(showAlert(
+        'Download Failed',
+        error instanceof Error ? error.message : 'Could not download the Python runtime.',
+      ));
+    }
+  };
+
+  const promptPythonInstall = () => {
+    setAlertState(showAlert(
+      'Download Python Runtime',
+      'Python needs a one-time 15 MB download (Python 3.12 with numpy and pandas). It runs entirely on your device and works offline afterwards.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Download',
+          onPress: () => {
+            setAlertState(hideAlert());
+            startPythonInstall();
+          },
+        },
+      ],
+    ));
+  };
 
   const handleToggleTool = (toolId: string) => {
     const cur = useAppStore.getState().settings.enabledTools || [];
+    const enabling = !cur.includes(toolId);
+    if (toolId === 'run_python' && enabling && usePythonRuntimeStore.getState().status !== 'installed') {
+      promptPythonInstall();
+      return;
+    }
     updateSettings({
-      enabledTools: cur.includes(toolId) ? cur.filter(id => id !== toolId) : [...cur, toolId],
+      enabledTools: enabling ? [...cur, toolId] : cur.filter(id => id !== toolId),
     });
   };
 
@@ -87,6 +136,10 @@ export const ToolsScreen: React.FC = () => {
 
         {AVAILABLE_TOOLS.map(tool => {
           const isEnabled = enabledTools.includes(tool.id);
+          const isPythonDownloading = tool.id === 'run_python' && pythonStatus === 'downloading';
+          const description = isPythonDownloading
+            ? `Downloading Python runtime... ${Math.round(pythonProgress * 100)}%`
+            : tool.description;
           return (
             <View key={tool.id} style={styles.toolRow} testID={`tool-picker-row-${tool.id}`}>
               <View style={styles.toolIcon}>
@@ -99,11 +152,12 @@ export const ToolsScreen: React.FC = () => {
                     <Icon name="wifi" size={12} color={colors.textMuted} style={styles.networkIcon} />
                   )}
                 </View>
-                <Text style={styles.toolDescription}>{tool.description}</Text>
+                <Text style={styles.toolDescription}>{description}</Text>
               </View>
               <Switch
                 value={isEnabled}
                 onValueChange={() => handleToggleTool(tool.id)}
+                disabled={isPythonDownloading}
                 trackColor={{ false: colors.border, true: `${colors.primary}80` }}
                 thumbColor={isEnabled ? colors.primary : colors.textMuted}
               />
@@ -114,6 +168,10 @@ export const ToolsScreen: React.FC = () => {
           Enabling more tools can confuse the model and increases latency on first response.
         </Text>
       </ScrollView>
+      <CustomAlert
+        {...alertState}
+        onClose={() => setAlertState(initialAlertState)}
+      />
     </SafeAreaView>
   );
 };

@@ -16,6 +16,7 @@ import { hardwareService, modelManager, authService, ragService, remoteServerMan
 import logger from './src/utils/logger';
 import { useAppStore, useAuthStore, useRemoteServerStore, useWhisperStore } from './src/stores';
 import { useDebugLogsStore } from './src/stores/debugLogsStore';
+import { PythonRuntimeHost } from './src/components/PythonRuntimeHost';
 import { loadProFeatures } from './src/bootstrap/loadProFeatures';
 import { checkProStatus } from './src/services/proLicenseService';
 import { hydrateDownloadStore } from './src/services/downloadHydration';
@@ -327,6 +328,7 @@ function App() {
         >
           <AppNavigator />
         </NavigationContainer>
+        <PythonRuntimeHost />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

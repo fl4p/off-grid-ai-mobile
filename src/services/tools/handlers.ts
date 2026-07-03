@@ -54,6 +54,11 @@ async function dispatchTool(call: ToolCall): Promise<string> {
       if (!url) throw new Error('Missing required parameter: url');
       return handleReadUrl(url);
     }
+    case 'run_python': {
+      const code = requireString(call, 'code');
+      if (!code) throw new Error('Missing required parameter: code');
+      return handleRunPython(code);
+    }
     default:
       throw new Error(`Unknown tool: ${call.name}`);
   }
@@ -382,6 +387,31 @@ async function handleReadUrl(rawUrl: string): Promise<string> {
     logger.error(`[Tools] read_url FAILED for "${url}": ${e?.message || e}`);
     throw e;
   } finally { clearTimeout(timeout); }
+}
+
+async function handleRunPython(code: string): Promise<string> {
+  const MAX_CHARS = 6000;
+  const { pythonRuntimeService } = require('../python/pythonRuntimeService'); // NOSONAR
+  const { usePythonRuntimeStore } = require('../../stores/pythonRuntimeStore'); // NOSONAR
+
+  if (usePythonRuntimeStore.getState().status === 'unknown') {
+    await pythonRuntimeService.refreshStatus();
+  }
+  if (!pythonRuntimeService.isInstalled()) {
+    return 'The Python runtime is not installed on this device. Tell the user to open Settings > Tools and enable Python (a one-time 15 MB download). After that, Python runs fully offline.';
+  }
+
+  const res = await pythonRuntimeService.execute(code);
+
+  const sections: string[] = [];
+  if (res.stdout) sections.push(res.stdout);
+  if (res.ok && res.result !== undefined && res.result !== '') sections.push(`[result] ${res.result}`);
+  if (res.stderr) sections.push(`[stderr]\n${res.stderr}`);
+  if (!res.ok) sections.push(`[error]\n${res.error || 'Execution failed'}`);
+  if (sections.length === 0) sections.push('(no output — use print() to see values)');
+
+  const output = sections.join('\n');
+  return output.length > MAX_CHARS ? `${output.slice(0, MAX_CHARS)}\n\n[Output truncated]` : output;
 }
 
 async function handleSearchKnowledgeBase(query: string, projectId?: string): Promise<string> {

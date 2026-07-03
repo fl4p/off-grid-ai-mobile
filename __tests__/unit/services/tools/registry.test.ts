@@ -19,7 +19,7 @@ describe('Tool Registry', () => {
     it('has core tools with correct IDs', () => {
       // Email + calendar tools are pro-gated and live in the pro package
       // (EmailCalendarExtension), so they are not part of the core registry.
-      expect(AVAILABLE_TOOLS).toHaveLength(9);
+      expect(AVAILABLE_TOOLS).toHaveLength(10);
 
       const ids = AVAILABLE_TOOLS.map(t => t.id);
       expect(ids).toEqual([
@@ -31,6 +31,7 @@ describe('Tool Registry', () => {
         'search_memory',
         'save_memory',
         'forget_memory',
+        'run_python',
         'read_url',
       ]);
     });
