@@ -4,9 +4,9 @@ import {
   showAlert,
   hideAlert,
 } from '../../components';
-import { llmService, activeModelService, modelManager } from '../../services';
+import { llmService, activeModelService, modelManager, remoteServerManager } from '../../services';
 import { liteRTService } from '../../services/litert';
-import { useAppStore } from '../../stores';
+import { useAppStore, useRemoteServerStore } from '../../stores';
 import { DownloadedModel, RemoteModel, ONNXImageModel } from '../../types';
 import logger from '../../utils/logger';
 
@@ -28,7 +28,7 @@ type ModelActionDeps = {
   isStreaming: boolean;
   settings: { showGenerationDetails: boolean };
   clearStreamingMessage: () => void;
-  createConversation: (modelId: string, title?: string, projectId?: string) => string;
+  createConversation: (modelId: string, title?: string, projectId?: string, serverId?: string) => string;
   addMessage: (convId: string, msg: any) => void;
   setIsModelLoading: SetState<boolean>;
   setLoadingModel: SetState<DownloadedModel | null>;
@@ -57,6 +57,45 @@ function addSystemMsg(
     content: `_${content}_`,
     isSystemInfo: true,
   });
+}
+
+/**
+ * Restore the model a conversation was created with, so re-opening a chat uses
+ * its own model instead of whatever model happened to be globally active. The
+ * model is not loaded here — it loads lazily on the next send — so this is a
+ * cheap state update.
+ *
+ * Only restores when the conversation's model is still available; otherwise it
+ * leaves the current active model untouched (important for legacy conversations
+ * saved before serverId was tracked, whose remote model can't be resolved).
+ */
+export function restoreConversationModelFn(
+  conv: { modelId?: string; serverId?: string } | undefined,
+): void {
+  if (!conv?.modelId) return;
+  const remote = useRemoteServerStore.getState();
+  const app = useAppStore.getState();
+
+  if (conv.serverId) {
+    // Remote conversation: re-activate its server + model if the server still exists.
+    if (!remote.servers.some(s => s.id === conv.serverId)) return;
+    if (remote.activeServerId === conv.serverId && remote.activeRemoteTextModelId === conv.modelId) return;
+    remoteServerManager
+      .setActiveRemoteTextModel(conv.serverId, conv.modelId)
+      .catch(err => logger.warn('[ChatScreen] Failed to restore remote model for conversation:', err));
+    return;
+  }
+
+  // Local conversation: only restore if the model is still downloaded.
+  if (!app.downloadedModels.some(m => m.id === conv.modelId)) return;
+  // A remote selection wins in model resolution, so clear it before selecting local.
+  if (remote.activeServerId || remote.activeRemoteTextModelId) {
+    remote.setActiveServerId(null);
+    remote.setActiveRemoteTextModelId(null);
+  }
+  if (app.activeModelId !== conv.modelId) {
+    app.setActiveModelId(conv.modelId);
+  }
 }
 
 async function doLoadTextModel(deps: ModelActionDeps): Promise<void> {

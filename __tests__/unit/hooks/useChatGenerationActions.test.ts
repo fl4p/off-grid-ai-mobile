@@ -495,8 +495,24 @@ describe('handleSendFn', () => {
       startGeneration,
       setDebugInfo: jest.fn(),
     });
-    expect(deps.createConversation).toHaveBeenCalledWith('model-1', undefined, undefined);
+    expect(deps.createConversation).toHaveBeenCalledWith('model-1', undefined, undefined, undefined);
     expect(deps.setActiveConversation).toHaveBeenCalledWith('new-conv-id');
+    expect(startGeneration).toHaveBeenCalledWith('new-conv-id', 'hello');
+  });
+
+  it('records the remote server id on the conversation when the active model is remote', async () => {
+    const startGeneration = jest.fn(() => Promise.resolve());
+    const deps = makeGenerationDeps({
+      activeConversationId: null,
+      activeModelInfo: { isRemote: true, model: { id: 'gpt-oss' }, modelId: 'gpt-oss', modelName: 'GPT-OSS', serverId: 'srv-9' },
+    });
+    await handleSendFn(deps, {
+      text: 'hello',
+      imageMode: 'disabled',
+      startGeneration,
+      setDebugInfo: jest.fn(),
+    });
+    expect(deps.createConversation).toHaveBeenCalledWith('gpt-oss', undefined, undefined, 'srv-9');
     expect(startGeneration).toHaveBeenCalledWith('new-conv-id', 'hello');
   });
 

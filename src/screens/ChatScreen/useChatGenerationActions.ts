@@ -22,7 +22,7 @@ const MEMORY_TOOL_IDS = ['search_memory', 'save_memory', 'forget_memory'];
 export type GenerationDeps = {
   activeModelId: string | null;
   activeModel: DownloadedModel | null | undefined;
-  activeModelInfo?: { isRemote: boolean; model: DownloadedModel | RemoteModel | null; modelId: string | null; modelName: string };
+  activeModelInfo?: { isRemote: boolean; model: DownloadedModel | RemoteModel | null; modelId: string | null; modelName: string; serverId?: string };
   hasActiveModel?: boolean;
   hasTextModel?: boolean;
   /** Same tool gate the UI shows; when false the Tools badge reads "N/A" and the picker is locked, so generation must not inject tools either. */
@@ -66,7 +66,7 @@ export type GenerationDeps = {
   ensureTextModelForChat: () => Promise<boolean>;
   /** Stash a message to replay after the user picks a text model. */
   setPendingMessage?: (text: string, attachments?: MediaAttachment[]) => void;
-  createConversation: (modelId: string, title?: string, projectId?: string) => string;
+  createConversation: (modelId: string, title?: string, projectId?: string, serverId?: string) => string;
   pendingProjectId?: string;
 };
 function applyCompactionPrefix(conversation: any, systemPrompt: string, messages: Message[]): { prefix: Message[]; filtered: Message[] } {
@@ -316,7 +316,8 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
                 deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
                 const modelId = deps.activeModelInfo?.modelId;
                 if (modelId) {
-                  const newId = deps.createConversation(modelId);
+                  const serverId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
+                  const newId = deps.createConversation(modelId, undefined, undefined, serverId);
                   deps.setActiveConversation(newId);
                 }
               },
@@ -376,7 +377,8 @@ export async function handleSendFn(deps: GenerationDeps, call: SendCall): Promis
   let targetConversationId = deps.activeConversationId;
   if (!targetConversationId) {
     const fallbackModelId = deps.activeModelInfo?.modelId || deps.activeImageModel?.id;
-    targetConversationId = deps.createConversation(fallbackModelId!, undefined, deps.pendingProjectId);
+    const fallbackServerId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
+    targetConversationId = deps.createConversation(fallbackModelId!, undefined, deps.pendingProjectId, fallbackServerId);
     deps.setActiveConversation(targetConversationId);
   }
   // Cross-modality serialization: queue if any generation is running (routed later).
@@ -468,7 +470,8 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
                 deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
                 const modelId = deps.activeModelInfo?.modelId;
                 if (modelId) {
-                  const newId = deps.createConversation(modelId);
+                  const serverId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
+                  const newId = deps.createConversation(modelId, undefined, undefined, serverId);
                   deps.setActiveConversation(newId);
                 }
               },

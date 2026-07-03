@@ -118,6 +118,7 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
   const storeDownloads = useDownloadStore(s => s.downloads);
   const servers = useRemoteServerStore((s) => s.servers);
   const discoveredModels = useRemoteServerStore((s) => s.discoveredModels);
+  const updateServer = useRemoteServerStore((s) => s.updateServer);
 
   // Init hardware + model recommendations
   useEffect(() => {
@@ -244,6 +245,13 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
       }
       const textModel = models.find(m => !m.capabilities.supportsVision) || models[0];
       if (textModel) await remoteServerManager.setActiveRemoteTextModel(server.id, textModel.id);
+      // Only surface the "Connected!" success modal the first time this endpoint
+      // connects. On later reconnects, go straight to chat without interrupting.
+      if (server.connectedModalShown) {
+        navigation.replace('Main');
+        return;
+      }
+      updateServer(server.id, { connectedModalShown: true });
       setAlertState(showAlert('Connected!', `${server.name} is ready with ${models.length} model${models.length === 1 ? '' : 's'}. You can start chatting now.`,
         [{ text: 'Continue', onPress: () => { setAlertState(hideAlert()); navigation.replace('Main'); } }]));
     } catch (e) { setAlertState(showAlert('Connection Failed', (e as Error).message)); }

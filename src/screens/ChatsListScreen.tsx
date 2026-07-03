@@ -18,10 +18,29 @@ import { useFocusTrigger } from '../hooks/useFocusTrigger';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors, ThemeShadows } from '../theme';
 import { TYPOGRAPHY, SPACING } from '../constants';
-import { useChatStore, useProjectStore, useAppStore } from '../stores';
+import { useChatStore, useProjectStore, useAppStore, useRemoteServerStore } from '../stores';
 import { useActiveTextModel } from '../hooks/useActiveTextModel';
 import { onnxImageGeneratorService, activeModelService, llmService, remoteServerManager } from '../services';
-import { Conversation } from '../types';
+import { Conversation, DownloadedModel, RemoteModel } from '../types';
+
+/**
+ * Human-readable model name for a conversation row. Remote conversations resolve
+ * against discovered models (falling back to the raw id, which is usually
+ * readable). Local conversations resolve against downloaded models; a deleted
+ * local model yields null so no stale badge is shown.
+ */
+function resolveConversationModelName(
+  conv: Conversation,
+  downloadedModels: DownloadedModel[],
+  discoveredModels: Record<string, RemoteModel[]>,
+): string | null {
+  if (!conv.modelId) return null;
+  if (conv.serverId) {
+    const remote = (discoveredModels[conv.serverId] || []).find(m => m.id === conv.modelId);
+    return remote?.name ?? conv.modelId;
+  }
+  return downloadedModels.find(m => m.id === conv.modelId)?.name ?? null;
+}
 import { RootStackParamList, MainTabParamList } from '../navigation/types';
 type NavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'ChatsTab'>,
@@ -41,6 +60,8 @@ export const ChatsListScreen: React.FC = () => {
   const shownSpotlights = useAppStore(s => s.shownSpotlights);
   const { removeImagesByConversationId, markSpotlightShown } = useAppStore.getState();
   const { modelId: activeTextModelId } = useActiveTextModel();
+  const downloadedModels = useAppStore(s => s.downloadedModels);
+  const discoveredModels = useRemoteServerStore(s => s.discoveredModels);
   const [alertState, setAlertState] = useState<AlertState>(initialAlertState);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(false);
@@ -172,6 +193,7 @@ export const ChatsListScreen: React.FC = () => {
   const renderChat = ({ item, index }: { item: Conversation; index: number }) => {
     const project = item.projectId ? getProject(item.projectId) : null;
     const lastMessage = item.messages[item.messages.length - 1];
+    const modelName = resolveConversationModelName(item, downloadedModels, discoveredModels);
 
     return (
       <Swipeable
@@ -197,6 +219,12 @@ export const ChatsListScreen: React.FC = () => {
               <Text style={styles.chatPreview} numberOfLines={1}>
                 {lastMessage.role === 'user' ? 'You: ' : ''}{lastMessage.content}
               </Text>
+            )}
+            {modelName && (
+              <View style={styles.modelRow}>
+                <Icon name="layers" size={11} color={colors.textMuted} style={styles.modelIcon} />
+                <Text style={styles.modelName} numberOfLines={1}>{modelName}</Text>
+              </View>
             )}
             {project && (
               <View style={styles.projectBadge}>
@@ -357,6 +385,19 @@ const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     ...TYPOGRAPHY.meta,
     color: colors.textSecondary,
     marginTop: 1,
+  },
+  modelRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'flex-start' as const,
+    marginTop: SPACING.xs,
+  },
+  modelIcon: {
+    marginRight: SPACING.xs / 2,
+  },
+  modelName: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textMuted,
   },
   projectBadge: {
     alignSelf: 'flex-start' as const,

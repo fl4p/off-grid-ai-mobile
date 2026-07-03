@@ -59,6 +59,7 @@ const mockRemoteServerState = {
   servers: [] as any[],
   discoveredModels: {} as Record<string, any[]>,
   testConnection: jest.fn().mockResolvedValue({ success: false }),
+  updateServer: jest.fn(),
 };
 
 jest.mock('../../../src/stores/remoteServerStore', () => ({
@@ -489,6 +490,28 @@ describe('ModelDownloadScreen', () => {
 
     expect(mockRsm.setActiveRemoteTextModel).toHaveBeenCalledWith('srv-1', 'llama3');
     expect(mockShowAlert).toHaveBeenCalledWith('Connected!', expect.stringContaining('My Server'), expect.any(Array));
+    // First connect marks the endpoint so the modal isn't shown again.
+    expect(mockRemoteServerState.updateServer).toHaveBeenCalledWith('srv-1', { connectedModalShown: true });
+  });
+
+  it('handleConnectServer — reconnect skips the Connected! modal and navigates straight to Main', async () => {
+    const { remoteServerManager: mockRsm } = jest.requireMock('../../../src/services');
+    const seenServer = { ...MOCK_SERVER, connectedModalShown: true };
+    const mockModels = [{ id: 'llama3', capabilities: { supportsVision: false } }];
+    mockRsm.testConnection.mockResolvedValueOnce({ success: true, models: mockModels });
+    mockRemoteServerState.servers = [seenServer];
+    mockRemoteServerState.discoveredModels = {};
+
+    render(<ModelDownloadScreen navigation={mockNavigation} />);
+    await flushPromises();
+
+    await act(async () => {
+      await mockOnConnectServer(seenServer);
+    });
+
+    expect(mockRsm.setActiveRemoteTextModel).toHaveBeenCalledWith('srv-1', 'llama3');
+    expect(mockShowAlert).not.toHaveBeenCalledWith('Connected!', expect.anything(), expect.anything());
+    expect(mockReplace).toHaveBeenCalledWith('Main');
   });
 
   it('handleConnectServer — success with no models shows "No Models Found" alert', async () => {

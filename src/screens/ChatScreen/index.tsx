@@ -248,6 +248,7 @@ export const ChatScreen: React.FC = () => {
           setShowSettingsPanel={chat.setShowSettingsPanel}
           setShowProjectSelector={chat.setShowProjectSelector}
           isRemote={chat.activeModelInfo?.isRemote}
+          activeModelName={chat.activeModelName}
         />
         <ModelsManagerSheet
           visible={modelsManagerOpen}
