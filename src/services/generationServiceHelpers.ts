@@ -482,7 +482,10 @@ export async function generateRemoteWithToolsImpl(
     // global flag — every other conversation was blocked from generating too.
     if (svc.abortRequested) return;
     logger.error('[GenerationService] Remote tool generation error:', error);
-    resetAfterGenerationError(svc, { markServerOffline: true });
+    // Don't mark the server offline here: a runToolLoop failure can be a tool
+    // error or a context-length error the caller recovers from via compaction,
+    // and nothing flips health back to healthy — a false offline would stick.
+    resetAfterGenerationError(svc);
     throw error;
   }
 

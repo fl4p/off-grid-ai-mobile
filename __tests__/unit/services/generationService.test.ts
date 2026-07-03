@@ -992,7 +992,7 @@ describe('generationService', () => {
         expect(state.isThinking).toBe(false);
       });
 
-      it('marks the failed server offline', async () => {
+      it('does NOT mark the server offline (a tool-loop error is not a reliable health signal)', async () => {
         const convId = setupWithConversation();
         const updateServerHealth = jest.fn();
         useRemoteServerStore.setState({ activeServerId: 'test-remote', updateServerHealth } as any);
@@ -1004,7 +1004,7 @@ describe('generationService', () => {
           ], { enabledToolIds: [] }),
         ).rejects.toThrow('boom');
 
-        expect(updateServerHealth).toHaveBeenCalledWith('test-remote', false);
+        expect(updateServerHealth).not.toHaveBeenCalled();
       });
 
       it('does not block a later generation for another conversation', async () => {

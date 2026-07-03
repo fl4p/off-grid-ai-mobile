@@ -118,6 +118,21 @@ describe('getConversationContext', () => {
     expect(ctx[0].content).toHaveLength(500);
   });
 
+  it('excludes system-info/error messages so failures do not leak into the enhancer', () => {
+    mockGetState.mockReturnValue({
+      conversations: [{
+        id: 'c1',
+        messages: [
+          { id: 'm1', role: 'user', content: 'a red car', timestamp: 1 },
+          { id: 'm2', role: 'assistant', content: 'Generation failed: boom', timestamp: 2, isSystemInfo: true, isError: true },
+        ],
+      }],
+    });
+    const ctx = getConversationContext('c1');
+    expect(ctx).toHaveLength(1);
+    expect(ctx[0].content).toBe('a red car');
+  });
+
   it('prefixes context message ids with ctx-', () => {
     mockGetState.mockReturnValue({
       conversations: [{
