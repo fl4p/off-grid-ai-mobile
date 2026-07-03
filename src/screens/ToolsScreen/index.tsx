@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Switch, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -64,6 +64,22 @@ export const ToolsScreen: React.FC = () => {
       ));
     }
   };
+
+  // Heal an enabled-but-not-installed runtime: a bundled-asset update (e.g. adding
+  // matplotlib) invalidates a prior install, leaving Python toggled on yet unusable
+  // until the model calls it and fails. Re-download once so the enabled state is
+  // real again, showing the same inline progress as a fresh install.
+  const healedRef = useRef(false);
+  useEffect(() => {
+    if (healedRef.current) return;
+    const enabled = (useAppStore.getState().settings.enabledTools || []).includes('run_python');
+    if (enabled && pythonStatus === 'not_installed') {
+      healedRef.current = true;
+      startPythonInstall();
+    }
+    // One-shot, guarded by healedRef; startPythonInstall is recreated each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pythonStatus]);
 
   const promptPythonInstall = () => {
     setAlertState(showAlert(
@@ -153,7 +169,7 @@ export const ToolsScreen: React.FC = () => {
           const isPythonDownloading = tool.id === 'run_python' && pythonStatus === 'downloading';
           const description = isPythonDownloading
             ? `Downloading Python runtime... ${Math.round(pythonProgress * 100)}%`
-            : tool.description;
+            : (tool.uiDescription || tool.description);
           return (
             <View key={tool.id} style={styles.toolRow} testID={`tool-picker-row-${tool.id}`}>
               <View style={styles.toolIcon}>

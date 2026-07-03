@@ -39,7 +39,13 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
     await pythonRuntimeService.refreshStatus();
   }
   if (!pythonRuntimeService.isInstalled()) {
-    return 'The Python runtime is not installed on this device. Tell the user to open Settings > Tools and enable Python (a one-time 33 MB download). After that, Python runs fully offline.';
+    // Reaching here means run_python is enabled (only enabled tools are offered to
+    // the model) but the runtime is not installed at the current revision - usually
+    // a bundled-asset update (e.g. matplotlib) invalidated a prior install. Kick off
+    // the download so it self-heals instead of dead-ending; install() dedupes with
+    // any download already running from the Tools screen.
+    pythonRuntimeService.install().catch(() => { /* status surfaced via the store */ });
+    return 'The Python runtime is downloading a required update (about 33 MB) and runs fully offline once ready. Tell the user it is updating - they can watch progress in Settings > Tools - and to try again in a moment.';
   }
 
   const packages = parsePackages(call.arguments.packages);

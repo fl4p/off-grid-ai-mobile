@@ -220,5 +220,29 @@ describe('ToolsScreen', () => {
       const utils = render(<ToolsScreen />);
       expect(utils.getByText('Downloading Python runtime... 42%')).toBeTruthy();
     });
+
+    it('shows the short one-line description in the row, not the full model instructions', () => {
+      const utils = render(<ToolsScreen />);
+      expect(utils.getByText('Run Python 3.12 on-device with numpy, pandas, and matplotlib. Plots show in the chat.')).toBeTruthy();
+      // The long model-facing description must not wall off the settings list.
+      expect(utils.queryByText(/sandboxed on-device interpreter/)).toBeNull();
+    });
+
+    it('re-downloads automatically when Python is enabled but not installed', async () => {
+      // A bundled-asset update invalidates a prior install: the tool is still
+      // enabled but the runtime is gone. The screen should heal it without the
+      // user having to toggle off and on.
+      mockEnabledTools = ['web_search', 'run_python'];
+      usePythonRuntimeStore.setState({ status: 'not_installed' });
+      render(<ToolsScreen />);
+      await waitFor(() => expect(mockPythonInstall).toHaveBeenCalledTimes(1));
+    });
+
+    it('does not auto-download when Python is not enabled', () => {
+      mockEnabledTools = ['web_search', 'calculator'];
+      usePythonRuntimeStore.setState({ status: 'not_installed' });
+      render(<ToolsScreen />);
+      expect(mockPythonInstall).not.toHaveBeenCalled();
+    });
   });
 });
