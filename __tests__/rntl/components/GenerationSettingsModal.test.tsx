@@ -20,14 +20,17 @@ import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import { GenerationSettingsModal } from '../../../src/components/GenerationSettingsModal';
 
-// Mock AppSheet
+// Mock AppSheet. Exposes an "app-sheet-closed" button so tests can simulate the
+// sheet finishing its close animation (which fires onClosed) — the real hook the
+// modal uses to run conversation actions AFTER it has fully dismissed (iOS-safe).
 jest.mock('../../../src/components/AppSheet', () => ({
-  AppSheet: ({ visible, children, title }: any) => {
+  AppSheet: ({ visible, children, title, onClosed }: any) => {
     if (!visible) return null;
-    const { View, Text } = require('react-native');
+    const { View, Text, TouchableOpacity } = require('react-native');
     return (
       <View testID="app-sheet">
         <Text>{title}</Text>
+        <TouchableOpacity testID="app-sheet-closed" onPress={() => onClosed?.()} />
         {children}
       </View>
     );
@@ -269,12 +272,11 @@ describe('GenerationSettingsModal', () => {
     });
   });
 
-  it('calls onClose then onDeleteConversation when Delete is pressed', () => {
-    jest.useFakeTimers();
+  it('closes first and runs onDeleteConversation only after the sheet has closed', () => {
     const onClose = jest.fn();
     const onDeleteConversation = jest.fn();
 
-    const { getByText } = render(
+    const { getByText, getByTestId } = render(
       <GenerationSettingsModal
         {...defaultProps}
         onClose={onClose}
@@ -284,13 +286,14 @@ describe('GenerationSettingsModal', () => {
 
     fireEvent.press(getByText('Delete Conversation'));
 
+    // Sheet is asked to close, but the action must NOT run while it is still
+    // on screen — presenting the confirm alert mid-dismiss freezes iOS.
     expect(onClose).toHaveBeenCalled();
+    expect(onDeleteConversation).not.toHaveBeenCalled();
 
-    // onDeleteConversation is called via setTimeout
-    jest.advanceTimersByTime(200);
+    // Once the sheet reports it has fully closed, the action runs.
+    fireEvent.press(getByTestId('app-sheet-closed'));
     expect(onDeleteConversation).toHaveBeenCalled();
-
-    jest.useRealTimers();
   });
 
   it('shows active project name in Project action', () => {
@@ -721,12 +724,11 @@ describe('GenerationSettingsModal', () => {
   // ============================================================================
   // NEW TESTS: onOpenProject and onOpenGallery callbacks
   // ============================================================================
-  it('calls onClose then onOpenProject when Project action is pressed', () => {
-    jest.useFakeTimers();
+  it('closes first and runs onOpenProject only after the sheet has closed', () => {
     const onClose = jest.fn();
     const onOpenProject = jest.fn();
 
-    const { getByText } = render(
+    const { getByText, getByTestId } = render(
       <GenerationSettingsModal
         {...defaultProps}
         onClose={onClose}
@@ -737,18 +739,17 @@ describe('GenerationSettingsModal', () => {
     fireEvent.press(getByText(/Project:/));
 
     expect(onClose).toHaveBeenCalled();
-    jest.advanceTimersByTime(350);
-    expect(onOpenProject).toHaveBeenCalled();
+    expect(onOpenProject).not.toHaveBeenCalled();
 
-    jest.useRealTimers();
+    fireEvent.press(getByTestId('app-sheet-closed'));
+    expect(onOpenProject).toHaveBeenCalled();
   });
 
-  it('calls onClose then onOpenGallery when Gallery action is pressed', () => {
-    jest.useFakeTimers();
+  it('closes first and runs onOpenGallery only after the sheet has closed', () => {
     const onClose = jest.fn();
     const onOpenGallery = jest.fn();
 
-    const { getByText } = render(
+    const { getByText, getByTestId } = render(
       <GenerationSettingsModal
         {...defaultProps}
         onClose={onClose}
@@ -760,10 +761,10 @@ describe('GenerationSettingsModal', () => {
     fireEvent.press(getByText('Gallery (5)'));
 
     expect(onClose).toHaveBeenCalled();
-    jest.advanceTimersByTime(200);
-    expect(onOpenGallery).toHaveBeenCalled();
+    expect(onOpenGallery).not.toHaveBeenCalled();
 
-    jest.useRealTimers();
+    fireEvent.press(getByTestId('app-sheet-closed'));
+    expect(onOpenGallery).toHaveBeenCalled();
   });
 
   it('shows "Default" when activeProjectName is null', () => {
