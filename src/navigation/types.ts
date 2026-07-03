@@ -17,6 +17,7 @@ export type RootStackParamList = {
   // Former SettingsStack
   ModelSettings: undefined;
   RemoteServers: undefined;
+  WebSearchSettings: undefined;
   DeviceInfo: undefined;
   StorageSettings: undefined;
   SecuritySettings: undefined;

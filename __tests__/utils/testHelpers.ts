@@ -71,6 +71,7 @@ export const resetStores = (): void => {
       enhanceImagePrompts: false,
       enabledTools: ['calculator', 'get_current_datetime'],
       memoryAutoCaptureEnabled: false,
+      searchProvider: 'brave' as const,
       thinkingEnabled: true,
       liteRTBackend: 'gpu' as const,
       liteRTTemperature: 0.7,

@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceInfo, DownloadedModel, ModelRecommendation, ONNXImageModel, ImageGenerationMode, AutoDetectMethod, CacheType, InferenceBackend, INFERENCE_BACKENDS, LiteRTBackend, GeneratedImage } from '../types';
+import type { SearchProviderId } from '../services/tools/search';
 
 function isUnknownLike(value: string): boolean {
   const normalized = value.trim().toLowerCase();
@@ -56,6 +57,7 @@ type AppSettings = {
   enableGpu: boolean; gpuLayers: number; flashAttn: boolean;
   cacheType: CacheType; showGenerationDetails: boolean; enabledTools: string[];
   memoryAutoCaptureEnabled: boolean;
+  searchProvider: SearchProviderId;
   thinkingEnabled: boolean;
   inferenceBackend: InferenceBackend;
   liteRTBackend: LiteRTBackend;
@@ -175,6 +177,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showGenerationDetails: false,
   enabledTools: ['web_search', 'read_url', 'search_knowledge_base'],
   memoryAutoCaptureEnabled: false,
+  searchProvider: 'brave',
   thinkingEnabled: false,
   liteRTBackend: 'gpu',
   liteRTTemperature: 0.7,
@@ -204,6 +207,14 @@ function migratePersistedState(persistedState: any, currentState: AppState): App
   // modelLoadingStrategy was removed (the residency manager owns swapping now).
   if (merged.settings?.modelLoadingStrategy !== undefined) {
     delete merged.settings.modelLoadingStrategy;
+  }
+  // Search API keys moved to the keychain; purge any legacy cleartext copy.
+  if (merged.settings?.serpApiKey !== undefined) {
+    delete merged.settings.serpApiKey;
+  }
+  // The 'serpapi' provider was replaced by 'serper'; reset stale selections.
+  if (merged.settings?.searchProvider === 'serpapi') {
+    merged.settings = { ...merged.settings, searchProvider: 'brave' };
   }
   if (persistedState?.settings && !persistedState.settings.cacheType) {
     merged.settings = { ...merged.settings, cacheType: persistedState.settings.flashAttn ? 'q8_0' : 'f16', flashAttn: true };
