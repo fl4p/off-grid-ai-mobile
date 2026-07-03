@@ -133,6 +133,22 @@ describe('ChatMessage — Tool message rendering', () => {
       expect(getByTestId('generated-image-content-0')).toBeTruthy();
     });
 
+    it('renders a plot full-width and uncropped (contain), not as a fixed thumbnail', () => {
+      const { getByTestId } = renderToolResult('run_python', '[1 plot shown to the user]', {
+        attachments: [
+          { id: 'p1', type: 'image', uri: 'file:///docs/python-plots/plot-p1.png', mimeType: 'image/png' },
+        ],
+      });
+      const img = getByTestId('generated-image-content-0');
+      // contain (not cover) so the whole figure is visible, and full-width rather
+      // than a 140px square thumbnail.
+      expect(img.props.resizeMode).toBe('contain');
+      const flat = Array.isArray(img.props.style)
+        ? Object.assign({}, ...img.props.style)
+        : img.props.style;
+      expect(flat.width).toBe('100%');
+    });
+
     it('opens the image viewer when a plot is tapped (so it can be saved)', () => {
       const onImagePress = jest.fn();
       const { getByTestId } = renderToolResult(
