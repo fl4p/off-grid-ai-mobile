@@ -54,6 +54,24 @@ interface PendingExecution {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * Lighttpd config fragment giving the loopback server a MIME map. Without it the
+ * server labels `pyodide.asm.wasm` as octet-stream and WebAssembly streaming
+ * compilation refuses to boot the interpreter. The trailing "" key is Lighttpd's
+ * default for any extension not listed.
+ */
+export const PYTHON_SERVER_MIME_CONFIG = [
+  'mimetype.assign = (',
+  '  ".html" => "text/html",',
+  '  ".js"   => "text/javascript",',
+  '  ".mjs"  => "text/javascript",',
+  '  ".json" => "application/json",',
+  '  ".wasm" => "application/wasm",',
+  '  ".zip"  => "application/zip",',
+  '  ""      => "application/octet-stream"',
+  ')',
+].join('\n');
+
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 30000;
 /** Installing packages downloads wheels over the network — allow more headroom. */
 export const PACKAGE_INSTALL_TIMEOUT_MS = 120000;
@@ -388,6 +406,13 @@ class PythonRuntimeService {
     const server = new StaticServer({
       fileDir: this.getRuntimeDir(),
       stopInBackground: false,
+      // The bundled Lighttpd ships no mimetype map, so every asset is served as
+      // application/octet-stream. Pyodide boots via WebAssembly.compileStreaming,
+      // which rejects anything that isn't `application/wasm` ("Incorrect response
+      // MIME type") — so the interpreter never starts. Map the handful of types
+      // the page fetches; the "" entry is Lighttpd's catch-all default for the
+      // rest (wheels/stdlib are read as ArrayBuffers, where MIME is irrelevant).
+      extraConfig: PYTHON_SERVER_MIME_CONFIG,
     });
     const origin = await server.start();
     this.server = server;
