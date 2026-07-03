@@ -705,7 +705,7 @@ describe('ChatScreen', () => {
       expect(getByText('My Test Chat')).toBeTruthy();
     });
 
-    it('shows the "Models" selector in the header', () => {
+    it('shows the active model name in the header selector', () => {
       const model = createDownloadedModel({ name: 'Llama-3.2-3B' });
       useAppStore.setState({
         downloadedModels: [model],
@@ -720,9 +720,8 @@ describe('ChatScreen', () => {
       mockRoute.params = { conversationId: conv.id };
 
       const { getByTestId } = renderChatScreen();
-      // The header no longer embeds the model name — it shows a generic "Models"
-      // selector that opens the shared models manager sheet.
-      expect(getByTestId('model-loaded-indicator').props.children).toBe('Models');
+      // The header selector shows the currently-selected model's name.
+      expect(getByTestId('model-loaded-indicator').props.children).toBe('Llama-3.2-3B');
     });
 
     it('navigates back when back button is pressed', () => {

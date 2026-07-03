@@ -80,7 +80,8 @@ export const ChatHeader: React.FC<{
   setShowSettingsPanel: (v: boolean) => void;
   setShowProjectSelector: (v: boolean) => void;
   isRemote?: boolean;
-}> = ({ styles, colors, activeConversation, activeProject, navigation, onOpenModels, setShowSettingsPanel, setShowProjectSelector, isRemote }) => (
+  activeModelName?: string;
+}> = ({ styles, colors, activeConversation, activeProject, navigation, onOpenModels, setShowSettingsPanel, setShowProjectSelector, isRemote, activeModelName }) => (
   <View style={styles.header}>
     <View style={styles.headerRow}>
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -97,7 +98,7 @@ export const ChatHeader: React.FC<{
             )}
             <Icon name="layers" size={12} color={colors.textSecondary} style={styles.remoteIcon} />
             <Text style={styles.headerSubtitle} numberOfLines={1} testID="model-loaded-indicator">
-              Models
+              {activeModelName && activeModelName !== 'Unknown' ? activeModelName : 'Models'}
             </Text>
             <Text style={styles.modelSelectorArrow}>▼</Text>
           </TouchableOpacity>
