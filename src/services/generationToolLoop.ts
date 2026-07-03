@@ -681,20 +681,35 @@ function emitFinalResponse(ctx: ToolLoopContext, state: ToolLoopState, displayRe
 
 /** Force a final text-only generation (no tools) when iteration/call caps are hit. */
 /**
- * Force a final text-only generation when the iteration/call cap is hit. We keep
- * declaring the tools but send tool_choice:'none' rather than an empty tools array:
- * dropping the tools turns off the server-side tool-call parser, so a DeepSeek-family
- * model that still wants to call a tool emits its raw tool-call tokens (e.g.
- * `<｜｜DSML｜｜invoke …>`) as plain content, which streams to the user verbatim.
- * tool_choice:'none' keeps the parser configured and forces a text answer instead.
+ * Force a final text answer when the iteration/call cap is hit. Two layers guard
+ * against a model that wants to keep calling tools leaking its raw tool-call tokens
+ * (e.g. DeepSeek's `<｜｜DSML｜｜invoke …>`) as visible text:
+ *  1. We keep the tools declared and send tool_choice:'none' rather than an empty
+ *     tools array — an empty array turns off the server-side tool-call parser, and a
+ *     compliant endpoint then produces prose instead.
+ *  2. Some endpoints (e.g. opencode zen big-pickle) ignore tool_choice:'none' and
+ *     still emit the markup as content anyway. We're at the cap, so we do NOT execute
+ *     those calls — we strip the markup from the visible text exactly like a normal
+ *     iteration does, so raw tokens never reach the user.
  */
 async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, req: { loopMessages: Message[]; tools: any[] }): Promise<void> {
   state.streamedContent = '';
   state.reasoningContent = '';
   state.firstTokenFired = false;
   const forcedOnStream = buildStreamHandler(ctx, state);
-  const { fullResponse: forcedResponse } = await callLLMWithRetry(req.loopMessages, req.tools, { onStream: forcedOnStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx, toolChoice: 'none' });
-  emitFinalResponse(ctx, state, forcedResponse);
+  const { fullResponse: forcedResponse, toolCalls } = await callLLMWithRetry(req.loopMessages, req.tools, { onStream: forcedOnStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx, toolChoice: 'none' });
+
+  const { effectiveToolCalls, displayResponse } = resolveToolCalls(forcedResponse, toolCalls);
+  if (effectiveToolCalls.length > 0 && state.streamedContent) {
+    // Leaked markup was streamed live — clear it and replace with the cleaned text.
+    ctx.onStreamReset?.();
+    useChatStore.getState().setStreamingMessage('');
+    state.streamedContent = '';
+  }
+  const finalText = displayResponse || (effectiveToolCalls.length > 0
+    ? 'I could not find any results for that.'
+    : '');
+  emitFinalResponse(ctx, state, finalText);
 }
 
 /**
@@ -773,8 +788,8 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
     }
 
     // Hit iteration or total-call cap — force one final text answer. Tools stay
-    // declared with tool_choice:'none' (see forceFinalTextResponse) so the model
-    // produces prose instead of leaking raw tool-call tokens as text.
+    // declared with tool_choice:'none' and any leaked tool-call markup is stripped
+    // from the result (see forceFinalTextResponse) so raw tokens never reach the user.
     if (iteration === MAX_TOOL_ITERATIONS - 1 || totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
       await forceFinalTextResponse(ctx, state, { loopMessages, tools: effectiveSchemas });
       return;

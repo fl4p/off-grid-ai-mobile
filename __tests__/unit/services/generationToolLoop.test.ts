@@ -242,6 +242,29 @@ describe('runToolLoop', () => {
       // Earlier (non-final) iterations must NOT force 'none' — they let the model call tools.
       expect(calls[0][1].toolChoice).toBeUndefined();
     });
+
+    it('strips leaked DSML tool-call markup from the forced final response (endpoint ignored tool_choice)', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      const dsmlLeak =
+        '<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name="web_search">' +
+        '<｜｜DSML｜｜parameter name="query" string="true">portugal crypto PIV</｜｜DSML｜｜parameter>' +
+        '</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>';
+      // Model keeps requesting tools until the cap, then — despite tool_choice:'none' —
+      // leaks the DSML envelope as text on the forced-final turn.
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall()] })
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall()] })
+        .mockResolvedValueOnce({ fullResponse: dsmlLeak, toolCalls: [] });
+
+      const onFinalResponse = jest.fn();
+      const ctx = createContext({ onFinalResponse });
+      await runToolLoop(ctx);
+
+      const finalText = String(onFinalResponse.mock.calls[onFinalResponse.mock.calls.length - 1]?.[0] ?? '');
+      expect(finalText).not.toContain('DSML');
+      expect(finalText).not.toContain('invoke name');
+      expect(finalText).not.toContain('｜');
+    });
   });
 
   describe('LiteRT image forwarding', () => {
