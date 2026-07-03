@@ -2,7 +2,14 @@ export interface ToolDefinition {
   id: string;
   name: string;
   displayName: string;
+  /** Full, model-facing description sent in the tool schema. Can be detailed. */
   description: string;
+  /**
+   * Short one-line description shown in the Tools settings list. Falls back to
+   * `description` when omitted. Use this when the model-facing `description`
+   * carries detailed instructions that would be a wall of text in the UI.
+   */
+  uiDescription?: string;
   icon: string;
   parameters: Record<string, ToolParameter>;
   requiresNetwork?: boolean;
