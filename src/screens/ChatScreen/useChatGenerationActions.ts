@@ -7,6 +7,7 @@ import {
   contextCompactionService,
 } from '../../services';
 import { liteRTService } from '../../services/litert';
+import { getToolExtensions } from '../../services/tools/extensions';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
 import { abortPreload } from '../../services/modelPreloader';
 import { useChatStore, useProjectStore } from '../../stores';
