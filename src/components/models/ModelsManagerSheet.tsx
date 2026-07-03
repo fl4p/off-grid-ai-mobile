@@ -27,6 +27,8 @@ type Props = {
   /** Fired once the sheet has fully closed — used to open a picker safely after. */
   onClosed?: () => void;
   labels: Record<ModelRowType, string>;
+  /** Optional second line under a row's value (e.g. the remote server name). */
+  subLabels?: Partial<Record<ModelRowType, string>>;
   loadingState: LoadingState;
   isEjecting: boolean;
   hasActiveModel: boolean;
@@ -40,7 +42,7 @@ type Props = {
  * type's picker.
  */
 export const ModelsManagerSheet: React.FC<Props> = ({
-  visible, onClose, onClosed, labels, loadingState, isEjecting, hasActiveModel, onOpenRow, onEject,
+  visible, onClose, onClosed, labels, subLabels, loadingState, isEjecting, hasActiveModel, onOpenRow, onEject,
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -51,6 +53,7 @@ export const ModelsManagerSheet: React.FC<Props> = ({
         {ROWS.map((row) => {
           const isLoading = loadingState.isLoading && loadingState.type === row.type;
           const value = labels[row.type];
+          const subLabel = subLabels?.[row.type];
           const isSet = value && value !== '—';
           return (
             <AnimatedPressable
@@ -62,9 +65,16 @@ export const ModelsManagerSheet: React.FC<Props> = ({
             >
               <Icon name={row.icon} size={16} color={colors.textMuted} />
               <Text style={styles.label}>{row.label}</Text>
-              <Text style={[styles.value, isSet && styles.valueSet]} numberOfLines={1}>
-                {isLoading ? 'Loading…' : value}
-              </Text>
+              <View style={styles.valueColumn}>
+                <Text style={[styles.value, isSet && styles.valueSet]} numberOfLines={1}>
+                  {isLoading ? 'Loading…' : value}
+                </Text>
+                {!isLoading && isSet && subLabel ? (
+                  <Text style={styles.subValue} numberOfLines={1} testID={`models-row-${row.type}-sub`}>
+                    {subLabel}
+                  </Text>
+                ) : null}
+              </View>
               {isLoading
                 ? <ActivityIndicator size="small" color={colors.primary} />
                 : <Icon name="chevron-right" size={16} color={colors.textMuted} />}
@@ -104,8 +114,10 @@ const createStyles = (colors: ThemeColors) => ({
     backgroundColor: colors.surface,
   },
   label: { ...TYPOGRAPHY.label, textTransform: 'uppercase' as const, color: colors.textMuted, width: 64 },
-  value: { ...TYPOGRAPHY.body, color: colors.textMuted, flex: 1, textAlign: 'right' as const },
+  valueColumn: { flex: 1, alignItems: 'flex-end' as const },
+  value: { ...TYPOGRAPHY.body, color: colors.textMuted, textAlign: 'right' as const },
   valueSet: { color: colors.text },
+  subValue: { ...TYPOGRAPHY.meta, color: colors.textMuted, textAlign: 'right' as const, marginTop: 2 },
   ejectButton: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,

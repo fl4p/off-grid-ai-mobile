@@ -130,10 +130,11 @@ export const EmptyChat: React.FC<{
   colors: ColorsType;
   activeModel: any;
   activeModelName?: string;
+  serverName?: string;
   activeProject: any;
   setShowProjectSelector: (v: boolean) => void;
   isRemote?: boolean;
-}> = ({ styles, colors, activeModel, activeModelName, activeProject, setShowProjectSelector, isRemote }) => (
+}> = ({ styles, colors, activeModel, activeModelName, serverName, activeProject, setShowProjectSelector, isRemote }) => (
   <View style={styles.emptyChat}>
     <AnimatedEntry index={0} staggerMs={60}>
       <View style={styles.emptyChatIconContainer}>
@@ -145,7 +146,8 @@ export const EmptyChat: React.FC<{
     </AnimatedEntry>
     <AnimatedEntry index={2} staggerMs={60}>
       <Text style={styles.emptyChatText}>
-        Type a message below to begin chatting with {activeModelName || activeModel?.name || 'Unknown'}.
+        Type a message below to begin chatting with {activeModelName || activeModel?.name || 'Unknown'}
+        {serverName ? ` on ${serverName}` : ''}.
       </Text>
     </AnimatedEntry>
     <AnimatedEntry index={3} staggerMs={60}>
