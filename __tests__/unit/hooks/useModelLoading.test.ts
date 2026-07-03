@@ -28,11 +28,13 @@ jest.mock('../../../src/components', () => ({
 const mockSetActiveModelId = jest.fn();
 const mockSetLastTextModelId = jest.fn();
 const mockSetActiveImageModelId = jest.fn();
+const mockRecordTextModelUsed = jest.fn();
 jest.mock('../../../src/stores', () => ({
   useAppStore: {
     getState: () => ({
       setActiveModelId: mockSetActiveModelId,
       setLastTextModelId: mockSetLastTextModelId,
+      recordTextModelUsed: mockRecordTextModelUsed,
       setActiveImageModelId: mockSetActiveImageModelId,
     }),
   },
@@ -80,6 +82,7 @@ describe('useModelLoading', () => {
 
       expect(mockSetActiveModelId).toHaveBeenCalledWith('text-1');
       expect(mockSetLastTextModelId).toHaveBeenCalledWith('text-1');
+      expect(mockRecordTextModelUsed).toHaveBeenCalledWith('local:text-1');
       expect(setters.setPickerType).toHaveBeenCalledWith(null);
       // Deferred to first send in chat — no eager load here.
       expect(mockLoadTextModel).not.toHaveBeenCalled();

@@ -11,17 +11,33 @@ export interface TextTabProps {
   downloadedModels: DownloadedModel[];
   remoteModels: Array<{ serverId: string; serverName: string; models: RemoteModel[] }>;
   currentModelPath: string | null;
+  currentRemoteServerId?: string | null;
   currentRemoteModelId: string | null;
+  recentTextModelKeys?: string[];
+  favoriteTextModelKeys?: string[];
   isAnyLoading: boolean;
   onSelectModel: (model: DownloadedModel) => void;
   onSelectRemoteModel: (model: RemoteModel, serverId: string) => void;
+  onToggleFavoriteTextModel?: (modelKey: string) => void;
   onUnloadModel: () => void;
   onAddServer: () => void;
   onBrowseModels?: () => void;
 }
 
+type TextModelEntry =
+  | { key: string; type: 'local'; model: DownloadedModel }
+  | { key: string; type: 'remote'; model: RemoteModel; serverId: string; serverName: string };
+
+const localTextModelKey = (modelId: string) => `local:${modelId}`;
+const remoteTextModelKey = (serverId: string, modelId: string) => `remote:${serverId}:${modelId}`;
+
+function orderByKeys(entries: TextModelEntry[], keys: string[]): TextModelEntry[] {
+  const byKey = new Map(entries.map(entry => [entry.key, entry]));
+  return keys.map(key => byKey.get(key)).filter((entry): entry is TextModelEntry => !!entry);
+}
+
 export const TextTab: React.FC<TextTabProps> = ({
-  downloadedModels, remoteModels, currentModelPath, currentRemoteModelId, isAnyLoading, onSelectModel, onUnloadModel, onSelectRemoteModel, onAddServer, onBrowseModels,
+  downloadedModels, remoteModels, currentModelPath, currentRemoteServerId = null, currentRemoteModelId, recentTextModelKeys = [], favoriteTextModelKeys = [], isAnyLoading, onSelectModel, onUnloadModel, onSelectRemoteModel, onToggleFavoriteTextModel, onAddServer, onBrowseModels,
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createAllStyles);
@@ -32,11 +48,135 @@ export const TextTab: React.FC<TextTabProps> = ({
   const activeRemoteModelInfo = useMemo(() => {
     if (!currentRemoteModelId) return null;
     for (const group of remoteModels) {
+      if (currentRemoteServerId && group.serverId !== currentRemoteServerId) continue;
       const model = group.models.find(m => m.id === currentRemoteModelId);
       if (model) return { model, serverName: group.serverName };
     }
     return null;
-  }, [remoteModels, currentRemoteModelId]);
+  }, [remoteModels, currentRemoteServerId, currentRemoteModelId]);
+
+  const allTextEntries = useMemo<TextModelEntry[]>(() => [
+    ...downloadedModels.map(model => ({
+      key: localTextModelKey(model.id),
+      type: 'local' as const,
+      model,
+    })),
+    ...remoteModels.flatMap(group => group.models.map(model => ({
+      key: remoteTextModelKey(group.serverId, model.id),
+      type: 'remote' as const,
+      model,
+      serverId: group.serverId,
+      serverName: group.serverName,
+    }))),
+  ], [downloadedModels, remoteModels]);
+
+  const favoriteEntries = useMemo(
+    () => orderByKeys(allTextEntries, favoriteTextModelKeys),
+    [allTextEntries, favoriteTextModelKeys],
+  );
+  const recentEntries = useMemo(
+    () => orderByKeys(allTextEntries, recentTextModelKeys).filter(entry => !favoriteTextModelKeys.includes(entry.key)),
+    [allTextEntries, recentTextModelKeys, favoriteTextModelKeys],
+  );
+
+  const renderTextModelRow = (
+    entry: TextModelEntry,
+    options: { keyPrefix?: string; showServerName?: boolean; selectedStyle?: object; selectedNameStyle?: object; checkmarkStyle?: object } = {},
+  ) => {
+    const isLocal = entry.type === 'local';
+    const isCurrent = isLocal
+      ? currentModelPath === entry.model.filePath
+      : currentRemoteServerId === entry.serverId && currentRemoteModelId === entry.model.id;
+    const isFavorite = favoriteTextModelKeys.includes(entry.key);
+    return (
+      <TouchableOpacity
+        key={`${options.keyPrefix ?? 'model'}:${entry.key}`}
+        accessibilityRole="button"
+        accessibilityLabel={`Select ${entry.model.name}`}
+        style={[styles.modelItem, isCurrent && (options.selectedStyle ?? styles.modelItemSelected)]}
+        onPress={() => {
+          if (isLocal) onSelectModel(entry.model);
+          else onSelectRemoteModel(entry.model, entry.serverId);
+        }}
+        disabled={isAnyLoading || isCurrent}
+      >
+        <View style={styles.modelInfo}>
+          <Text style={[styles.modelName, isCurrent && (options.selectedNameStyle ?? styles.modelNameSelected)]} numberOfLines={1}>
+            {entry.model.name}
+          </Text>
+          <View style={styles.modelMeta}>
+            {entry.type === 'local' ? (
+              <>
+                <Text style={styles.modelSize}>{hardwareService.formatModelSize(entry.model)}</Text>
+                {!!entry.model.quantization && (
+                  <>
+                    <Text style={styles.metaSeparator}>•</Text>
+                    <Text style={styles.modelQuant}>{entry.model.quantization}</Text>
+                  </>
+                )}
+                {entry.model.engine === 'llama' && entry.model.isVisionModel && (
+                  <>
+                    <Text style={styles.metaSeparator}>•</Text>
+                    <View style={styles.visionBadge}>
+                      <Icon name="eye" size={10} color={colors.info} />
+                      <Text style={styles.visionBadgeText}>Vision</Text>
+                    </View>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Text style={styles.remoteBadge}>Remote</Text>
+                {options.showServerName && (
+                  <>
+                    <Text style={styles.metaSeparator}>•</Text>
+                    <Text style={styles.modelQuant}>{entry.serverName}</Text>
+                  </>
+                )}
+                {entry.model.capabilities.supportsVision && (
+                  <>
+                    <Text style={styles.metaSeparator}>•</Text>
+                    <View style={styles.visionBadge}>
+                      <Icon name="eye" size={10} color={colors.info} />
+                      <Text style={styles.visionBadgeText}>Vision</Text>
+                    </View>
+                  </>
+                )}
+                <Text style={styles.metaSeparator}>•</Text>
+                <RemoteToolsToggle model={entry.model} />
+                {entry.model.capabilities.supportsThinking && (
+                  <>
+                    <Text style={styles.metaSeparator}>•</Text>
+                    <View style={styles.thinkingBadge}>
+                      <Icon name="zap" size={10} color="#8B5CF6" />
+                      <Text style={styles.thinkingBadgeText}>Thinking</Text>
+                    </View>
+                  </>
+                )}
+              </>
+            )}
+          </View>
+        </View>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`${isFavorite ? 'Remove favorite' : 'Add favorite'} ${entry.model.name}`}
+          style={localStyles.favoriteButton}
+          onPress={(event) => {
+            event?.stopPropagation?.();
+            onToggleFavoriteTextModel?.(entry.key);
+          }}
+          disabled={isAnyLoading}
+        >
+          <Icon name="star" size={18} color={isFavorite ? colors.warning : colors.textMuted} />
+        </TouchableOpacity>
+        {isCurrent && (
+          <View style={[styles.checkmark, options.checkmarkStyle]}>
+            <Icon name="check" size={16} color={colors.background} />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <>
@@ -67,6 +207,30 @@ export const TextTab: React.FC<TextTabProps> = ({
 
       <Text style={styles.sectionTitle}>{hasLoaded ? 'Switch Model' : 'Available Models'}</Text>
 
+      {favoriteEntries.length > 0 && (
+        <>
+          <View style={styles.sectionHeaderRow}>
+            <Icon name="star" size={14} color={colors.warning} />
+            <Text style={styles.sectionSubTitle}>Favorites</Text>
+          </View>
+          {favoriteEntries.map(entry => renderTextModelRow(entry, entry.type === 'remote'
+            ? { keyPrefix: 'favorite', showServerName: true, selectedStyle: styles.modelItemSelectedRemote, selectedNameStyle: styles.modelNameSelectedRemote, checkmarkStyle: styles.checkmarkRemote }
+            : { keyPrefix: 'favorite' }))}
+        </>
+      )}
+
+      {recentEntries.length > 0 && (
+        <>
+          <View style={styles.sectionHeaderRow}>
+            <Icon name="clock" size={14} color={colors.textMuted} />
+            <Text style={styles.sectionSubTitle}>Recent</Text>
+          </View>
+          {recentEntries.map(entry => renderTextModelRow(entry, entry.type === 'remote'
+            ? { keyPrefix: 'recent', showServerName: true, selectedStyle: styles.modelItemSelectedRemote, selectedNameStyle: styles.modelNameSelectedRemote, checkmarkStyle: styles.checkmarkRemote }
+            : { keyPrefix: 'recent' }))}
+        </>
+      )}
+
       {/* Empty state when no models at all */}
       {downloadedModels.length === 0 && remoteModels.length === 0 && (
         <View style={styles.emptyState}>
@@ -95,46 +259,11 @@ export const TextTab: React.FC<TextTabProps> = ({
             <Icon name="hard-drive" size={14} color={colors.textMuted} />
             <Text style={styles.sectionSubTitle}>Local Models</Text>
           </View>
-          {downloadedModels.map((model) => {
-            const isCurrent = currentModelPath === model.filePath;
-            return (
-              <TouchableOpacity
-                key={model.id}
-                style={[styles.modelItem, isCurrent && styles.modelItemSelected]}
-                onPress={() => onSelectModel(model)}
-                disabled={isAnyLoading || isCurrent}
-              >
-                <View style={styles.modelInfo}>
-                  <Text style={[styles.modelName, isCurrent && styles.modelNameSelected]} numberOfLines={1}>
-                    {model.name}
-                  </Text>
-                  <View style={styles.modelMeta}>
-                    <Text style={styles.modelSize}>{hardwareService.formatModelSize(model)}</Text>
-                    {!!model.quantization && (
-                      <>
-                        <Text style={styles.metaSeparator}>•</Text>
-                        <Text style={styles.modelQuant}>{model.quantization}</Text>
-                      </>
-                    )}
-                    {model.engine === 'llama' && model.isVisionModel && (
-                      <>
-                        <Text style={styles.metaSeparator}>•</Text>
-                        <View style={styles.visionBadge}>
-                          <Icon name="eye" size={10} color={colors.info} />
-                          <Text style={styles.visionBadgeText}>Vision</Text>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                </View>
-                {isCurrent && (
-                  <View style={styles.checkmark}>
-                    <Icon name="check" size={16} color={colors.background} />
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
+          {downloadedModels.map((model) => renderTextModelRow({
+            key: localTextModelKey(model.id),
+            type: 'local',
+            model,
+          }))}
         </>
       )}
 
@@ -145,51 +274,18 @@ export const TextTab: React.FC<TextTabProps> = ({
             <Icon name="wifi" size={14} color={colors.textMuted} />
             <Text style={styles.sectionSubTitle}>{serverName}</Text>
           </View>
-          {models.map((model) => {
-            const isCurrent = currentRemoteModelId === model.id;
-            return (
-              <TouchableOpacity
-                key={model.id}
-                style={[styles.modelItem, isCurrent && styles.modelItemSelectedRemote]}
-                onPress={() => onSelectRemoteModel(model, serverId)}
-                disabled={isAnyLoading || isCurrent}
-              >
-                <View style={styles.modelInfo}>
-                  <Text style={[styles.modelName, isCurrent && styles.modelNameSelectedRemote]} numberOfLines={1}>
-                    {model.name}
-                  </Text>
-                  <View style={styles.modelMeta}>
-                    <Text style={styles.remoteBadge}>Remote</Text>
-                    {model.capabilities.supportsVision && (
-                      <>
-                        <Text style={styles.metaSeparator}>•</Text>
-                        <View style={styles.visionBadge}>
-                          <Icon name="eye" size={10} color={colors.info} />
-                          <Text style={styles.visionBadgeText}>Vision</Text>
-                        </View>
-                      </>
-                    )}
-                    <Text style={styles.metaSeparator}>•</Text>
-                    <RemoteToolsToggle model={model} />
-                    {model.capabilities.supportsThinking && (
-                      <>
-                        <Text style={styles.metaSeparator}>•</Text>
-                        <View style={styles.thinkingBadge}>
-                          <Icon name="zap" size={10} color="#8B5CF6" />
-                          <Text style={styles.thinkingBadgeText}>Thinking</Text>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                </View>
-                {isCurrent && (
-                  <View style={styles.checkmarkRemote}>
-                    <Icon name="check" size={16} color={colors.background} />
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
+          {models.map((model) => renderTextModelRow({
+            key: remoteTextModelKey(serverId, model.id),
+            type: 'remote',
+            model,
+            serverId,
+            serverName,
+          }, {
+            keyPrefix: 'remote',
+            selectedStyle: styles.modelItemSelectedRemote,
+            selectedNameStyle: styles.modelNameSelectedRemote,
+            checkmarkStyle: styles.checkmarkRemote,
+          }))}
         </View>
       ))}
     </>
@@ -216,5 +312,12 @@ const localStyles = StyleSheet.create({
   actionButtonText: {
     fontSize: 13,
     fontWeight: '400',
+  },
+  favoriteButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
 });

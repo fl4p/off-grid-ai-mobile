@@ -237,6 +237,7 @@ export async function proceedWithModelLoadFn(
   await waitForRenderFrame();
   try {
     await activeModelService.loadTextModel(model.id);
+    useAppStore.getState().recordTextModelUsed(`local:${model.id}`);
     const multimodalSupport = llmService.getMultimodalSupport();
     deps.setSupportsVision(model.engine === 'litert' ? !!model.liteRTVision : (multimodalSupport?.vision || false));
     if (deps.modelLoadStartTimeRef.current && deps.settings.showGenerationDetails && deps.activeConversationId) {

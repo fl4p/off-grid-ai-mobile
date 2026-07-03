@@ -90,6 +90,10 @@ describe('ModelSelectorModal', () => {
       ],
       downloadedImageModels: [],
       activeImageModelId: null,
+      recentTextModelKeys: [],
+      favoriteTextModelKeys: [],
+      recordTextModelUsed: jest.fn(),
+      toggleFavoriteTextModel: jest.fn(),
     });
     mockUseRemoteServerStore.mockReturnValue({
       servers: [],
@@ -97,6 +101,7 @@ describe('ModelSelectorModal', () => {
       activeRemoteTextModelId: null,
       activeRemoteImageModelId: null,
       discoveredModels: {},
+      serverHealth: {},
       setActiveServerId: jest.fn(),
       setActiveRemoteImageModelId: jest.fn(),
     });
@@ -213,6 +218,10 @@ describe('ModelSelectorModal', () => {
         ],
         downloadedImageModels: [],
         activeImageModelId: null,
+        recentTextModelKeys: [],
+        favoriteTextModelKeys: [],
+        recordTextModelUsed: jest.fn(),
+        toggleFavoriteTextModel: jest.fn(),
       });
 
       const { getByText } = render(
@@ -228,6 +237,10 @@ describe('ModelSelectorModal', () => {
         downloadedModels: [],
         downloadedImageModels: [],
         activeImageModelId: null,
+        recentTextModelKeys: [],
+        favoriteTextModelKeys: [],
+        recordTextModelUsed: jest.fn(),
+        toggleFavoriteTextModel: jest.fn(),
       });
 
       const { getByText } = render(
@@ -269,6 +282,10 @@ describe('ModelSelectorModal', () => {
         ],
         downloadedImageModels: [],
         activeImageModelId: null,
+        recentTextModelKeys: [],
+        favoriteTextModelKeys: [],
+        recordTextModelUsed: jest.fn(),
+        toggleFavoriteTextModel: jest.fn(),
       });
 
       const { getByText } = render(
@@ -276,6 +293,73 @@ describe('ModelSelectorModal', () => {
       );
 
       expect(getByText('Vision')).toBeTruthy();
+    });
+
+    it('shows favorite and recent text model sections', () => {
+      mockUseAppStore.mockReturnValue({
+        downloadedModels: [
+          {
+            id: 'model1',
+            name: 'Favorite Model',
+            filePath: '/path/favorite.gguf',
+            fileSize: 4000000000,
+            quantization: 'Q4_K_M',
+          },
+          {
+            id: 'model2',
+            name: 'Recent Model',
+            filePath: '/path/recent.gguf',
+            fileSize: 2000000000,
+            quantization: 'Q5_K_S',
+          },
+        ],
+        downloadedImageModels: [],
+        activeImageModelId: null,
+        recentTextModelKeys: ['local:model2', 'local:model1'],
+        favoriteTextModelKeys: ['local:model1'],
+        recordTextModelUsed: jest.fn(),
+        toggleFavoriteTextModel: jest.fn(),
+      });
+
+      const { getByText, getAllByText } = render(
+        <ModelSelectorModal {...defaultProps} />
+      );
+
+      expect(getByText('Favorites')).toBeTruthy();
+      expect(getByText('Recent')).toBeTruthy();
+      expect(getAllByText('Favorite Model').length).toBeGreaterThanOrEqual(2);
+      expect(getAllByText('Recent Model').length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('toggles favorite without selecting the model', () => {
+      const toggleFavoriteTextModel = jest.fn();
+      const onSelectModel = jest.fn();
+      mockUseAppStore.mockReturnValue({
+        downloadedModels: [
+          {
+            id: 'model1',
+            name: 'Test Model',
+            filePath: '/path/model1.gguf',
+            fileSize: 4000000000,
+            quantization: 'Q4_K_M',
+          },
+        ],
+        downloadedImageModels: [],
+        activeImageModelId: null,
+        recentTextModelKeys: [],
+        favoriteTextModelKeys: [],
+        recordTextModelUsed: jest.fn(),
+        toggleFavoriteTextModel,
+      });
+
+      const { getByLabelText } = render(
+        <ModelSelectorModal {...defaultProps} onSelectModel={onSelectModel} />
+      );
+
+      fireEvent.press(getByLabelText('Add favorite Test Model'));
+
+      expect(toggleFavoriteTextModel).toHaveBeenCalledWith('local:model1');
+      expect(onSelectModel).not.toHaveBeenCalled();
     });
   });
 
@@ -1011,6 +1095,16 @@ describe('ModelSelectorModal', () => {
 
     it('calls setActiveRemoteTextModel when remote model pressed', async () => {
       const { remoteServerManager } = require('../../../src/services');
+      const recordTextModelUsed = jest.fn();
+      mockUseAppStore.mockReturnValue({
+        downloadedModels: [],
+        downloadedImageModels: [],
+        activeImageModelId: null,
+        recentTextModelKeys: [],
+        favoriteTextModelKeys: [],
+        recordTextModelUsed,
+        toggleFavoriteTextModel: jest.fn(),
+      });
 
       const { getByText } = render(
         <ModelSelectorModal {...defaultProps} />
@@ -1023,6 +1117,59 @@ describe('ModelSelectorModal', () => {
       expect(remoteServerManager.setActiveRemoteTextModel).toHaveBeenCalledWith(
         'srv1',
         'llama3'
+      );
+      expect(recordTextModelUsed).toHaveBeenCalledWith('remote:srv1:llama3');
+    });
+
+    it('does not treat duplicate remote model IDs on other servers as current', async () => {
+      const { remoteServerManager } = require('../../../src/services');
+      mockUseRemoteServerStore.mockReturnValue({
+        servers: [
+          { id: 'srv1', name: 'Server One', endpoint: 'http://one.local' },
+          { id: 'srv2', name: 'Server Two', endpoint: 'http://two.local' },
+        ],
+        activeServerId: 'srv2',
+        activeRemoteTextModelId: 'llama3',
+        activeRemoteImageModelId: null,
+        discoveredModels: {
+          srv1: [
+            {
+              id: 'llama3',
+              name: 'Llama 3 One',
+              serverId: 'srv1',
+              capabilities: { supportsVision: false, supportsToolCalling: false, supportsThinking: false },
+              lastUpdated: '2026-01-01T00:00:00Z',
+            },
+          ],
+          srv2: [
+            {
+              id: 'llama3',
+              name: 'Llama 3 Two',
+              serverId: 'srv2',
+              capabilities: { supportsVision: false, supportsToolCalling: false, supportsThinking: false },
+              lastUpdated: '2026-01-01T00:00:00Z',
+            },
+          ],
+        },
+        serverHealth: {
+          srv1: { isHealthy: true, lastCheck: '2026-01-01T00:00:00Z' },
+          srv2: { isHealthy: true, lastCheck: '2026-01-01T00:00:00Z' },
+        },
+        setActiveServerId: jest.fn(),
+        setActiveRemoteImageModelId: jest.fn(),
+      });
+
+      const { getByLabelText } = render(
+        <ModelSelectorModal {...defaultProps} />
+      );
+
+      await act(async () => {
+        fireEvent.press(getByLabelText('Select Llama 3 One'));
+      });
+
+      expect(remoteServerManager.setActiveRemoteTextModel).toHaveBeenCalledWith(
+        'srv1',
+        'llama3',
       );
     });
 

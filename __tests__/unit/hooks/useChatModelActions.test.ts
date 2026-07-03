@@ -10,6 +10,8 @@
 
 import { initiateModelLoad, proceedWithModelLoadFn, handleModelSelectFn, handleUnloadModelFn } from '../../../src/screens/ChatScreen/useChatModelActions';
 import { createDownloadedModel } from '../../utils/factories';
+import { useAppStore } from '../../../src/stores/appStore';
+import { resetStores } from '../../utils/testHelpers';
 
 // ─────────────────────────────────────────────
 // Mocks
@@ -69,6 +71,7 @@ jest.mock('../../../src/components', () => ({
 };
 
 beforeEach(() => {
+  resetStores();
   mockLoadTextModel.mockResolvedValue(undefined);
   mockUnloadTextModel.mockResolvedValue(undefined);
   mockCheckMemoryForModel.mockResolvedValue({ canLoad: true, severity: 'safe', message: '' });
@@ -166,6 +169,7 @@ describe('proceedWithModelLoadFn', () => {
     deps.modelLoadStartTimeRef.current = Date.now() - 1000;
     const model = createDownloadedModel({ id: 'model-1', name: 'Fast Model' });
     await proceedWithModelLoadFn(deps, model);
+    expect(useAppStore.getState().recentTextModelKeys).toEqual(['local:model-1']);
     expect(deps.addMessage).toHaveBeenCalledWith(
       'conv-1',
       expect.objectContaining({ isSystemInfo: true }),
@@ -187,6 +191,7 @@ describe('proceedWithModelLoadFn', () => {
     const deps = makeDeps();
     const model = createDownloadedModel();
     await proceedWithModelLoadFn(deps, model);
+    expect(useAppStore.getState().recentTextModelKeys).toEqual([]);
     expect(deps.setAlertState).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Error' }),
     );

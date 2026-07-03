@@ -169,6 +169,48 @@ describe('appStore', () => {
       expect(getAppState().lastTextModelId).toBe('my-text-model');
     });
 
+    it('recordTextModelUsed keeps recent text models newest first and bounded', () => {
+      const { recordTextModelUsed } = useAppStore.getState();
+
+      ['local:1', 'local:2', 'remote:s1:m1', 'local:3', 'local:4', 'local:5'].forEach(recordTextModelUsed);
+      recordTextModelUsed('local:3');
+
+      expect(getAppState().recentTextModelKeys).toEqual([
+        'local:3',
+        'local:5',
+        'local:4',
+        'remote:s1:m1',
+        'local:2',
+      ]);
+    });
+
+    it('toggleFavoriteTextModel adds and removes favorite text models', () => {
+      const { toggleFavoriteTextModel } = useAppStore.getState();
+
+      toggleFavoriteTextModel('local:fav');
+      expect(getAppState().favoriteTextModelKeys).toEqual(['local:fav']);
+
+      toggleFavoriteTextModel('remote:server:model');
+      expect(getAppState().favoriteTextModelKeys).toEqual(['remote:server:model', 'local:fav']);
+
+      toggleFavoriteTextModel('local:fav');
+      expect(getAppState().favoriteTextModelKeys).toEqual(['remote:server:model']);
+    });
+
+    it('removeDownloadedModel prunes local recents and favorites for that model', () => {
+      const { addDownloadedModel, recordTextModelUsed, toggleFavoriteTextModel, removeDownloadedModel } = useAppStore.getState();
+      addDownloadedModel(createDownloadedModel({ id: 'remove-me' }));
+      recordTextModelUsed('local:remove-me');
+      recordTextModelUsed('remote:server:model');
+      toggleFavoriteTextModel('local:remove-me');
+      toggleFavoriteTextModel('remote:server:model');
+
+      removeDownloadedModel('remove-me');
+
+      expect(getAppState().recentTextModelKeys).toEqual(['remote:server:model']);
+      expect(getAppState().favoriteTextModelKeys).toEqual(['remote:server:model']);
+    });
+
     it('removeDownloadedModel preserves activeModelId if different model removed', () => {
       const { addDownloadedModel, setActiveModelId, removeDownloadedModel } = useAppStore.getState();
       const model1 = createDownloadedModel({ id: 'model-1' });
@@ -1000,6 +1042,30 @@ describe('appStore', () => {
       expect(migrated.imageModelDownloading).toBeUndefined();
       expect(migrated.imageModelDownloadIds).toBeUndefined();
       expect(migrated.imageModelDownloadId).toBeUndefined();
+    });
+
+    it('partialize persists recent and favorite text model keys', () => {
+      const state = useAppStore.getState();
+      state.recordTextModelUsed('local:recent');
+      state.toggleFavoriteTextModel('remote:server:fav');
+
+      const partialized = (useAppStore.persist as any).getOptions().partialize(useAppStore.getState());
+
+      expect(partialized.recentTextModelKeys).toEqual(['local:recent']);
+      expect(partialized.favoriteTextModelKeys).toEqual(['remote:server:fav']);
+    });
+
+    it('normalizes missing or malformed persisted text model preference keys during migration', () => {
+      const currentState = useAppStore.getState();
+      const migrated = (useAppStore.persist as any).getOptions().merge({
+        state: {
+          recentTextModelKeys: 'local:not-array',
+          favoriteTextModelKeys: { bad: true },
+        },
+      }, currentState);
+
+      expect(migrated.recentTextModelKeys).toEqual([]);
+      expect(migrated.favoriteTextModelKeys).toEqual([]);
     });
 
     it('handles model add and remove in sequence', () => {

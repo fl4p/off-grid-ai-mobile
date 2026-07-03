@@ -100,6 +100,7 @@ export const ChatsListScreen: React.FC = () => {
     setIsModelLoading(true);
     try {
       await activeModelService.loadTextModel(model.id);
+      useAppStore.getState().recordTextModelUsed(`local:${model.id}`);
       setShowModelSelector(false);
       navigation.navigate('Chat', {});
     } catch (error) {

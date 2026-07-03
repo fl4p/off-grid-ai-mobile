@@ -55,11 +55,20 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createAllStyles);
-  const { downloadedModels, downloadedImageModels, activeImageModelId } = useAppStore();
+  const {
+    downloadedModels,
+    downloadedImageModels,
+    activeImageModelId,
+    recentTextModelKeys,
+    favoriteTextModelKeys,
+    recordTextModelUsed,
+    toggleFavoriteTextModel,
+  } = useAppStore();
   const {
     servers,
     discoveredModels,
     serverHealth,
+    activeServerId,
     activeRemoteTextModelId,
     activeRemoteImageModelId,
     setActiveRemoteImageModelId,
@@ -144,6 +153,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         await activeModelService.unloadTextModel();
       }
       await remoteServerManager.setActiveRemoteTextModel(serverId, model.id);
+      recordTextModelUsed?.(`remote:${serverId}:${model.id}`);
     } catch (error) {
       logger.error('[ModelSelectorModal] Failed to set remote text model:', error);
       setAlertState(showAlert('Failed to Select Model', (error as Error).message));
@@ -224,10 +234,14 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
               downloadedModels={filteredDownloadedModels}
               remoteModels={remoteTextModels}
               currentModelPath={currentModelPath}
+              currentRemoteServerId={activeServerId}
               currentRemoteModelId={activeRemoteTextModelId}
+              recentTextModelKeys={recentTextModelKeys}
+              favoriteTextModelKeys={favoriteTextModelKeys}
               isAnyLoading={isAnyLoading}
               onSelectModel={handleSelectLocalModel}
               onSelectRemoteModel={handleSelectRemoteTextModel}
+              onToggleFavoriteTextModel={toggleFavoriteTextModel}
               onUnloadModel={handleUnloadModel}
               onAddServer={() => { onClose(); onAddServer?.(); }}
               onBrowseModels={onBrowseModels ? () => onBrowseModels('text') : undefined}

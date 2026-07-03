@@ -37,6 +37,7 @@ export const useModelLoading = ({
       // Remember the explicit choice so routing can reload it on demand even
       // after the residency manager evicts it.
       store.setLastTextModelId(model.id);
+      store.recordTextModelUsed(`local:${model.id}`);
     },
     [setPickerType],
   );

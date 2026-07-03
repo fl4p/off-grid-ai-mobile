@@ -40,6 +40,8 @@ function isExcludedTextModel(model: DownloadedModel): boolean {
   return isSuspiciousRecoveredTextModel(model) || isWhisperTextModel(model);
 }
 
+const MAX_RECENT_TEXT_MODELS = 5;
+
 type OnboardingChecklist = {
   downloadedModel: boolean; loadedModel: boolean; sentMessage: boolean;
   triedImageGen: boolean; exploredSettings: boolean; createdProject: boolean;
@@ -89,6 +91,10 @@ interface AppState {
    *  eviction so routing can reload it on demand. */
   lastTextModelId: string | null;
   setLastTextModelId: (modelId: string | null) => void;
+  recentTextModelKeys: string[];
+  favoriteTextModelKeys: string[];
+  recordTextModelUsed: (modelKey: string) => void;
+  toggleFavoriteTextModel: (modelKey: string) => void;
   isLoadingModel: boolean;
   setIsLoadingModel: (loading: boolean) => void;
   modelMaxContext: number | null;
@@ -203,6 +209,8 @@ function migratePersistedState(persistedState: any, currentState: AppState): App
   if (merged.settings?.modelLoadingStrategy !== undefined) {
     delete merged.settings.modelLoadingStrategy;
   }
+  merged.recentTextModelKeys = Array.isArray(merged.recentTextModelKeys) ? merged.recentTextModelKeys : [];
+  merged.favoriteTextModelKeys = Array.isArray(merged.favoriteTextModelKeys) ? merged.favoriteTextModelKeys : [];
   if (persistedState?.settings && !persistedState.settings.cacheType) {
     merged.settings = { ...merged.settings, cacheType: persistedState.settings.flashAttn ? 'q8_0' : 'f16', flashAttn: true };
   }
@@ -253,11 +261,28 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           downloadedModels: state.downloadedModels.filter((m) => m.id !== modelId),
           activeModelId: state.activeModelId === modelId ? null : state.activeModelId,
+          recentTextModelKeys: state.recentTextModelKeys.filter(key => key !== `local:${modelId}`),
+          favoriteTextModelKeys: state.favoriteTextModelKeys.filter(key => key !== `local:${modelId}`),
         })),
       activeModelId: null,
       setActiveModelId: (modelId) => set({ activeModelId: modelId }),
       lastTextModelId: null,
       setLastTextModelId: (modelId) => set({ lastTextModelId: modelId }),
+      recentTextModelKeys: [],
+      favoriteTextModelKeys: [],
+      recordTextModelUsed: (modelKey) =>
+        set((state) => ({
+          recentTextModelKeys: [
+            modelKey,
+            ...state.recentTextModelKeys.filter(key => key !== modelKey),
+          ].slice(0, MAX_RECENT_TEXT_MODELS),
+        })),
+      toggleFavoriteTextModel: (modelKey) =>
+        set((state) => ({
+          favoriteTextModelKeys: state.favoriteTextModelKeys.includes(modelKey)
+            ? state.favoriteTextModelKeys.filter(key => key !== modelKey)
+            : [modelKey, ...state.favoriteTextModelKeys],
+        })),
       isLoadingModel: false,
       setIsLoadingModel: (loading) => set({ isLoadingModel: loading }),
       modelMaxContext: null,
@@ -354,6 +379,8 @@ export const useAppStore = create<AppState>()(
         checklistDismissed: state.checklistDismissed,
         activeModelId: state.activeModelId,
         lastTextModelId: state.lastTextModelId,
+        recentTextModelKeys: state.recentTextModelKeys,
+        favoriteTextModelKeys: state.favoriteTextModelKeys,
         settings: state.settings,
         activeImageModelId: state.activeImageModelId,
         generatedImages: state.generatedImages,

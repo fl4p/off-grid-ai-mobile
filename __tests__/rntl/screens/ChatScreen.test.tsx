@@ -431,14 +431,21 @@ jest.mock('../../../src/components/AnimatedPressable', () => ({
 // entry animation, which doesn't flush synchronously in tests, so we render a
 // lightweight stand-in that exposes the same `models-row-*` testIDs and callback.
 jest.mock('../../../src/components/models/ModelsManagerSheet', () => ({
-  ModelsManagerSheet: ({ visible, onOpenRow }: any) => {
+  ModelsManagerSheet: ({ visible, onOpenRow, onClosed }: any) => {
     const { View, Text, TouchableOpacity } = require('react-native');
     if (!visible) return null;
     const rows = ['text', 'image', 'voice', 'speech'];
     return (
       <View testID="models-manager-sheet">
         {rows.map((type) => (
-          <TouchableOpacity key={type} testID={`models-row-${type}`} onPress={() => onOpenRow(type)}>
+          <TouchableOpacity
+            key={type}
+            testID={`models-row-${type}`}
+            onPress={() => {
+              onOpenRow(type);
+              onClosed?.();
+            }}
+          >
             <Text>{type}</Text>
           </TouchableOpacity>
         ))}
