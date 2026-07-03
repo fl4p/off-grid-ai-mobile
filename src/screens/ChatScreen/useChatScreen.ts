@@ -20,6 +20,7 @@ import { startGenerationFn, handleSendFn, handleStopFn, handleSelectProjectFn, d
 import { handleRetryMessageFn, handleEditMessageFn, handleDeleteConversationFn, handleCopyTranscriptFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
 import { getDisplayMessages, getPlaceholderText, ChatMessageItem, StreamingState } from './types';
 import { saveImageToGallery } from './useSaveImage';
+import { resolveMemoryProjectId } from './memoryActions';
 import {
   isSuspiciousRecoveredImageModel,
   isSuspiciousRecoveredTextModel,
@@ -38,6 +39,43 @@ type ActiveModelInfo = {
   /** Remote server id when isRemote; undefined for local models. */
   serverId?: string;
 };
+
+type ActiveModelInfoParams = {
+  activeServerId?: string | null;
+  activeRemoteTextModelId?: string | null;
+  discoveredModels: Record<string, RemoteModel[]>;
+  activeModelId?: string | null;
+  downloadedModels: DownloadedModel[];
+};
+
+function resolveActiveModelInfo(params: ActiveModelInfoParams): ActiveModelInfo {
+  const { activeServerId, activeRemoteTextModelId, discoveredModels, activeModelId, downloadedModels } = params;
+  if (activeServerId && activeRemoteTextModelId) {
+    const serverModels = discoveredModels[activeServerId] || [];
+    const remoteModel = serverModels.find(m => m.id === activeRemoteTextModelId);
+    if (remoteModel) {
+      return {
+        isRemote: true,
+        model: remoteModel,
+        modelId: remoteModel.id,
+        modelName: remoteModel.name,
+        serverId: activeServerId,
+      };
+    }
+    logger.warn('[ChatScreen] Remote model not found:', activeServerId, activeRemoteTextModelId);
+  }
+
+  const localModel = downloadedModels.find(m => m.id === activeModelId);
+  if (localModel) {
+    return {
+      isRemote: false,
+      model: localModel,
+      modelId: localModel.id,
+      modelName: localModel.name,
+    };
+  }
+  return { isRemote: false, model: null, modelId: null, modelName: 'Unknown' };
+}
 
 export const useChatScreen = () => {
   const navigation = useNavigation();
@@ -122,35 +160,13 @@ export const useChatScreen = () => {
 
   const activeConversation = conversations.find(c => c.id === activeConversationId);
 
-  // Compute active model from either local or remote source
-  const activeModelInfo = useMemo((): ActiveModelInfo => {
-    // Check for remote model first
-    if (activeServerId && activeRemoteTextModelId) {
-      const serverModels = discoveredModels[activeServerId] || [];
-      const remoteModel = serverModels.find(m => m.id === activeRemoteTextModelId);
-      if (remoteModel) {
-        return {
-          isRemote: true,
-          model: remoteModel,
-          modelId: remoteModel.id,
-          modelName: remoteModel.name,
-          serverId: activeServerId,
-        };
-      }
-      logger.warn('[ChatScreen] Remote model not found:', activeServerId, activeRemoteTextModelId);
-    }
-    // Fall back to local model
-    const localModel = downloadedModels.find(m => m.id === activeModelId);
-    if (localModel) {
-      return {
-        isRemote: false,
-        model: localModel,
-        modelId: localModel.id,
-        modelName: localModel.name,
-      };
-    }
-    return { isRemote: false, model: null, modelId: null, modelName: 'Unknown' };
-  }, [activeServerId, activeRemoteTextModelId, discoveredModels, activeModelId, downloadedModels]);
+  const activeModelInfo = useMemo(() => resolveActiveModelInfo({
+    activeServerId,
+    activeRemoteTextModelId,
+    discoveredModels,
+    activeModelId,
+    downloadedModels,
+  }), [activeServerId, activeRemoteTextModelId, discoveredModels, activeModelId, downloadedModels]);
 
   // activeModel is for LOCAL models only (for file path, memory checks, etc.)
   const activeModel = activeModelInfo.isRemote ? undefined : (activeModelInfo.model as DownloadedModel | undefined);
@@ -177,7 +193,7 @@ export const useChatScreen = () => {
     discoveredModels[activeServerId || '']?.length > 0 ||
     Object.values(discoveredModels).some(models => models.length > 0);
 
-  const effectiveProjectId = activeConversation ? activeConversation.projectId : pendingProjectId;
+  const effectiveProjectId = resolveMemoryProjectId(activeConversation, pendingProjectId);
   const activeProject = effectiveProjectId ? getProject(effectiveProjectId) : null;
   const activeImageModel = downloadedImageModels.find(m => m.id === activeImageModelId);
   const imageModelLoaded = !!activeImageModel;

@@ -17,6 +17,7 @@ import { render, fireEvent, act, waitFor } from '@testing-library/react-native';
 
 const mockGoBack = jest.fn();
 const mockNavigate = jest.fn();
+const mockFocusCallbacks: Array<() => void> = [];
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -31,7 +32,9 @@ jest.mock('@react-navigation/native', () => {
     useRoute: () => ({
       params: { projectId: 'proj1' },
     }),
-    useFocusEffect: jest.fn(),
+    useFocusEffect: jest.fn((callback: () => void) => {
+      mockFocusCallbacks.push(callback);
+    }),
     useIsFocused: () => true,
   };
 });
@@ -161,6 +164,7 @@ const mockGetDocumentsByProject = jest.fn<Promise<any[]>, [string]>(() => Promis
 const mockIndexDocument = jest.fn<Promise<number>, [any]>(() => Promise.resolve(1));
 const mockDeleteDocumentRag = jest.fn<Promise<void>, [number]>(() => Promise.resolve());
 const mockToggleDocument = jest.fn<Promise<void>, [number, boolean]>(() => Promise.resolve());
+const mockListMemories = jest.fn<Promise<any[]>, [string | undefined]>(() => Promise.resolve([]));
 
 jest.mock('../../../src/services/rag', () => ({
   ragService: {
@@ -170,6 +174,12 @@ jest.mock('../../../src/services/rag', () => ({
     toggleDocument: (docId: number, enabled: boolean) => mockToggleDocument(docId, enabled),
     deleteProjectDocuments: jest.fn(() => Promise.resolve()),
     ensureReady: jest.fn(() => Promise.resolve()),
+  },
+}));
+
+jest.mock('../../../src/services/memory', () => ({
+  memoryService: {
+    listMemories: (projectId?: string) => mockListMemories(projectId),
   },
 }));
 
@@ -194,6 +204,11 @@ jest.mock('react-native-gesture-handler/Swipeable', () => {
 
 import { ProjectDetailScreen } from '../../../src/screens/ProjectDetailScreen';
 
+const triggerLatestFocus = () => {
+  const callback = mockFocusCallbacks[mockFocusCallbacks.length - 1];
+  if (callback) callback();
+};
+
 describe('ProjectDetailScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -208,6 +223,9 @@ describe('ProjectDetailScreen', () => {
     mockConversations = [];
     mockDownloadedModels = [{ id: 'model1', name: 'Test Model' }];
     mockActiveModelId = 'model1';
+    mockGetDocumentsByProject.mockResolvedValue([]);
+    mockListMemories.mockResolvedValue([]);
+    mockFocusCallbacks.length = 0;
   });
 
   // ============================================================================
@@ -272,6 +290,131 @@ describe('ProjectDetailScreen', () => {
       const { getByText } = render(<ProjectDetailScreen />);
       fireEvent.press(getByText('Memory'));
       expect(mockNavigate).toHaveBeenCalledWith('Memory', { projectId: 'proj1' });
+    });
+  });
+
+  // ============================================================================
+  // Memory Preview
+  // ============================================================================
+  describe('memory preview', () => {
+    it('loads project memories for the detail screen', async () => {
+      render(<ProjectDetailScreen />);
+
+      act(() => {
+        triggerLatestFocus();
+      });
+
+      await waitFor(() => expect(mockListMemories).toHaveBeenCalledWith('proj1'));
+    });
+
+    it('shows an empty memory state when no memories are saved', () => {
+      const { getByText } = render(<ProjectDetailScreen />);
+      expect(getByText('No memories saved')).toBeTruthy();
+    });
+
+    it('shows saved project and shared memory previews', async () => {
+      mockListMemories.mockResolvedValue([
+        {
+          id: 1,
+          scope: 'project',
+          kind: 'preference',
+          title: 'Plot line width',
+          body: 'Use linewidth=2 for plots.',
+          tags: [],
+          confidence: 0.9,
+          importance: 0.8,
+          status: 'active',
+          source_type: 'chat_command',
+          created_at: '2026-07-03T00:00:00.000Z',
+          updated_at: '2026-07-03T00:00:00.000Z',
+        },
+        {
+          id: 2,
+          scope: 'global',
+          kind: 'preference',
+          title: 'Citation style',
+          body: 'Prefer primary sources.',
+          tags: [],
+          confidence: 0.8,
+          importance: 0.7,
+          status: 'active',
+          source_type: 'manual',
+          created_at: '2026-07-03T00:00:00.000Z',
+          updated_at: '2026-07-03T00:00:00.000Z',
+        },
+      ]);
+
+      const { findByText, getByText } = render(<ProjectDetailScreen />);
+      act(() => {
+        triggerLatestFocus();
+      });
+
+      expect(await findByText('Plot line width')).toBeTruthy();
+      expect(getByText('Use linewidth=2 for plots.')).toBeTruthy();
+      expect(getByText('Citation style')).toBeTruthy();
+      expect(getByText('Shared')).toBeTruthy();
+      expect(getByText('Project')).toBeTruthy();
+      expect(getByText('2')).toBeTruthy();
+    });
+
+    it('navigates to project memory from a saved memory preview', async () => {
+      mockListMemories.mockResolvedValue([
+        {
+          id: 1,
+          scope: 'project',
+          kind: 'preference',
+          title: 'Plot line width',
+          body: 'Use linewidth=2 for plots.',
+          tags: [],
+          confidence: 0.9,
+          importance: 0.8,
+          status: 'active',
+          source_type: 'chat_command',
+          created_at: '2026-07-03T00:00:00.000Z',
+          updated_at: '2026-07-03T00:00:00.000Z',
+        },
+      ]);
+
+      const { findByText } = render(<ProjectDetailScreen />);
+      act(() => {
+        triggerLatestFocus();
+      });
+      fireEvent.press(await findByText('Plot line width'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('Memory', { projectId: 'proj1' });
+    });
+
+    it('refreshes memory previews when returning to the project detail screen', async () => {
+      mockListMemories
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            id: 1,
+            scope: 'project',
+            kind: 'preference',
+            title: 'Fresh memory',
+            body: 'Reloaded after focus.',
+            tags: [],
+            confidence: 0.9,
+            importance: 0.8,
+            status: 'active',
+            source_type: 'chat_command',
+            created_at: '2026-07-03T00:00:00.000Z',
+            updated_at: '2026-07-03T00:00:00.000Z',
+          },
+        ]);
+
+      const { findByText } = render(<ProjectDetailScreen />);
+      act(() => {
+        triggerLatestFocus();
+      });
+      await waitFor(() => expect(mockListMemories).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        triggerLatestFocus();
+      });
+
+      expect(await findByText('Fresh memory')).toBeTruthy();
     });
   });
 
