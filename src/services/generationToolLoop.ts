@@ -679,36 +679,74 @@ function emitFinalResponse(ctx: ToolLoopContext, state: ToolLoopState, displayRe
   }
 }
 
-/** Force a final text-only generation (no tools) when iteration/call caps are hit. */
-/**
- * Force a final text answer when the iteration/call cap is hit. Two layers guard
- * against a model that wants to keep calling tools leaking its raw tool-call tokens
- * (e.g. DeepSeek's `<｜｜DSML｜｜invoke …>`) as visible text:
- *  1. We keep the tools declared and send tool_choice:'none' rather than an empty
- *     tools array — an empty array turns off the server-side tool-call parser, and a
- *     compliant endpoint then produces prose instead.
- *  2. Some endpoints (e.g. opencode zen big-pickle) ignore tool_choice:'none' and
- *     still emit the markup as content anyway. We're at the cap, so we do NOT execute
- *     those calls — we strip the markup from the visible text exactly like a normal
- *     iteration does, so raw tokens never reach the user.
- */
-async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, req: { loopMessages: Message[]; tools: any[] }): Promise<void> {
+/** Run one forced-final generation pass and return the cleaned result. Clears any
+ *  live-streamed tool-call markup so the caller can replace it with cleaned text. */
+async function runForcedPass(
+  ctx: ToolLoopContext,
+  state: ToolLoopState,
+  req: { loopMessages: Message[]; tools: any[]; toolChoice?: 'auto' | 'none' },
+): Promise<{ effectiveToolCalls: ToolCall[]; displayResponse: string }> {
   state.streamedContent = '';
   state.reasoningContent = '';
   state.firstTokenFired = false;
-  const forcedOnStream = buildStreamHandler(ctx, state);
-  const { fullResponse: forcedResponse, toolCalls } = await callLLMWithRetry(req.loopMessages, req.tools, { onStream: forcedOnStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx, toolChoice: 'none' });
-
-  const { effectiveToolCalls, displayResponse } = resolveToolCalls(forcedResponse, toolCalls);
-  if (effectiveToolCalls.length > 0 && state.streamedContent) {
-    // Leaked markup was streamed live — clear it and replace with the cleaned text.
+  const onStream = buildStreamHandler(ctx, state);
+  const { fullResponse, toolCalls } = await callLLMWithRetry(req.loopMessages, req.tools, {
+    onStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx, toolChoice: req.toolChoice,
+  });
+  const resolved = resolveToolCalls(fullResponse, toolCalls);
+  if (resolved.effectiveToolCalls.length > 0 && state.streamedContent) {
+    // Leaked markup was streamed live — clear it so cleaned text can replace it.
     ctx.onStreamReset?.();
     useChatStore.getState().setStreamingMessage('');
     state.streamedContent = '';
   }
-  const finalText = displayResponse || (effectiveToolCalls.length > 0
-    ? 'I could not find any results for that.'
-    : '');
+  return resolved;
+}
+
+/**
+ * Explicit "stop and answer" turn for the synthesis pass. DeepSeek-family models
+ * (e.g. opencode zen big-pickle) emit tool-call markup even with NO tools declared
+ * and tool_choice:'none' — the request-level levers don't reach their intent to keep
+ * searching. A direct instruction turn does: it tells the model, in-band, that it has
+ * enough and must write prose now. Kept explicit about the markup so it does not just
+ * emit `<｜｜DSML｜｜…>` tokens that we would then strip to nothing.
+ */
+const FORCE_SYNTHESIS_INSTRUCTION =
+  'Stop searching. You now have enough information. Using only the tool results already gathered above, write your complete final answer for the user now, in plain prose. Do not call any tools and do not output any tool-call syntax.';
+
+/**
+ * Force a final text answer when the iteration/call cap is hit. Guards against a
+ * model that wants to keep calling tools leaking its raw tool-call tokens
+ * (e.g. DeepSeek's `<｜｜DSML｜｜invoke …>`) as visible text, in three layers:
+ *  1. Keep the tools declared and send tool_choice:'none' rather than an empty tools
+ *     array — an empty array turns off the server-side tool-call parser, and a
+ *     compliant endpoint then produces prose instead.
+ *  2. Some endpoints (e.g. opencode zen big-pickle) ignore tool_choice:'none' and
+ *     still emit ONLY tool-call markup with no prose. We're at the cap, so we never
+ *     execute those calls and we strip the markup so raw tokens never reach the user.
+ *  3. When that first pass yields no prose (just stripped markup), retry with no tools
+ *     AND an explicit in-band instruction to stop and synthesize. The request-level
+ *     tool_choice:'none' doesn't reach a DeepSeek model's intent to keep searching, but
+ *     a direct "answer now from what you have" turn does — otherwise the user dead-ends
+ *     on the generic fallback despite the data we gathered.
+ */
+async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, req: { loopMessages: Message[]; tools: any[] }): Promise<void> {
+  let { effectiveToolCalls, displayResponse } = await runForcedPass(ctx, state, {
+    loopMessages: req.loopMessages, tools: req.tools, toolChoice: 'none',
+  });
+
+  // The endpoint ignored tool_choice:'none' and returned only tool-call markup. Retry
+  // with no tools and an explicit instruction so it synthesizes from the gathered results.
+  if (!displayResponse && effectiveToolCalls.length > 0) {
+    const synthMessages: Message[] = [...req.loopMessages, {
+      id: `force-final-${Date.now()}`, role: 'user', content: FORCE_SYNTHESIS_INSTRUCTION, timestamp: Date.now(),
+    }];
+    ({ effectiveToolCalls, displayResponse } = await runForcedPass(ctx, state, {
+      loopMessages: synthMessages, tools: [],
+    }));
+  }
+
+  const finalText = displayResponse || 'I could not find any results for that.';
   emitFinalResponse(ctx, state, finalText);
 }
 

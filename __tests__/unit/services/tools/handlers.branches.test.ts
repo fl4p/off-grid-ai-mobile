@@ -62,6 +62,7 @@ describe('Tool Handlers — branch coverage', () => {
         </div>
       </body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
       const result = await runTool('web_search', { query: 'alt parse' });
@@ -76,6 +77,7 @@ describe('Tool Handlers — branch coverage', () => {
         </div>
       </body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
       const result = await runTool('web_search', { query: 'no title' });
@@ -89,6 +91,7 @@ describe('Tool Handlers — branch coverage', () => {
         <p class="snippet">Snippet ${i}</p></div>`;
       const html = `<html><body>${[0, 1, 2, 3, 4, 5, 6].map(block).join('')}</body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
       const result = await runTool('web_search', { query: 'many' });
@@ -201,6 +204,7 @@ describe('Tool Handlers — branch coverage', () => {
         </div>
       </body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
       const result = await runTool('web_search', { query: 'no snippet' });
@@ -216,6 +220,7 @@ describe('Tool Handlers — branch coverage', () => {
         </div>
       </body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
       const result = await runTool('web_search', { query: 'skip empty' });
