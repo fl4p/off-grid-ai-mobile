@@ -167,6 +167,37 @@ describe('processDelta', () => {
     expect(state.currentToolCall?.function?.arguments).toBe('{"city":"NY"}');
   });
 
+  it('accumulates interleaved parallel tool calls by index without concatenating args across calls', () => {
+    // GLM / Kimi emit several tool calls at once, streamed INTERLEAVED by index. Keying
+    // off id/last-call (the old behavior) concatenated both calls' JSON into one, which
+    // then failed JSON.parse ("Unexpected end of JSON input").
+    const state = makeState();
+    const { thinkTagParser, callbacks } = makeCtx();
+    const run = (tool_calls: any[]) => processDelta({ tool_calls }, state, { thinkingEnabled: true, callbacks, thinkTagParser });
+    run([{ index: 0, id: 'call-a', type: 'function', function: { name: 'web_search', arguments: '' } }]);
+    run([{ index: 1, id: 'call-b', type: 'function', function: { name: 'web_search', arguments: '' } }]);
+    run([{ index: 0, function: { arguments: '{"query":"a' } }]);
+    run([{ index: 1, function: { arguments: '{"query":"b' } }]);
+    run([{ index: 0, function: { arguments: '"}' } }]);
+    run([{ index: 1, function: { arguments: '"}' } }]);
+
+    expect(state.toolCalls).toHaveLength(2);
+    expect(state.toolCalls[0]).toMatchObject({ id: 'call-a', function: { name: 'web_search', arguments: '{"query":"a"}' } });
+    expect(state.toolCalls[1]).toMatchObject({ id: 'call-b', function: { name: 'web_search', arguments: '{"query":"b"}' } });
+    expect(() => JSON.parse(state.toolCalls[0].function.arguments)).not.toThrow();
+    expect(() => JSON.parse(state.toolCalls[1].function.arguments)).not.toThrow();
+  });
+
+  it('sets the tool-call id when it first arrives on a later fragment for an index', () => {
+    const state = makeState();
+    const { thinkTagParser, callbacks } = makeCtx();
+    const run = (tool_calls: any[]) => processDelta({ tool_calls }, state, { thinkingEnabled: true, callbacks, thinkTagParser });
+    run([{ index: 0, function: { name: 'web_search', arguments: '{"q":' } }]);
+    run([{ index: 0, id: 'late-id', function: { arguments: '"x"}' } }]);
+    expect(state.toolCalls[0].id).toBe('late-id');
+    expect(state.toolCalls[0].function.arguments).toBe('{"q":"x"}');
+  });
+
   it('suppresses think-tag reasoning when thinkingEnabled=false', () => {
     const state = makeState();
     const { thinkTagParser, callbacks, onReasoning, onToken } = makeCtx(false);

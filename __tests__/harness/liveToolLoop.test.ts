@@ -98,8 +98,12 @@ class NodeXHR {
       })
       .catch(() => {
         this.readyState = 4;
-        // aborted → provider treats an empty response as a normal (cancelled) finish.
-        if (this.ctrl.signal.aborted) this.onreadystatechange?.();
+        // Real XHR delivers all buffered bytes on load even if the socket resets after
+        // the response completed. Some upstreams (e.g. Fireworks) drop the connection
+        // right after the final SSE chunk; treat "error after we already have data" (or
+        // an abort) as a normal end-of-stream so the provider parses what it received,
+        // rather than a fatal network error.
+        if (this.ctrl.signal.aborted || this.responseText.length > 0) this.onreadystatechange?.();
         else this.onerror?.();
       });
   }
