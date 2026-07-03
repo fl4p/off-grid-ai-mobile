@@ -48,6 +48,11 @@ function getToolLabel(toolName?: string, content?: string): string {
     case 'get_current_datetime': return 'Retrieved date/time';
     case 'get_device_info': return 'Retrieved device info';
     case 'run_python': return 'Python output';
+    case 'read_file': return 'Read file';
+    case 'write_file': return 'Wrote file';
+    case 'edit_file': return 'Edited file';
+    case 'list_files': return 'Listed files';
+    case 'grep': return 'Searched files';
     default: return toolName || 'Tool result';
   }
 }

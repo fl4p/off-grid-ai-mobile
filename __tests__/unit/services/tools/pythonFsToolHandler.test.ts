@@ -40,8 +40,8 @@ function run(name: string, args: Record<string, unknown>) {
 /** Recover the op name and decoded args from the generated Python (double-encoded). */
 function decodeRequest(): { op: string; args: any } {
   const code: string = mockExecute.mock.calls[0][0];
-  const op = /_fs_emit\(_fs_(\w+)\(/.exec(code)![1];
-  const literal = /_req = json\.loads\((".*")\)/.exec(code)![1];
+  const op = /_fs_emit\(_fs_(\w+)\(_fs_req\)\)/.exec(code)![1];
+  const literal = /_fs_req = _fs_json\.loads\((".*")\)/.exec(code)![1];
   const args = JSON.parse(JSON.parse(literal)); // undo the double-encode
   return { op, args };
 }
@@ -164,6 +164,59 @@ describe('python filesystem tools', () => {
       emit({ ok: true, truncated: true, matches: [{ path: './a', line_no: 1, line: 'x' }] });
       const res = await run('grep', { pattern: 'x' });
       expect(res.content).toContain('more matches');
+    });
+  });
+
+  describe('argument coercion and validation', () => {
+    it('coerces string offset/limit and clamps negatives to a safe request', async () => {
+      emit({ ok: true, start: 0, total: 3, truncated: false, lines: ['a'] });
+      await run('read_file', { path: 'f', offset: '-5', limit: '10' });
+      expect(decodeRequest().args).toEqual({ path: 'f', offset: 0, limit: 10 });
+    });
+
+    it('treats limit "0" as read-all (omitted), not zero lines', async () => {
+      emit({ ok: true, start: 0, total: 3, truncated: false, lines: ['a', 'b', 'c'] });
+      await run('read_file', { path: 'f', limit: '0' });
+      // limit dropped => Python reads all; only offset is sent.
+      expect(decodeRequest().args).toEqual({ path: 'f', offset: 0 });
+    });
+
+    it('reports a line that exceeds the per-read size limit instead of "(empty)"', async () => {
+      emit({ ok: true, start: 0, total: 500, truncated: true, line_too_long: true, lines: [] });
+      const res = await run('read_file', { path: 'blob.txt' });
+      expect(res.content).toContain('exceeds the per-read size limit');
+      expect(res.content).not.toContain('(empty)');
+    });
+
+    it('write_file rejects a missing content arg instead of truncating the file', async () => {
+      const res = await run('write_file', { path: 'x.py' });
+      expect(res.content).toContain('requires string "content"');
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it('write_file allows an explicit empty string (clear a file)', async () => {
+      emit({ ok: true, bytes: 0, created: false, path: 'x.py' });
+      const res = await run('write_file', { path: 'x.py', content: '' });
+      expect(res.content).toContain('Wrote 0 bytes');
+    });
+
+    it('edit_file rejects an empty old_string (would interleave the whole file)', async () => {
+      const res = await run('edit_file', { path: 'x.py', old_string: '', new_string: 'Z' });
+      expect(res.content).toContain('must not be empty');
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it('edit_file reads a stringified replace_all correctly (does not bypass the uniqueness guard)', async () => {
+      emit({ ok: false, error: 'old_string is not unique (3 matches)' });
+      await run('edit_file', { path: 'x.py', old_string: 'a', new_string: 'b', replace_all: 'false' });
+      // "false" (string) must NOT be coerced to true - that would silently mass-replace.
+      expect(decodeRequest().args.replace_all).toBe(false);
+    });
+
+    it('edit_file honours a stringified replace_all=true', async () => {
+      emit({ ok: true, replacements: 3, path: 'x.py' });
+      await run('edit_file', { path: 'x.py', old_string: 'a', new_string: 'b', replace_all: 'true' });
+      expect(decodeRequest().args.replace_all).toBe(true);
     });
   });
 

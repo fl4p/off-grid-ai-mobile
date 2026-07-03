@@ -18,8 +18,8 @@ jest.mock('../../../src/services/python/pythonRuntimeService', () => {
     new RegExp(`^${glob.replace(/[.]/g, '\\.').replace(/\*/g, '.*')}$`);
 
   function fakeExecute(code: string) {
-    const op = /_fs_emit\(_fs_(\w+)\(/.exec(code)![1];
-    const literal = /_req = json\.loads\((".*")\)/.exec(code)![1];
+    const op = /_fs_emit\(_fs_(\w+)\(_fs_req\)\)/.exec(code)![1];
+    const literal = /_fs_req = _fs_json\.loads\((".*")\)/.exec(code)![1];
     const req = JSON.parse(JSON.parse(literal));
     let env: any;
 
