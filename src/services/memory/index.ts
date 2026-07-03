@@ -136,6 +136,49 @@ function buildMessageMemoryTitle(content: string): string {
   return normalized.length > 64 ? `${normalized.slice(0, 61)}...` : normalized;
 }
 
+function canonicalMemoryBody(body: string): string {
+  return body
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!?]+$/g, '')
+    .toLowerCase();
+}
+
+function hasSameMemoryContent(
+  item: Pick<MemoryItem | MemoryCandidate, 'body'>,
+  input: Pick<CreateMemoryInput | CreateMemoryCandidateInput, 'body'>,
+): boolean {
+  return canonicalMemoryBody(item.body) === canonicalMemoryBody(input.body);
+}
+
+function hasSameWriteScope(
+  item: Pick<MemoryItem | MemoryCandidate, 'scope' | 'project_id'>,
+  input: Pick<CreateMemoryInput | CreateMemoryCandidateInput, 'scope' | 'projectId'>,
+): boolean {
+  if (item.scope !== input.scope) return false;
+  return item.scope === 'global' || item.project_id === input.projectId;
+}
+
+function findDuplicateActiveMemory(input: CreateMemoryInput | CreateMemoryCandidateInput): MemoryItem | undefined {
+  return memoryDatabase
+    .getActiveMemories(input.projectId)
+    .find(memory => hasSameWriteScope(memory, input) && hasSameMemoryContent(memory, input));
+}
+
+function findDuplicatePendingCandidate(input: CreateMemoryCandidateInput): MemoryCandidate | undefined {
+  return memoryDatabase
+    .getPendingCandidates(input.projectId)
+    .find(candidate => hasSameWriteScope(candidate, input) && hasSameMemoryContent(candidate, input));
+}
+
+function memoryContentKey(memory: MemoryItem): string {
+  return [
+    memory.scope,
+    memory.project_id ?? '',
+    canonicalMemoryBody(memory.body),
+  ].join('\u0000');
+}
+
 function canAccessCandidate(candidate: MemoryCandidate, projectId?: string): boolean {
   if (candidate.scope === 'global') return true;
   return !!projectId && candidate.project_id === projectId;
@@ -180,6 +223,8 @@ class MemoryService {
   async saveMemory(input: CreateMemoryInput): Promise<MemoryItem> {
     await this.ensureReady();
     const normalized = normalizeInput(input);
+    const duplicate = findDuplicateActiveMemory(normalized);
+    if (duplicate) return duplicate;
     const id = memoryDatabase.createMemory(normalized);
     const memory = memoryDatabase.getMemory(id);
     if (!memory) throw new Error('Saved memory could not be read back');
@@ -209,14 +254,19 @@ class MemoryService {
     if (existingCandidate) return existingCandidate.status === 'pending' ? existingCandidate : null;
     const extracted = extractMemoryCandidateFromText(content, { projectId: params.projectId });
     if (!extracted) return null;
-    return this.createCandidate({
+    const candidateInput: CreateMemoryCandidateInput = {
       ...extracted,
       scope,
       projectId: params.projectId,
       sourceType: 'auto_capture',
       sourceId: params.message.id,
       sourceExcerpt: extracted.sourceExcerpt ?? content,
-    });
+    };
+    const duplicateMemory = findDuplicateActiveMemory(candidateInput);
+    if (duplicateMemory) return null;
+    const duplicateCandidate = findDuplicatePendingCandidate(candidateInput);
+    if (duplicateCandidate) return duplicateCandidate;
+    return this.createCandidate(candidateInput);
   }
 
   async captureMemoryFromMessage(params: CaptureMemoryFromMessageParams): Promise<MemoryItem | null> {
@@ -231,14 +281,21 @@ class MemoryService {
     if (existingCandidate) return null;
     const extracted = extractMemoryCandidateFromText(content, { projectId: params.projectId });
     if (!extracted) return null;
-    return this.saveMemory({
+    const memoryInput: CreateMemoryInput = {
       ...extracted,
       scope,
       projectId: params.projectId,
       sourceType,
       sourceId: params.message.id,
       sourceExcerpt: extracted.sourceExcerpt ?? content,
-    });
+    };
+    const duplicate = findDuplicateActiveMemory(memoryInput);
+    if (duplicate) return duplicate;
+    const duplicateCandidate = findDuplicatePendingCandidate(memoryInput);
+    if (duplicateCandidate) {
+      memoryDatabase.deleteCandidate(duplicateCandidate.id);
+    }
+    return this.saveMemory(memoryInput);
   }
 
   async rememberMessage(params: CaptureMessageParams): Promise<MemoryItem> {
@@ -261,6 +318,7 @@ class MemoryService {
 
   async listMemories(projectId?: string): Promise<MemoryItem[]> {
     await this.ensureReady();
+    this.deleteDuplicateActiveMemories(projectId);
     return memoryDatabase.getActiveMemories(projectId);
   }
 
@@ -297,6 +355,7 @@ class MemoryService {
 
   async searchMemory(params: { projectId?: string; query: string; topK?: number }): Promise<MemorySearchResult[]> {
     await this.ensureReady();
+    this.deleteDuplicateActiveMemories(params.projectId);
     const results = await memoryRetrievalService.search(params.projectId, params.query, params.topK ?? 6);
     memoryDatabase.markUsed(results.map(result => result.memory.id));
     return results;
@@ -371,6 +430,20 @@ class MemoryService {
       memoryDatabase.setEmbedding(memory.id, embedding);
     } catch (err) {
       logger.error('[Memory] Embedding generation failed; memory saved without vector index', err);
+    }
+  }
+
+  private deleteDuplicateActiveMemories(projectId?: string): void {
+    const seen = new Set<string>();
+    for (const memory of memoryDatabase.getActiveMemories(projectId)) {
+      const key = memoryContentKey(memory);
+      if (!seen.has(key)) {
+        seen.add(key);
+        continue;
+      }
+      if (memoryDatabase.deleteMemory(memory.id)) {
+        memoryDatabase.addEvent(null, 'duplicate_deleted', { memoryId: memory.id });
+      }
     }
   }
 }

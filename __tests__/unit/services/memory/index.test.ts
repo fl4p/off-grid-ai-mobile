@@ -9,6 +9,7 @@ const mockCreateCandidate = jest.fn();
 const mockGetCandidate = jest.fn();
 const mockGetCandidateBySource = jest.fn();
 const mockGetPendingCandidates = jest.fn();
+const mockGetActiveMemories = jest.fn();
 const mockGetActiveMemoryBySource = jest.fn();
 const mockSetCandidateStatus = jest.fn();
 const mockDeleteMemory = jest.fn();
@@ -29,6 +30,7 @@ jest.mock('../../../../src/services/memory/database', () => ({
     getCandidate: (...args: any[]) => mockGetCandidate(...args),
     getCandidateBySource: (...args: any[]) => mockGetCandidateBySource(...args),
     getPendingCandidates: (...args: any[]) => mockGetPendingCandidates(...args),
+    getActiveMemories: (...args: any[]) => mockGetActiveMemories(...args),
     getActiveMemoryBySource: (...args: any[]) => mockGetActiveMemoryBySource(...args),
     setCandidateStatus: (...args: any[]) => mockSetCandidateStatus(...args),
     deleteCandidate: (...args: any[]) => mockDeleteCandidate(...args),
@@ -107,6 +109,7 @@ describe('MemoryService', () => {
     mockGetCandidate.mockReturnValue(baseCandidate);
     mockGetCandidateBySource.mockReturnValue(null);
     mockGetPendingCandidates.mockReturnValue([baseCandidate]);
+    mockGetActiveMemories.mockReturnValue([]);
     mockGetActiveMemoryBySource.mockReturnValue(null);
     mockSetCandidateStatus.mockReturnValue(true);
     mockDeleteCandidate.mockReturnValue(true);
@@ -195,6 +198,25 @@ describe('MemoryService', () => {
     expect(mockMarkUsed).toHaveBeenCalledWith([7]);
   });
 
+  it('removes duplicate active memories when listing', async () => {
+    const duplicate = {
+      ...baseMemory,
+      id: 8,
+      body: 'County permit research is in progress.',
+      source_id: 'msg-duplicate',
+    };
+    mockGetActiveMemories
+      .mockReturnValueOnce([baseMemory, duplicate])
+      .mockReturnValueOnce([baseMemory]);
+
+    const memories = await memoryService.listMemories('proj-1');
+
+    expect(memories).toEqual([baseMemory]);
+    expect(mockDeleteMemory).toHaveBeenCalledWith(8);
+    expect(mockAddEvent).toHaveBeenCalledWith(null, 'duplicate_deleted', { memoryId: 8 });
+    expect(JSON.stringify(mockAddEvent.mock.calls)).not.toContain('County permit research');
+  });
+
   it('creates a normalized candidate without embedding it', async () => {
     const candidate = await memoryService.createCandidate({
       projectId: 'proj-1',
@@ -256,6 +278,46 @@ describe('MemoryService', () => {
     expect(mockCreateCandidate).not.toHaveBeenCalled();
   });
 
+  it('deduplicates auto-capture candidates by extracted content', async () => {
+    mockGetPendingCandidates.mockReturnValueOnce([{
+      ...baseCandidate,
+      source_id: 'msg-existing',
+      body: 'the county solar permit office closes at 3 PM on Fridays.',
+    }]);
+
+    const duplicate = await memoryService.captureCandidateFromMessage({
+      message: {
+        id: 'msg-new',
+        role: 'user',
+        content: 'Remember that the county solar permit office closes at 3 PM on Fridays.',
+      },
+      projectId: 'proj-1',
+    });
+
+    expect(duplicate).toEqual(expect.objectContaining({ source_id: 'msg-existing' }));
+    expect(mockCreateCandidate).not.toHaveBeenCalled();
+  });
+
+  it('skips auto-capture candidates when an active memory already has the same content', async () => {
+    mockGetActiveMemories.mockReturnValueOnce([{
+      ...baseMemory,
+      kind: 'research_note',
+      body: 'the county solar permit office closes at 3 PM on Fridays.',
+    }]);
+
+    const duplicate = await memoryService.captureCandidateFromMessage({
+      message: {
+        id: 'msg-new',
+        role: 'user',
+        content: 'Remember that the county solar permit office closes at 3 PM on Fridays.',
+      },
+      projectId: 'proj-1',
+    });
+
+    expect(duplicate).toBeNull();
+    expect(mockCreateCandidate).not.toHaveBeenCalled();
+  });
+
   it('captures and saves memory from a user message when direct auto-save is enabled', async () => {
     const saved = await memoryService.captureMemoryFromMessage({
       message: {
@@ -307,6 +369,100 @@ describe('MemoryService', () => {
     expect(mockCreateMemory).toHaveBeenCalledWith(expect.objectContaining({
       sourceType: 'chat_command',
       sourceId: 'msg-command-1',
+    }));
+  });
+
+  it('deduplicates saved memories by extracted content across message ids', async () => {
+    mockGetActiveMemories.mockReturnValueOnce([{
+      ...baseMemory,
+      scope: 'global',
+      project_id: null,
+      kind: 'preference',
+      body: 'use default linewidth=2 for plots',
+    }]);
+
+    const duplicate = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-2',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for Plots.',
+      },
+      sourceType: 'chat_command',
+    });
+
+    expect(duplicate).toEqual(expect.objectContaining({ id: baseMemory.id }));
+    expect(mockCreateMemory).not.toHaveBeenCalled();
+  });
+
+  it('does not deduplicate project saves against matching global memories', async () => {
+    mockGetActiveMemories.mockReturnValueOnce([{
+      ...baseMemory,
+      scope: 'global',
+      project_id: null,
+      kind: 'preference',
+      body: 'use default linewidth=2 for plots',
+    }]);
+
+    await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-project',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for plots',
+      },
+      projectId: 'proj-1',
+      sourceType: 'chat_command',
+    });
+
+    expect(mockCreateMemory).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'project',
+      projectId: 'proj-1',
+      body: 'use default linewidth=2 for plots',
+    }));
+  });
+
+  it('does not strip comparison operators when checking duplicates', async () => {
+    mockGetActiveMemories.mockReturnValueOnce([{
+      ...baseMemory,
+      scope: 'global',
+      project_id: null,
+      body: 'plot y < 2 as red',
+    }]);
+
+    await memoryService.saveMemory({
+      scope: 'global',
+      title: 'Plot greater than threshold',
+      body: 'plot y > 2 as red',
+    });
+
+    expect(mockCreateMemory).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'plot y > 2 as red',
+    }));
+  });
+
+  it('turns a matching pending candidate into an active explicit memory', async () => {
+    mockGetPendingCandidates.mockReturnValueOnce([{
+      ...baseCandidate,
+      id: 12,
+      source_id: 'msg-candidate',
+      body: 'use default linewidth=2 for plots',
+    }]);
+
+    await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-command-save',
+        role: 'user',
+        content: 'remember: use default linewidth=2 for plots',
+      },
+      projectId: 'proj-1',
+      sourceType: 'chat_command',
+    });
+
+    expect(mockDeleteCandidate).toHaveBeenCalledWith(12);
+    expect(mockCreateMemory).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'project',
+      projectId: 'proj-1',
+      sourceType: 'chat_command',
+      body: 'use default linewidth=2 for plots',
     }));
   });
 
