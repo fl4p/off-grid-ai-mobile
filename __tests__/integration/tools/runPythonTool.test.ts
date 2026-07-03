@@ -39,7 +39,7 @@ import { executeToolCall } from '../../../src/services/tools/handlers';
 import { getToolsAsOpenAISchema, AVAILABLE_TOOLS } from '../../../src/services/tools/registry';
 import { pythonRuntimeService } from '../../../src/services/python/pythonRuntimeService';
 import { usePythonRuntimeStore } from '../../../src/stores/pythonRuntimeStore';
-import { PYODIDE_VERSION, PYTHON_RUNTIME_MARKER_FILE } from '../../../src/services/python/pyodideManifest';
+import { PYODIDE_VERSION, PYODIDE_MANIFEST_REVISION, PYTHON_RUNTIME_MARKER_FILE } from '../../../src/services/python/pyodideManifest';
 
 const MARKER_PATH = `/docs/pyodide-runtime/${PYTHON_RUNTIME_MARKER_FILE}`;
 
@@ -113,7 +113,7 @@ describe('run_python tool integration', () => {
   });
 
   it('executes code end-to-end through the injection protocol', async () => {
-    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION });
+    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION });
 
     const result = await callToolWithFakePage(
       { id: 'c2', name: 'run_python', arguments: { code: 'print(sum(range(11)))' } },
@@ -127,7 +127,7 @@ describe('run_python tool integration', () => {
   });
 
   it('carries python exceptions back to the model', async () => {
-    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION });
+    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION });
 
     const result = await callToolWithFakePage(
       { id: 'c3', name: 'run_python', arguments: { code: '1/0' } },
@@ -145,7 +145,7 @@ describe('run_python tool integration', () => {
   });
 
   it('keeps interpreter state warm across sequential tool calls', async () => {
-    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION });
+    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION });
     const codes: string[] = [];
     const run = (code: string) => {
       codes.push(code);
