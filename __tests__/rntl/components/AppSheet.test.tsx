@@ -16,7 +16,7 @@
  */
 
 import React from 'react';
-import { Text, Keyboard, Modal, TouchableWithoutFeedback, View } from 'react-native';
+import { Animated, Text, Keyboard, Modal, TouchableWithoutFeedback, View } from 'react-native';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import { AppSheet } from '../../../src/components/AppSheet';
 
@@ -197,6 +197,70 @@ describe('AppSheet', () => {
         },
         { timeout: 2000 }
       );
+    });
+
+    it('fires onClosed from a fallback when close animation completion is missed', async () => {
+      const onClosed = jest.fn();
+      const parallelSpy = jest.spyOn(Animated, 'parallel').mockReturnValue({
+        start: jest.fn(),
+        stop: jest.fn(),
+        reset: jest.fn(),
+      } as any);
+
+      const { rerender } = render(
+        <AppSheet visible={true} onClose={jest.fn()} onClosed={onClosed} title="Fallback Sheet">
+          <Text>Content</Text>
+        </AppSheet>
+      );
+
+      rerender(
+        <AppSheet visible={false} onClose={jest.fn()} onClosed={onClosed} title="Fallback Sheet">
+          <Text>Content</Text>
+        </AppSheet>
+      );
+
+      await waitFor(() => {
+        expect(onClosed).toHaveBeenCalledTimes(1);
+      }, { timeout: 1000 });
+
+      parallelSpy.mockRestore();
+    });
+
+    it('ignores a stale close fallback after the sheet reopens', () => {
+      jest.useFakeTimers();
+      const onClosed = jest.fn();
+      const parallelSpy = jest.spyOn(Animated, 'parallel').mockReturnValue({
+        start: jest.fn(),
+        stop: jest.fn(),
+        reset: jest.fn(),
+      } as any);
+
+      const { rerender, getByText } = render(
+        <AppSheet visible={true} onClose={jest.fn()} onClosed={onClosed} title="Reopened Sheet">
+          <Text>Content</Text>
+        </AppSheet>
+      );
+
+      rerender(
+        <AppSheet visible={false} onClose={jest.fn()} onClosed={onClosed} title="Reopened Sheet">
+          <Text>Content</Text>
+        </AppSheet>
+      );
+      rerender(
+        <AppSheet visible={true} onClose={jest.fn()} onClosed={onClosed} title="Reopened Sheet">
+          <Text>Content</Text>
+        </AppSheet>
+      );
+
+      act(() => {
+        jest.advanceTimersByTime(350);
+      });
+
+      expect(onClosed).not.toHaveBeenCalled();
+      expect(getByText('Reopened Sheet')).toBeTruthy();
+
+      parallelSpy.mockRestore();
+      jest.useRealTimers();
     });
   });
 
@@ -774,8 +838,9 @@ describe('AppSheet', () => {
       jest.spyOn(RNAnimated, 'parallel').mockReturnValue({ start: startMock } as any);
 
       const onClose = jest.fn();
+      const onClosed = jest.fn();
       const { UNSAFE_getAllByType } = render(
-        <AppSheet visible={true} onClose={onClose}>
+        <AppSheet visible={true} onClose={onClose} onClosed={onClosed}>
           <Text>Content</Text>
         </AppSheet>
       );
@@ -791,8 +856,9 @@ describe('AppSheet', () => {
       });
 
       // The dismiss branch called Animated.parallel().start(cb) and cb fired
-      // synchronously → onClose should have been called.
+      // synchronously → close callbacks should have been called.
       expect(onClose).toHaveBeenCalled();
+      expect(onClosed).toHaveBeenCalled();
 
       jest.restoreAllMocks();
     });

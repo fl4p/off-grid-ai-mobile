@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -48,14 +48,10 @@ function resolveSnapPoint(snap: string | number): number {
 
 function createSheetPanResponder({
   translateY,
-  backdropOpacity,
-  setModalVisible,
-  onCloseRef,
+  onDismiss,
 }: {
   translateY: Animated.Value;
-  backdropOpacity: Animated.Value;
-  setModalVisible: (v: boolean) => void;
-  onCloseRef: React.MutableRefObject<() => void>;
+  onDismiss: () => void;
 }) {
   return PanResponder.create({
     onStartShouldSetPanResponder: () => false,
@@ -67,21 +63,7 @@ function createSheetPanResponder({
     },
     onPanResponderRelease: (_, { dy, vy }) => {
       if (dy > 80 || vy > 0.5) {
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: SCREEN_HEIGHT,
-            duration: 150,
-            useNativeDriver: true,
-          }),
-          Animated.timing(backdropOpacity, {
-            toValue: 0,
-            duration: 150,
-            useNativeDriver: true,
-          }),
-        ]).start(() => {
-          setModalVisible(false);
-          onCloseRef.current();
-        });
+        onDismiss();
       } else {
         Animated.spring(translateY, {
           toValue: 0,
@@ -116,6 +98,8 @@ export const AppSheet: React.FC<AppSheetProps> = ({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const closeFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeRunIdRef = useRef(0);
 
   // Keep onClose ref current for PanResponder
   const onCloseRef = useRef(onClose);
@@ -173,6 +157,22 @@ export const AppSheet: React.FC<AppSheetProps> = ({
   const animateOut = useCallback(
     (cb?: () => void) => {
       backdropEnabled.current = false;
+      if (closeFallbackTimeoutRef.current) {
+        clearTimeout(closeFallbackTimeoutRef.current);
+      }
+      const closeRunId = closeRunIdRef.current + 1;
+      closeRunIdRef.current = closeRunId;
+      let completed = false;
+      const finish = () => {
+        if (completed || closeRunId !== closeRunIdRef.current) return;
+        completed = true;
+        if (closeFallbackTimeoutRef.current) {
+          clearTimeout(closeFallbackTimeoutRef.current);
+          closeFallbackTimeoutRef.current = null;
+        }
+        cb?.();
+      };
+      closeFallbackTimeoutRef.current = setTimeout(finish, 350);
       Animated.parallel([
         Animated.timing(translateY, {
           toValue: SCREEN_HEIGHT,
@@ -184,16 +184,29 @@ export const AppSheet: React.FC<AppSheetProps> = ({
           duration: 200,
           useNativeDriver: true,
         }),
-      ]).start(() => cb?.());
+      ]).start(finish);
     },
     [translateY, backdropOpacity],
   );
+
+  useEffect(() => () => {
+    closeRunIdRef.current += 1;
+    if (closeFallbackTimeoutRef.current) {
+      clearTimeout(closeFallbackTimeoutRef.current);
+      closeFallbackTimeoutRef.current = null;
+    }
+  }, []);
 
   // Track whether we should animate on next onShow
   const pendingAnimateIn = useRef(false);
 
   useEffect(() => {
     if (visible) {
+      closeRunIdRef.current += 1;
+      if (closeFallbackTimeoutRef.current) {
+        clearTimeout(closeFallbackTimeoutRef.current);
+        closeFallbackTimeoutRef.current = null;
+      }
       pendingAnimateIn.current = true;
       // Dismiss keyboard first, then open — prevents animation conflict
       const keyboardVisible = Keyboard.isVisible?.() ?? false;
@@ -227,6 +240,10 @@ export const AppSheet: React.FC<AppSheetProps> = ({
         onClosedRef.current?.();
       });
     }
+  // Intentionally keyed to the external visibility prop. Including internal
+  // modalVisible here can re-arm pendingAnimateIn after Modal.onShow has
+  // already fired, leaving the sheet translated mostly off-screen.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   // Track keyboard height so the sheet lifts above the keyboard
@@ -264,9 +281,10 @@ export const AppSheet: React.FC<AppSheetProps> = ({
   }, [dismiss]);
 
   // Swipe-to-dismiss on handle
-  const panResponder = useRef(
-    createSheetPanResponder({ translateY, backdropOpacity, setModalVisible, onCloseRef }),
-  ).current;
+  const panResponder = useMemo(
+    () => createSheetPanResponder({ translateY, onDismiss: dismiss }),
+    [translateY, dismiss],
+  );
 
   if (!modalVisible && !visible) {
     return null;

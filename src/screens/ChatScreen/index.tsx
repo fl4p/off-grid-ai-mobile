@@ -45,6 +45,7 @@ export const ChatScreen: React.FC = () => {
 
   // Collapsed Models control (shared with home): header "Models" → manager sheet.
   const [modelsManagerOpen, setModelsManagerOpen] = useState(false);
+  const pendingAfterCloseRef = useRef<(() => void) | null>(null);
   const [whisperOpen, setWhisperOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const voiceSummary = useUiModeStore((s) => s.voiceSummary);
@@ -55,11 +56,21 @@ export const ChatScreen: React.FC = () => {
     voice: voiceSummary ?? '—',
     speech: WHISPER_MODELS.find((m) => m.id === whisperModelId)?.name ?? '—',
   };
-  const openModelRow = (type: ModelRowType) => {
+  const closeManagerThen = (action: () => void) => {
+    pendingAfterCloseRef.current = action;
     setModelsManagerOpen(false);
-    if (type === 'text' || type === 'image') chat.setShowModelSelector(true);
-    else if (type === 'speech') setWhisperOpen(true);
-    else setVoiceOpen(true);
+  };
+  const openModelRow = (type: ModelRowType) => {
+    closeManagerThen(() => {
+      if (type === 'text' || type === 'image') chat.setShowModelSelector(true);
+      else if (type === 'speech') setWhisperOpen(true);
+      else setVoiceOpen(true);
+    });
+  };
+  const runPendingAfterClose = () => {
+    const action = pendingAfterCloseRef.current;
+    pendingAfterCloseRef.current = null;
+    action?.();
   };
   const pendingNextRef = useRef<number | null>(null);
 
@@ -253,6 +264,7 @@ export const ChatScreen: React.FC = () => {
         <ModelsManagerSheet
           visible={modelsManagerOpen}
           onClose={() => setModelsManagerOpen(false)}
+          onClosed={runPendingAfterClose}
           labels={modelLabels}
           loadingState={{ isLoading: !!chat.isModelLoading, type: 'text' }}
           isEjecting={false}
