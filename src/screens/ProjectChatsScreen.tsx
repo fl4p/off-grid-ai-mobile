@@ -17,6 +17,7 @@ import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors, ThemeShadows } from '../theme';
 import { TYPOGRAPHY, SPACING } from '../constants';
 import { useChatStore, useProjectStore, useAppStore } from '../stores';
+import { useNewChatModel } from '../hooks/useActiveTextModel';
 import { Conversation } from '../types';
 import { RootStackParamList } from '../navigation/types';
 
@@ -167,7 +168,8 @@ export const ProjectChatsScreen: React.FC = () => {
 
   const { getProject } = useProjectStore();
   const { conversations, deleteConversation, setActiveConversation, createConversation } = useChatStore();
-  const { downloadedModels, activeModelId } = useAppStore();
+  const { downloadedModels } = useAppStore();
+  const newChatModel = useNewChatModel();
 
   const project = getProject(projectId);
   const hasModels = downloadedModels.length > 0;
@@ -187,9 +189,9 @@ export const ProjectChatsScreen: React.FC = () => {
       setAlertState(showAlert('No Model', 'Please download a model first from the Models tab.'));
       return;
     }
-    const modelId = activeModelId || downloadedModels[0]?.id;
+    const { modelId, serverId } = newChatModel;
     if (modelId) {
-      const newConversationId = createConversation(modelId, undefined, projectId);
+      const newConversationId = createConversation(modelId, undefined, projectId, serverId);
       navigation.navigate('Chat', { conversationId: newConversationId, projectId });
     }
   };

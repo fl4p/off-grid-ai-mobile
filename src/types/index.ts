@@ -234,7 +234,10 @@ export interface Message {
 export interface Conversation {
   id: string;
   title: string;
+  /** Model the conversation was created with. Local model id, or remote model id when serverId is set. */
   modelId: string;
+  /** Remote server id when this conversation uses a remote model; undefined for local models. */
+  serverId?: string;
   messages: Message[];
   createdAt: string;
   updatedAt: string;

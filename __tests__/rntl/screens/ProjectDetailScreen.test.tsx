@@ -69,8 +69,13 @@ jest.mock('../../../src/stores', () => ({
     const state = {
       downloadedModels: mockDownloadedModels,
       activeModelId: mockActiveModelId,
+      lastTextModelId: null,
       themeMode: 'system',
     };
+    return selector ? selector(state) : state;
+  }),
+  useRemoteServerStore: jest.fn((selector?: any) => {
+    const state = { activeServerId: null, activeRemoteTextModelId: null, discoveredModels: {} };
     return selector ? selector(state) : state;
   }),
 }));
@@ -400,7 +405,7 @@ describe('ProjectDetailScreen', () => {
       const { getByText } = render(<ProjectDetailScreen />);
       fireEvent.press(getByText('New'));
 
-      expect(mockCreateConversation).toHaveBeenCalledWith('model1', undefined, 'proj1');
+      expect(mockCreateConversation).toHaveBeenCalledWith('model1', undefined, 'proj1', undefined);
       expect(mockNavigate).toHaveBeenCalledWith('Chat', { conversationId: 'new-conv-1', projectId: 'proj1' });
     });
 
@@ -416,7 +421,7 @@ describe('ProjectDetailScreen', () => {
       const { getByText } = render(<ProjectDetailScreen />);
       fireEvent.press(getByText('New'));
 
-      expect(mockCreateConversation).toHaveBeenCalledWith('model1', undefined, 'proj1');
+      expect(mockCreateConversation).toHaveBeenCalledWith('model1', undefined, 'proj1', undefined);
     });
 
     it('falls back to first downloaded model when no active model', () => {
@@ -425,7 +430,7 @@ describe('ProjectDetailScreen', () => {
       const { getByText } = render(<ProjectDetailScreen />);
       fireEvent.press(getByText('New'));
 
-      expect(mockCreateConversation).toHaveBeenCalledWith('fallback-model', undefined, 'proj1');
+      expect(mockCreateConversation).toHaveBeenCalledWith('fallback-model', undefined, 'proj1', undefined);
     });
   });
 

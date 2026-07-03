@@ -11,6 +11,8 @@ type ActiveTextModelResult = {
   modelName: string;
   /** Whether the active model is remote */
   isRemote: boolean;
+  /** Remote server id when isRemote; undefined for local models. */
+  serverId?: string;
 };
 
 /**
@@ -36,6 +38,7 @@ export function useActiveTextModel(): ActiveTextModelResult {
           modelId: remoteModel.id,
           modelName: remoteModel.name,
           isRemote: true,
+          serverId: activeServerId,
         };
       }
     }
@@ -51,4 +54,24 @@ export function useActiveTextModel(): ActiveTextModelResult {
     }
     return { model: null, modelId: null, modelName: 'Unknown', isRemote: false };
   }, [activeServerId, activeRemoteTextModelId, discoveredModels, activeModelId, downloadedModels]);
+}
+
+/**
+ * Resolves which text model a NEW chat should start with: the currently-selected
+ * model (remote preferred over local), falling back to the last loaded local
+ * model, then the first downloaded model. Returns a null modelId when nothing is
+ * available. Use this instead of `downloadedModels[0]` so a new chat honours the
+ * user's last selection instead of resetting to the first available model.
+ */
+export function useNewChatModel(): { modelId: string | null; serverId?: string } {
+  const active = useActiveTextModel();
+  const lastTextModelId = useAppStore((s) => s.lastTextModelId);
+  const downloadedModels = useAppStore((s) => s.downloadedModels);
+
+  return useMemo(() => {
+    if (active.modelId) {
+      return { modelId: active.modelId, serverId: active.isRemote ? active.serverId : undefined };
+    }
+    return { modelId: lastTextModelId ?? downloadedModels[0]?.id ?? null };
+  }, [active, lastTextModelId, downloadedModels]);
 }

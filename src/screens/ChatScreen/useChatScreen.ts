@@ -13,7 +13,7 @@ import {
 import { liteRTService } from '../../services/litert';
 import { Message, MediaAttachment, Project, DownloadedModel, DebugInfo, RemoteModel, INFERENCE_BACKENDS } from '../../types';
 import { RootStackParamList } from '../../navigation/types';
-import { ensureModelLoadedFn, ensureTextModelForChatFn, handleModelSelectFn, handleUnloadModelFn, initiateModelLoad, useChatImageModelEffects, useChatModelStateSync } from './useChatModelActions';
+import { ensureModelLoadedFn, ensureTextModelForChatFn, handleModelSelectFn, handleUnloadModelFn, initiateModelLoad, restoreConversationModelFn, useChatImageModelEffects, useChatModelStateSync } from './useChatModelActions';
 import { startGenerationFn, handleSendFn, handleStopFn, handleSelectProjectFn, dispatchGenerationFn } from './useChatGenerationActions';
 import { handleRetryMessageFn, handleEditMessageFn, handleDeleteConversationFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
 import { getDisplayMessages, getPlaceholderText, ChatMessageItem, StreamingState } from './types';
@@ -33,6 +33,8 @@ type ActiveModelInfo = {
   model: DownloadedModel | RemoteModel | null;
   modelId: string | null;
   modelName: string;
+  /** Remote server id when isRemote; undefined for local models. */
+  serverId?: string;
 };
 
 export const useChatScreen = () => {
@@ -129,6 +131,7 @@ export const useChatScreen = () => {
           model: remoteModel,
           modelId: remoteModel.id,
           modelName: remoteModel.name,
+          serverId: activeServerId,
         };
       }
       logger.warn('[ChatScreen] Remote model not found:', activeServerId, activeRemoteTextModelId);
@@ -220,7 +223,13 @@ export const useChatScreen = () => {
 
   useEffect(() => {
     const { conversationId } = route.params || {};
-    if (conversationId) { setActiveConversation(conversationId); }
+    if (conversationId) {
+      setActiveConversation(conversationId);
+      // Re-open with the model this conversation was created with, not whatever
+      // model was globally active from another chat.
+      const conv = useChatStore.getState().conversations.find(c => c.id === conversationId);
+      restoreConversationModelFn(conv);
+    }
     else { setActiveConversation(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.conversationId]);
