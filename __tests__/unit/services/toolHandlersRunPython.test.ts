@@ -23,6 +23,14 @@ jest.mock('../../../src/stores/pythonRuntimeStore', () => ({
   usePythonRuntimeStore: { getState: () => ({ status: mockStatus }) },
 }));
 
+// The handler consults the global "online tools" switch to decide whether PyPI
+// installs are allowed. Default it on so the existing package tests hold; the
+// gate tests flip it off explicitly.
+let mockOnlineToolsEnabled = true;
+jest.mock('../../../src/stores/appStore', () => ({
+  useAppStore: { getState: () => ({ settings: { onlineToolsEnabled: mockOnlineToolsEnabled } }) },
+}));
+
 function runPython(code: unknown, extra: Record<string, unknown> = {}) {
   return executeToolCall({ id: 'call_1', name: 'run_python', arguments: { code, ...extra } });
 }
@@ -32,6 +40,7 @@ describe('run_python handler', () => {
     jest.clearAllMocks();
     mockStatus = 'installed';
     mockIsInstalled.mockReturnValue(true);
+    mockOnlineToolsEnabled = true;
   });
 
   it('errors when code is missing', async () => {
@@ -97,6 +106,35 @@ describe('run_python handler', () => {
     mockExecute.mockResolvedValue({ ok: true, stdout: 'x', stderr: '' });
     await runPython('print(1)');
     expect(mockExecute).toHaveBeenCalledWith('print(1)', {});
+  });
+
+  it('skips the PyPI install and runs code offline when online tools are off', async () => {
+    mockOnlineToolsEnabled = false;
+    mockExecute.mockResolvedValue({ ok: true, stdout: 'ran offline', stderr: '' });
+    const result = await runPython('import numpy', { packages: 'requests, beautifulsoup4' });
+
+    // Install is refused: execute runs without the packages option.
+    expect(mockExecute).toHaveBeenCalledWith('import numpy', {});
+    // The model is told why, with the package names, so it can relay to the user.
+    expect(result.content).toContain('Online tools are off');
+    expect(result.content).toContain('requests, beautifulsoup4');
+    expect(result.content).toContain('ran offline');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('still installs packages when online tools are on', async () => {
+    mockOnlineToolsEnabled = true;
+    mockExecute.mockResolvedValue({ ok: true, stdout: 'ok', stderr: '' });
+    await runPython('import requests', { packages: 'requests' });
+    expect(mockExecute).toHaveBeenCalledWith('import requests', { packages: ['requests'] });
+  });
+
+  it('does not add the offline note when no packages were requested, even with online tools off', async () => {
+    mockOnlineToolsEnabled = false;
+    mockExecute.mockResolvedValue({ ok: true, stdout: 'hi', stderr: '' });
+    const result = await runPython('print("hi")');
+    expect(mockExecute).toHaveBeenCalledWith('print("hi")', {});
+    expect(result.content).not.toContain('Online tools are off');
   });
 
   it('saves returned plot images as attachments and notes them for the model', async () => {

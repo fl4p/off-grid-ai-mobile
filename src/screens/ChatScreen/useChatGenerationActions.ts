@@ -7,6 +7,7 @@ import {
   contextCompactionService,
 } from '../../services';
 import { getToolExtensions } from '../../services/tools/extensions';
+import { filterToolsByNetworkAccess } from '../../services/tools/registry';
 import { liteRTService } from '../../services/litert';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
 import { abortPreload } from '../../services/modelPreloader';
@@ -44,6 +45,7 @@ export type GenerationDeps = {
     imageSteps?: number;
     imageGuidanceScale?: number;
     enabledTools?: string[];
+    onlineToolsEnabled?: boolean;
     cacheType?: CacheType;
     thinkingEnabled?: boolean;
   };
@@ -228,6 +230,24 @@ const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLit
   const llamaWantsThink = !isRemote && llmService.isGemma4Model() && llmService.isThinkingEnabled();
   return (liteRTWantsThink || llamaWantsThink) ? `<|think|>\n${prompt}` : prompt;
 };
+function resolveEnabledTools(deps: GenerationDeps, conversation: any, ctx: { canUseTools: boolean; isRemote: boolean }): string[] {
+  const { canUseTools, isRemote } = ctx;
+  // Online-tools switch off: withhold network tools so the model can't search/fetch.
+  let enabledTools = canUseTools
+    ? filterToolsByNetworkAccess(deps.settings.enabledTools || [], deps.settings.onlineToolsEnabled ?? false)
+    : [];
+  if (isRemote) {
+    enabledTools = enabledTools.filter(toolId => !MEMORY_TOOL_IDS.includes(toolId));
+  }
+  // Auto-add project search tools even if not in the user's enabled list.
+  if (conversation?.projectId && !enabledTools.includes('search_knowledge_base')) {
+    enabledTools = [...enabledTools, 'search_knowledge_base'];
+  }
+  if (canUseTools && !isRemote && conversation?.projectId && !enabledTools.includes('search_memory')) {
+    enabledTools = [...enabledTools, 'search_memory'];
+  }
+  return enabledTools;
+}
 function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _messageText: string): { enabledTools: string[]; rawPrompt: string; isLiteRT: boolean } {
   const project = conversation?.projectId ? useProjectStore.getState().getProject(conversation.projectId) : null;
   const { activeServerId, activeRemoteTextModelId } = useRemoteServerStore.getState();
@@ -236,19 +256,7 @@ function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _message
   // Honour the UI gate: "N/A" (supportsToolCalling === false) means the picker is unreachable, so don't inject tools the user can't disable.
   const canUseTools = deps.supportsToolCalling !== false && (llmService.supportsToolCalling() || !!(activeServerId && activeRemoteTextModelId) || isLiteRT);
 
-  let enabledTools = canUseTools ? (deps.settings.enabledTools || []) : [];
-  if (isRemote) {
-    enabledTools = enabledTools.filter(toolId => !MEMORY_TOOL_IDS.includes(toolId));
-  }
-
-  // Auto-add search_knowledge_base for project chats even if not in user's enabled list
-  if (conversation?.projectId && !enabledTools.includes('search_knowledge_base')) {
-    enabledTools = [...enabledTools, 'search_knowledge_base'];
-  }
-  if (canUseTools && !isRemote && conversation?.projectId && !enabledTools.includes('search_memory')) {
-    enabledTools = [...enabledTools, 'search_memory'];
-  }
-
+  const enabledTools = resolveEnabledTools(deps, conversation, { canUseTools, isRemote });
   const rawPrompt = project?.systemPrompt || deps.settings.systemPrompt || APP_CONFIG.defaultSystemPrompt;
   return { enabledTools, rawPrompt, isLiteRT };
 }

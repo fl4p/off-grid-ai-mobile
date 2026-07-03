@@ -42,12 +42,24 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
     return 'The Python runtime is not installed on this device. Tell the user to open Settings > Tools and enable Python (a one-time 24 MB download). After that, Python runs fully offline.';
   }
 
-  const packages = parsePackages(call.arguments.packages);
+  const requestedPackages = parsePackages(call.arguments.packages);
+  // The only network path Python has is installing PyPI packages, and the WASM
+  // sandbox's CSP already pins that to pypi.org/pythonhosted/jsdelivr (no other
+  // host is reachable, so nothing can be exfiltrated). The global "online tools"
+  // switch gates that install path: when off, run the code offline (numpy/pandas
+  // and matplotlib are bundled) but skip the install and tell the model why.
+  const { useAppStore } = require('../../stores/appStore'); // NOSONAR
+  const onlineToolsEnabled = useAppStore.getState().settings.onlineToolsEnabled ?? false;
+  const blockedInstall = requestedPackages.length > 0 && !onlineToolsEnabled;
+  const packages = blockedInstall ? [] : requestedPackages;
   const res = await pythonRuntimeService.execute(code, packages.length ? { packages } : {});
 
   const attachments = await savePlotImages(res.images);
 
   const sections: string[] = [];
+  if (blockedInstall) {
+    sections.push(`[Online tools are off, so these PyPI packages were not installed: ${requestedPackages.join(', ')}. numpy, pandas and matplotlib work offline. Tell the user to enable online tools in Settings > Web Search to install packages.]`);
+  }
   if (res.stdout) sections.push(res.stdout);
   if (res.ok && res.result !== undefined && res.result !== '') sections.push(`[result] ${res.result}`);
   if (res.stderr) sections.push(`[stderr]\n${res.stderr}`);

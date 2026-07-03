@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   Modal,
   Image,
+  Switch,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +15,7 @@ import { AnimatedEntry } from '../../components/AnimatedEntry';
 import { llmService } from '../../services';
 import { createStyles } from './styles';
 import { useTheme } from '../../theme';
+import { useAppStore } from '../../stores';
 import { getSlot, SLOTS } from '../../bootstrap/slotRegistry';
 
 type StylesType = ReturnType<typeof createStyles>;
@@ -134,7 +136,10 @@ export const EmptyChat: React.FC<{
   activeProject: any;
   setShowProjectSelector: (v: boolean) => void;
   isRemote?: boolean;
-}> = ({ styles, colors, activeModel, activeModelName, serverName, activeProject, setShowProjectSelector, isRemote }) => (
+}> = ({ styles, colors, activeModel, activeModelName, serverName, activeProject, setShowProjectSelector, isRemote }) => {
+  const onlineToolsEnabled = useAppStore(s => s.settings.onlineToolsEnabled);
+  const updateSettings = useAppStore(s => s.updateSettings);
+  return (
   <View style={styles.emptyChat}>
     <AnimatedEntry index={0} staggerMs={60}>
       <View style={styles.emptyChatIconContainer}>
@@ -169,8 +174,30 @@ export const EmptyChat: React.FC<{
           : 'This conversation is completely private. All processing happens on your device.'}
       </Text>
     </AnimatedEntry>
+    <AnimatedEntry index={5} staggerMs={60}>
+      <View style={styles.onlineToolsRow}>
+        <Icon
+          name={onlineToolsEnabled ? 'wifi' : 'wifi-off'}
+          size={16}
+          color={onlineToolsEnabled ? colors.primary : colors.textMuted}
+        />
+        <Text style={styles.onlineToolsText}>
+          {onlineToolsEnabled
+            ? 'Online tools are on. The model can search the web and read links.'
+            : 'Online tools are off. Turn on to let the model search the web and read links.'}
+        </Text>
+        <Switch
+          testID="empty-chat-online-tools-switch"
+          value={!!onlineToolsEnabled}
+          onValueChange={v => updateSettings({ onlineToolsEnabled: v })}
+          trackColor={{ false: colors.border, true: `${colors.primary}80` }}
+          thumbColor={onlineToolsEnabled ? colors.primary : colors.textMuted}
+        />
+      </View>
+    </AnimatedEntry>
   </View>
-);
+  );
+};
 
 export const ImageProgressIndicator: React.FC<{
   styles: StylesType;
