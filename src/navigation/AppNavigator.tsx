@@ -13,7 +13,7 @@ import { SpotlightTourProvider } from 'react-native-spotlight-tour';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors, ThemeShadows } from '../theme';
 import { triggerHaptic } from '../utils/haptics';
-import { useAppStore } from '../stores';
+import { useAppStore, useRemoteServerStore } from '../stores';
 import { createSpotlightSteps } from '../components/onboarding/spotlightConfig';
 import {
   OnboardingScreen,
@@ -191,6 +191,11 @@ export const AppNavigator: React.FC = () => {
   const { colors, isDark } = useTheme();
   const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding);
   const downloadedModels = useAppStore((s) => s.downloadedModels);
+  // Remote-only users have no local models but a configured server on their
+  // network. Treat a configured remote server as a valid "has a model" state
+  // so they land on Main instead of the ModelDownload ("Set Up Your AI")
+  // screen on every launch.
+  const remoteServerCount = useRemoteServerStore((s) => s.servers.length);
   const steps = useMemo(() => createSpotlightSteps(), []);
   // Reactive: screens registered at runtime (Pro activation re-runs loadProFeatures)
   // mount as real routes live, so navigate('McpServers') works without an app restart.
@@ -199,7 +204,8 @@ export const AppNavigator: React.FC = () => {
   // Determine initial route
   let initialRoute: keyof RootStackParamList = 'Onboarding';
   if (hasCompletedOnboarding) {
-    initialRoute = downloadedModels.length > 0 ? 'Main' : 'ModelDownload';
+    const hasAnyModel = downloadedModels.length > 0 || remoteServerCount > 0;
+    initialRoute = hasAnyModel ? 'Main' : 'ModelDownload';
   }
 
   return (
