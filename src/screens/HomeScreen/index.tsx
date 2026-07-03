@@ -55,6 +55,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     generatedImages,
     conversations,
     activeTextModel,
+    activeTextServerName,
     activeImageModel,
     recentConversations,
     // Remote model state
@@ -101,6 +102,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     voice: voiceSummary ?? '—',
     speech: WHISPER_MODELS.find((m) => m.id === whisperModelId)?.name ?? '—',
   };
+  const modelSubLabels: Partial<Record<ModelRowType, string>> = { text: activeTextServerName };
 
   // Stash an action and close the manager; the action runs from the manager's
   // onClosed once it has fully dismissed — so opening a picker or the eject
@@ -277,6 +279,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         onClose={() => setModelsManagerOpen(false)}
         onClosed={runPendingAfterClose}
         labels={modelLabels}
+        subLabels={modelSubLabels}
         loadingState={loadingState}
         isEjecting={isEjecting}
         hasActiveModel={!!(activeModelId || activeImageModelId || activeRemoteTextModelId || activeRemoteImageModelId)}

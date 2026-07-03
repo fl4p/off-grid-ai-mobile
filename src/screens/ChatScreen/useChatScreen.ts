@@ -33,6 +33,8 @@ type ActiveModelInfo = {
   model: DownloadedModel | RemoteModel | null;
   modelId: string | null;
   modelName: string;
+  /** Remote server id when isRemote; undefined for local models. */
+  serverId?: string;
 };
 
 export const useChatScreen = () => {
@@ -105,6 +107,7 @@ export const useChatScreen = () => {
   const activeServerId = useRemoteServerStore((s) => s.activeServerId);
   const activeRemoteTextModelId = useRemoteServerStore((s) => s.activeRemoteTextModelId);
   const discoveredModels = useRemoteServerStore((s) => s.discoveredModels);
+  const remoteServers = useRemoteServerStore((s) => s.servers);
 
   const {
     activeConversationId, conversations, createConversation, addMessage,
@@ -129,6 +132,7 @@ export const useChatScreen = () => {
           model: remoteModel,
           modelId: remoteModel.id,
           modelName: remoteModel.name,
+          serverId: activeServerId,
         };
       }
       logger.warn('[ChatScreen] Remote model not found:', activeServerId, activeRemoteTextModelId);
@@ -152,6 +156,11 @@ export const useChatScreen = () => {
   const hasTextModel = activeModelInfo.modelId !== null;
   const hasActiveModel = hasTextModel || !!activeImageModelId;
   const activeModelName = activeModelInfo.modelName;
+  // Name of the remote server backing the active model (undefined for local
+  // models) — surfaced next to the model name so remote picks show where they run.
+  const activeServerName = activeModelInfo.isRemote && activeModelInfo.serverId
+    ? remoteServers.find((s) => s.id === activeModelInfo.serverId)?.name
+    : undefined;
   const availableDownloadedTextModels = useMemo(
     () => downloadedModels.filter(model => !isSuspiciousRecoveredTextModel(model)),
     [downloadedModels],
@@ -344,7 +353,7 @@ export const useChatScreen = () => {
     viewerImageUri, setViewerImageUri, imageGenState,
     enabledTools, handleToggleTool,
     activeModelId: activeModelInfo.modelId, activeConversationId, activeConversation, activeModel,
-    activeModelInfo, hasActiveModel, hasTextModel, activeRemoteModel, activeModelName,
+    activeModelInfo, hasActiveModel, hasTextModel, activeRemoteModel, activeModelName, activeServerName,
     activeProject, activeImageModel, imageModelLoaded, isGeneratingImage,
     imageGenerationProgress: imageGenState.progress,
     imageGenerationStatus: imageGenState.status,

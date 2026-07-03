@@ -118,7 +118,12 @@ export const useHomeScreen = (navigation: HomeScreenNavigationProp) => {
     [_handleUnloadTextModel],
   );
 
-  const { model: activeTextModel, modelId: activeTextModelId } = useActiveTextModel();
+  const { model: activeTextModel, modelId: activeTextModelId, isRemote: activeTextIsRemote, serverId: activeTextServerId } = useActiveTextModel();
+  // Remote server name backing the active text model (undefined for local) —
+  // shown as a second line in the models manager sheet.
+  const activeTextServerName = activeTextIsRemote && activeTextServerId
+    ? remoteServers.find((s) => s.id === activeTextServerId)?.name
+    : undefined;
 
   const { runLANDiscovery } = useLANDiscovery({ navigation, setAlertState });
 
@@ -268,6 +273,7 @@ export const useHomeScreen = (navigation: HomeScreenNavigationProp) => {
     generatedImages,
     conversations,
     activeTextModel,
+    activeTextServerName,
     activeImageModel,
     recentConversations,
     // Remote model state

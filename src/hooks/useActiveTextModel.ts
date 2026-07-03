@@ -11,6 +11,8 @@ type ActiveTextModelResult = {
   modelName: string;
   /** Whether the active model is remote */
   isRemote: boolean;
+  /** Remote server id when isRemote; undefined for local models. */
+  serverId?: string;
 };
 
 /**
@@ -36,6 +38,7 @@ export function useActiveTextModel(): ActiveTextModelResult {
           modelId: remoteModel.id,
           modelName: remoteModel.name,
           isRemote: true,
+          serverId: activeServerId,
         };
       }
     }
