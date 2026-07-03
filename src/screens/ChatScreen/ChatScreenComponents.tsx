@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ZoomableImage } from '../../components/ZoomableImage';
 import { AttachStep } from 'react-native-spotlight-tour';
 import { ModelSelectorModal } from '../../components';
 import { AnimatedEntry } from '../../components/AnimatedEntry';
@@ -236,7 +237,7 @@ export const ImageViewerModal: React.FC<{
       <TouchableOpacity style={styles.imageViewerBackdrop} activeOpacity={1} onPress={onClose} />
       {viewerImageUri && (
         <View style={styles.imageViewerContent}>
-          <Image source={{ uri: viewerImageUri }} style={styles.fullscreenImage} resizeMode="contain" />
+          <ZoomableImage uri={viewerImageUri} containerStyle={styles.fullscreenImage} />
           <View style={styles.imageViewerActions}>
             <TouchableOpacity style={styles.imageViewerButton} onPress={onSave}>
               <Icon name="download" size={24} color={colors.text} />

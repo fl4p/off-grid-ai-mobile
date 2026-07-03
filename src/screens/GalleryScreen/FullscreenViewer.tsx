@@ -12,6 +12,7 @@ import { useTheme, useThemedStyles } from '../../theme';
 import { GeneratedImage } from '../../types';
 import { createStyles } from './styles';
 import { formatDate } from './useGalleryActions';
+import { ZoomableImage } from '../../components/ZoomableImage';
 
 interface FullscreenViewerProps {
   image: GeneratedImage | null;
@@ -49,10 +50,9 @@ export const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
         {image && (
           <View style={styles.viewerContent}>
             {!showDetails && (
-              <Image
-                source={{ uri: `file://${image.imagePath}` }}
-                style={styles.fullscreenImage}
-                resizeMode="contain"
+              <ZoomableImage
+                uri={`file://${image.imagePath}`}
+                containerStyle={styles.fullscreenImage}
               />
             )}
             {showDetails && (

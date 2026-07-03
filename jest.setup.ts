@@ -401,6 +401,8 @@ jest.mock('react-native-gesture-handler', () => {
       activeOffsetX: () => gesture,
       activeOffsetY: () => gesture,
       minDuration: () => gesture,
+      numberOfTaps: () => gesture,
+      averageTouches: () => gesture,
       onStart: () => gesture,
       onUpdate: () => gesture,
       onEnd: () => gesture,
@@ -419,6 +421,7 @@ jest.mock('react-native-gesture-handler', () => {
     Gesture: {
       Pan: mockGestureBuilder,
       Tap: mockGestureBuilder,
+      Pinch: mockGestureBuilder,
       LongPress: mockGestureBuilder,
       Race: (..._gestures: any[]) => ({}),
       Simultaneous: (..._gestures: any[]) => ({}),
