@@ -215,6 +215,18 @@ const createSectionStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     ...TYPOGRAPHY.metaSmall,
     color: colors.textMuted,
   },
+  conversationMetaSeparator: {
+    ...TYPOGRAPHY.metaSmall,
+    color: colors.textMuted,
+    marginHorizontal: SPACING.xs,
+  },
+  conversationProjectIcon: {
+    marginRight: SPACING.xs / 2,
+  },
+  conversationProjectName: {
+    ...TYPOGRAPHY.metaSmall,
+    color: colors.primary,
+  },
   deleteAction: {
     backgroundColor: colors.errorBackground,
     justifyContent: 'center' as const,
