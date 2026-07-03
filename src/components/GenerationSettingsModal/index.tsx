@@ -21,11 +21,21 @@ const DEFAULT_SETTINGS = {
   nBatch: 512,
 };
 
+function hasAnyAction(actions: Array<unknown>): boolean {
+  return actions.some(Boolean);
+}
+
+function afterSheetClose(action: (() => void) | undefined, runAfterClose: (action: () => void) => void): (() => void) | undefined {
+  if (!action) return undefined;
+  return () => runAfterClose(action);
+}
+
 interface GenerationSettingsModalProps {
   visible: boolean;
   onClose: () => void;
   onOpenProject?: () => void;
   onOpenGallery?: () => void;
+  onOpenMemory?: () => void;
   onDeleteConversation?: () => void;
   onCopyTranscript?: () => void;
   onOpenTTSSettings?: () => void;
@@ -42,6 +52,7 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
   onClose,
   onOpenProject,
   onOpenGallery,
+  onOpenMemory,
   onDeleteConversation,
   onCopyTranscript,
   onOpenTTSSettings,
@@ -89,7 +100,13 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
     action?.();
   };
 
-  const hasConversationActions = !!(onOpenProject || onOpenGallery || onDeleteConversation || onCopyTranscript);
+  const hasConversationActions = hasAnyAction([
+    onOpenProject,
+    onOpenGallery,
+    onOpenMemory,
+    onDeleteConversation,
+    onCopyTranscript,
+  ]);
 
   return (
     <AppSheet
@@ -122,10 +139,11 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
         showsVerticalScrollIndicator={false}
       >
         <ConversationActionsSection
-          onOpenProject={onOpenProject ? () => runAfterClose(onOpenProject) : undefined}
-          onOpenGallery={onOpenGallery ? () => runAfterClose(onOpenGallery) : undefined}
-          onDeleteConversation={onDeleteConversation ? () => runAfterClose(onDeleteConversation) : undefined}
-          onCopyTranscript={onCopyTranscript ? () => runAfterClose(onCopyTranscript) : undefined}
+          onOpenProject={afterSheetClose(onOpenProject, runAfterClose)}
+          onOpenGallery={afterSheetClose(onOpenGallery, runAfterClose)}
+          onOpenMemory={afterSheetClose(onOpenMemory, runAfterClose)}
+          onDeleteConversation={afterSheetClose(onDeleteConversation, runAfterClose)}
+          onCopyTranscript={afterSheetClose(onCopyTranscript, runAfterClose)}
           conversationImageCount={conversationImageCount}
           activeProjectName={activeProjectName}
         />
