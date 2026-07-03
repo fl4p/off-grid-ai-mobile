@@ -6,6 +6,7 @@ import type { ThemeColors } from '../theme';
 import { TYPOGRAPHY, SPACING, FONTS } from '../constants';
 import { markdownItMath } from '../utils/markdownItMath';
 import { MathText } from './MathText';
+import { renderEmojiRuns } from './EmojiText';
 
 /**
  * markdown-it instance extended with the `$…$` / `$$…$$` math tokenizer. Built
@@ -78,6 +79,13 @@ const selectableRules = {
   textgroup: (node: any, children: any, ...[, styles]: any[]) => (
     <Text key={node.key} style={styles.textgroup} selectable>
       {children}
+    </Text>
+  ),
+  // Mirror the library's default `text` rule but render emoji in the system font
+  // so they show as color emoji instead of the tofu `?` box under monospace Menlo.
+  text: (node: any, _children: any, ...[, styles, inheritedStyles = {}]: any[]) => (
+    <Text key={node.key} style={[inheritedStyles, styles.text]}>
+      {renderEmojiRuns(node.content, node.key)}
     </Text>
   ),
   fence: (node: any, _children: any, ...[, styles, inheritedStyles = {}]: any[]) => (
