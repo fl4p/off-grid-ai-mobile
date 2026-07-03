@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# Guard: block direct commits to main (repo policy: all changes go via PR branches).
+# core.hooksPath points here; this file is the active pre-commit for every
+# worktree of this repo.
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+if [ "$branch" = "main" ]; then
+  echo "" >&2
+  echo "COMMIT BLOCKED: you are on 'main'." >&2
+  echo "Repo policy: never commit directly to main. Create a branch first:" >&2
+  echo "  git checkout -b feat/<name>    (or fix/, docs/, chore/, test/)" >&2
+  exit 1
+fi
+
+# Delegate to the husky pre-commit pipeline when present (quality gates).
+if [ -x "$(git rev-parse --show-toplevel)/.husky/pre-commit" ]; then
+  exec "$(git rev-parse --show-toplevel)/.husky/pre-commit" "$@"
+fi
+exit 0
