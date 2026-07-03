@@ -114,10 +114,15 @@ describe('ToolsScreen', () => {
   });
 
   it('renders the page header and every free tool row', () => {
-    const { getByText, getByTestId } = render(<ToolsScreen />);
+    const { getByText, getByTestId, queryByTestId } = render(<ToolsScreen />);
     expect(getByText('Tools')).toBeTruthy();
     for (const tool of AVAILABLE_TOOLS) {
-      expect(getByTestId(`tool-picker-row-${tool.id}`)).toBeTruthy();
+      if (tool.hidden) {
+        // Hidden companions (Python filesystem tools) are not their own rows.
+        expect(queryByTestId(`tool-picker-row-${tool.id}`)).toBeNull();
+      } else {
+        expect(getByTestId(`tool-picker-row-${tool.id}`)).toBeTruthy();
+      }
     }
   });
 
@@ -223,7 +228,7 @@ describe('ToolsScreen', () => {
 
     it('shows the short one-line description in the row, not the full model instructions', () => {
       const utils = render(<ToolsScreen />);
-      expect(utils.getByText('Run Python 3.12 on-device with numpy, pandas, and matplotlib. Plots show in the chat.')).toBeTruthy();
+      expect(utils.getByText(/Run Python 3\.12 on-device with numpy, pandas, and matplotlib/)).toBeTruthy();
       // The long model-facing description must not wall off the settings list.
       expect(utils.queryByText(/sandboxed on-device interpreter/)).toBeNull();
     });

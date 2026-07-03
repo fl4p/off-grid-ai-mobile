@@ -13,6 +13,14 @@ export interface ToolDefinition {
   icon: string;
   parameters: Record<string, ToolParameter>;
   requiresNetwork?: boolean;
+  /**
+   * Backed by the on-device Python runtime (operates on the Pyodide MEMFS).
+   * These are unlocked as a group when `run_python` is enabled rather than
+   * toggled individually - see resolveEnabledToolIds.
+   */
+  requiresPython?: boolean;
+  /** Not shown as its own row in the Tools settings list (unlocked via another tool). */
+  hidden?: boolean;
 }
 
 export interface ToolParameter {

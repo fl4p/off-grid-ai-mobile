@@ -101,15 +101,20 @@ describe('run_python tool integration', () => {
   it('is exposed to the model through the OpenAI tool schema', () => {
     expect(AVAILABLE_TOOLS.some(t => t.id === 'run_python')).toBe(true);
     const schema = getToolsAsOpenAISchema(['run_python']);
-    expect(schema).toHaveLength(1);
-    expect(schema[0].function.name).toBe('run_python');
-    expect(schema[0].function.parameters.required).toEqual(['code']);
+    const py = schema.find(s => s.function.name === 'run_python')!;
+    expect(py).toBeTruthy();
+    expect(py.function.parameters.required).toEqual(['code']);
+    // Enabling Python also unlocks its filesystem companions in the schema.
+    expect(schema.map(s => s.function.name)).toEqual(
+      expect.arrayContaining(['read_file', 'write_file', 'edit_file', 'list_files', 'grep']),
+    );
   });
 
-  it('returns an install hint when the runtime is missing', async () => {
+  it('returns an updating hint when the runtime is missing', async () => {
     const result = await executeToolCall({ id: 'c1', name: 'run_python', arguments: { code: 'print(1)' } });
     expect(result.error).toBeUndefined();
-    expect(result.content).toContain('not installed');
+    expect(result.content).toContain('downloading');
+    expect(result.content).toContain('Settings > Tools');
   });
 
   it('executes code end-to-end through the injection protocol', async () => {

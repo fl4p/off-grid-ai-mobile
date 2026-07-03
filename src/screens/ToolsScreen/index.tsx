@@ -36,7 +36,10 @@ export const ToolsScreen: React.FC = () => {
   const enabledTools = useAppStore(st => st.settings.enabledTools) || [];
   const memoryEnabled = route.params?.memoryEnabled !== false;
   const visibleEnabledTools = memoryEnabled ? enabledTools : filterMemoryToolNames(enabledTools);
-  const visibleTools = memoryEnabled ? AVAILABLE_TOOLS : AVAILABLE_TOOLS.filter(tool => !isMemoryToolName(tool.id));
+  // Hidden tools (e.g. the Python filesystem companions) are unlocked via another
+  // tool's toggle, not listed as their own rows.
+  const listableTools = AVAILABLE_TOOLS.filter(tool => !tool.hidden);
+  const visibleTools = memoryEnabled ? listableTools : listableTools.filter(tool => !isMemoryToolName(tool.id));
   const updateSettings = useAppStore(st => st.updateSettings);
   const toolCountHintDismissed = useAppStore(st => st.toolCountHintDismissed);
   const setToolCountHintDismissed = useAppStore(st => st.setToolCountHintDismissed);

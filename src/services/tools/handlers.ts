@@ -3,12 +3,22 @@ import DeviceInfo from 'react-native-device-info';
 import { ToolCall, ToolResult } from './types';
 import type { MediaAttachment } from '../../types';
 import { handleRunPython, type PythonDispatchResult } from './pythonToolHandler';
+import { handleReadFile, handleWriteFile, handleEditFile, handleListFiles, handleGrep } from './pythonFsToolHandler';
 import { getActiveSearchProvider, type SearchResult } from './search';
 import { getSearchApiKey } from './search/searchKeychain';
 import logger from '../../utils/logger';
 
 /** A handler may return plain text, or text plus media to show the user. */
 type DispatchResult = PythonDispatchResult;
+
+/** Python-runtime filesystem tools: uniform (call) -> Promise<string> shape. */
+const PYTHON_FS_HANDLERS: Record<string, (call: ToolCall) => Promise<string>> = {
+  read_file: handleReadFile,
+  write_file: handleWriteFile,
+  edit_file: handleEditFile,
+  list_files: handleListFiles,
+  grep: handleGrep,
+};
 
 function makeResult(call: ToolCall, start: number, opts: { content: string; error?: string; attachments?: MediaAttachment[] }): ToolResult {
   return { toolCallId: call.id, name: call.name, content: opts.content, error: opts.error, attachments: opts.attachments, durationMs: Date.now() - start };
@@ -67,8 +77,14 @@ async function dispatchTool(call: ToolCall): Promise<DispatchResult> {
       if (!code) throw new Error('Missing required parameter: code');
       return handleRunPython(call, code);
     }
-    default:
+    default: {
+      // Python filesystem tools (read/write/edit/list/grep) validate their own
+      // args and share one call shape, so they route through a map rather than
+      // adding near-identical switch arms.
+      const fsHandler = PYTHON_FS_HANDLERS[call.name];
+      if (fsHandler) return fsHandler(call);
       throw new Error(`Unknown tool: ${call.name}`);
+    }
   }
 }
 

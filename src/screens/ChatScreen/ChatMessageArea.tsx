@@ -94,7 +94,7 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
   const proToolsCount = proToolsActiveCount + extToolCount;
   // The free Tools page lists only AVAILABLE_TOOLS, so its badge counts just those
   // (pro email/calendar ids are surfaced under Pro Tools instead, not double-counted).
-  const freeToolIds = new Set(AVAILABLE_TOOLS.map(t => t.id));
+  const freeToolIds = new Set(AVAILABLE_TOOLS.filter(t => !t.hidden).map(t => t.id));
   const freeToolsCount = chat.enabledTools.filter(id => freeToolIds.has(id)).length;
   const totalToolCount = freeToolsCount + proToolsCount;
   const handleProToolsPress = useOpenProTools();
