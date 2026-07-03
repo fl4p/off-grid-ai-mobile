@@ -288,7 +288,7 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
   // buildPromptWithToolNote adds only the built-in-tools line; MCP/extension hints
   // come solely from augmentSystemPromptForTools in the tool loop (no double-inject).
   const systemPrompt = applyGemma4ThinkToken(
-    buildPromptWithToolNote(basePrompt, activeTools, useTextHint),
+    buildPromptWithToolNote(basePrompt, { activeToolIds: activeTools, useTextHint, hasOtherTools: getToolExtensions().some(e => e.enabledToolCount() > 0) }),
     isRemote,
     { isLiteRT, thinkingEnabled: deps.settings.thinkingEnabled },
   );
@@ -442,7 +442,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   // MCP/extension hints come solely from augmentSystemPromptForTools in the tool loop
   // (see the send path above) — adding them here too would double-inject.
   const systemPrompt = applyGemma4ThinkToken(
-    buildPromptWithToolNote(basePrompt, activeTools, useTextHint),
+    buildPromptWithToolNote(basePrompt, { activeToolIds: activeTools, useTextHint, hasOtherTools: getToolExtensions().some(e => e.enabledToolCount() > 0) }),
     isRemote,
     { isLiteRT: isLiteRTRegen, thinkingEnabled: deps.settings.thinkingEnabled },
   );
