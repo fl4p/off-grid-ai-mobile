@@ -28,6 +28,9 @@ export interface RemoteServer {
   isHealthy?: boolean;
   /** User-defined notes or description */
   notes?: string;
+  /** Whether the "Connected!" success modal has already been shown for this
+   * endpoint. Set on the first successful connect so it isn't repeated. */
+  connectedModalShown?: boolean;
 }
 
 /** Model discovered from a remote server */
