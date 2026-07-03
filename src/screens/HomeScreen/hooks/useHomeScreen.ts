@@ -275,6 +275,7 @@ export const useHomeScreen = (navigation: HomeScreenNavigationProp) => {
     remoteImageModels,
     activeRemoteTextModelId,
     activeRemoteImageModelId,
+    remoteDiscoveredModels,
     handleSelectTextModel,
     handleUnloadTextModel,
     handleSelectImageModel,
