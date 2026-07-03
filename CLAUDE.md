@@ -130,3 +130,31 @@ The repo has three automated reviewers on every PR. After pushing, loop until al
 4. Re-run local quality gates (`npm run lint && npm test && npx tsc --noEmit`)
 5. Push fixes, comment `/gemini review` on the PR to re-trigger Gemini
 6. Repeat until all three reviewers pass with no blocking issues
+
+## Pulling App Data & Chat Transcripts (debug builds)
+
+Chats persist via zustand -> AsyncStorage; the RAG knowledge base is SQLite. Both are directly readable for E2E verification (e.g. asserting OCR'd attachment text reached the model).
+
+### iOS Simulator
+
+```bash
+APP_DATA=$(xcrun simctl get_app_container booted ai.offgridmobile data)
+# Chat transcripts (JSON): key "local-llm-chat-storage" in the manifest
+python3 -c "import json; m=json.load(open('$APP_DATA/Library/Application Support/ai.offgridmobile/RCTAsyncLocalStorage_V1/manifest.json')); print(m['local-llm-chat-storage'])"
+# Knowledge base
+sqlite3 "$APP_DATA/Library/rag.db" 'SELECT * FROM rag_documents;'
+```
+
+Large AsyncStorage values are stored as separate hash-named files next to `manifest.json` (value in manifest is then null); settings live under key `local-llm-app-storage`, whisper state under `local-llm-whisper-storage`. Attached files persist in `Documents/attachments/`.
+
+### Android (debug build, device or emulator)
+
+AsyncStorage is a SQLite DB on Android:
+
+```bash
+adb exec-out run-as ai.offgridmobile.dev cat databases/RKStorage > /tmp/rkstorage.db
+sqlite3 /tmp/rkstorage.db "SELECT value FROM catalystLocalStorage WHERE key='local-llm-chat-storage';"
+adb exec-out run-as ai.offgridmobile.dev cat files/rag.db > /tmp/rag.db
+```
+
+`run-as` works only with debug builds (`ai.offgridmobile.dev` application id).

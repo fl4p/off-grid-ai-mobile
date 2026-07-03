@@ -86,9 +86,10 @@ export function useAttachments(setAlertState: (state: AlertState) => void) {
       if (!file) return;
       const fileName = file.name || 'document';
       if (!documentService.isSupported(fileName)) {
+        const supported = documentService.getSupportedExtensions().map(ext => ext.slice(1)).join(', ');
         setAlertState(showAlert(
           'Unsupported File',
-          `"${fileName}" is not supported. Supported types: txt, md, csv, json, pdf, and code files.`,
+          `"${fileName}" is not supported. Supported types: ${supported}.`,
           [{ text: 'OK' }],
         ));
         return;

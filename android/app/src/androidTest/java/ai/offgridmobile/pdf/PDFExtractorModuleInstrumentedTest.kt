@@ -8,8 +8,8 @@ import android.graphics.Rect
 import android.graphics.pdf.PdfDocument as AndroidPdfDocument
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.facebook.react.bridge.BridgeReactContext
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.WritableMap
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -63,9 +63,12 @@ class PDFExtractorModuleInstrumentedTest {
         override fun reject(message: String) = fail(null, message)
     }
 
+    @Suppress("DEPRECATION")
     private fun newModule(): PDFExtractorModule {
+        // BridgeReactContext is the concrete ReactApplicationContext; the module
+        // only uses it as a plain Android Context (pdfium init, ML Kit decode).
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-        return PDFExtractorModule(ReactApplicationContext(ctx))
+        return PDFExtractorModule(BridgeReactContext(ctx))
     }
 
     /** Draw text into a bitmap — the raster stand-in for a scanned page. */
@@ -144,6 +147,90 @@ class PDFExtractorModuleInstrumentedTest {
 
         assertTrue(
             "Expected OCR_ERROR rejection, got result=${promise.result}",
+            promise.errorMessage?.contains("OCR_ERROR") == true,
+        )
+    }
+
+    @Test
+    fun recognizeImage_capsHugeImagesInsteadOfCrashing() {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        // Camera-resolution canvas; text drawn large enough to survive the
+        // capped (2048px long side) downsample.
+        val bitmap = Bitmap.createBitmap(4400, 3400, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            textSize = 220f
+        }
+        canvas.drawText("CAPPED DECODE WORKS 9876", 300f, 1700f, paint)
+        val file = File(ctx.cacheDir, "ocr-test-huge.png")
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+
+        val promise = AwaitablePromise()
+        newModule().recognizeImage(file.path, promise)
+        promise.await()
+
+        assertNull("recognizeImage rejected: ${promise.errorMessage}", promise.errorMessage)
+        val text = promise.result as String
+        assertTrue("OCR output missing expected words. Got: $text", text.contains("9876"))
+    }
+
+    @Test
+    fun recognizeImage_appliesMirroredExifOrientation() {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        // Store a horizontally mirrored image and mark it FLIP_HORIZONTAL in
+        // EXIF — a correct pipeline un-mirrors before OCR.
+        val upright = makeTextBitmap(sampleLines)
+        val matrix = android.graphics.Matrix().apply { postScale(-1f, 1f) }
+        val mirrored = Bitmap.createBitmap(upright, 0, 0, upright.width, upright.height, matrix, true)
+        upright.recycle()
+        val file = File(ctx.cacheDir, "ocr-test-mirrored.jpg")
+        file.outputStream().use { mirrored.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+        mirrored.recycle()
+        android.media.ExifInterface(file.path).apply {
+            setAttribute(
+                android.media.ExifInterface.TAG_ORIENTATION,
+                android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL.toString(),
+            )
+            saveAttributes()
+        }
+
+        val promise = AwaitablePromise()
+        newModule().recognizeImage(file.path, promise)
+        promise.await()
+
+        assertNull("recognizeImage rejected: ${promise.errorMessage}", promise.errorMessage)
+        val text = promise.result as String
+        assertTrue(
+            "Mirrored EXIF image should OCR after un-mirroring. Got: $text",
+            text.contains("quick", ignoreCase = true) && text.contains("1234"),
+        )
+    }
+
+    @Test
+    fun recognizeImage_rejectsCleanlyAfterInvalidate() {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val bitmap = makeTextBitmap(sampleLines)
+        val file = File(ctx.cacheDir, "ocr-test-after-invalidate.png")
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+
+        val module = newModule()
+        // Warm up the recognizer, then tear the module down.
+        val warmup = AwaitablePromise()
+        module.recognizeImage(file.path, warmup)
+        warmup.await()
+        module.invalidate()
+        module.invalidate() // second teardown must not throw
+
+        val promise = AwaitablePromise()
+        module.recognizeImage(file.path, promise)
+        promise.await(30)
+
+        assertTrue(
+            "Expected shut-down rejection after invalidate, got result=${promise.result}",
             promise.errorMessage?.contains("OCR_ERROR") == true,
         )
     }
