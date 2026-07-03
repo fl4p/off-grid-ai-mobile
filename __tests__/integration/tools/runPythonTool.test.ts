@@ -106,10 +106,12 @@ describe('run_python tool integration', () => {
     expect(schema[0].function.parameters.required).toEqual(['code']);
   });
 
-  it('returns an install hint when the runtime is missing', async () => {
+  it('kicks off a download and returns an updating hint when the runtime is missing', async () => {
     const result = await executeToolCall({ id: 'c1', name: 'run_python', arguments: { code: 'print(1)' } });
     expect(result.error).toBeUndefined();
-    expect(result.content).toContain('not installed');
+    // Enabled-but-not-installed now self-heals: the handler starts the update and
+    // tells the model it is updating (was the misleading 'not installed' hint).
+    expect(result.content).toContain('updating');
   });
 
   it('executes code end-to-end through the injection protocol', async () => {
