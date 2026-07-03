@@ -13,7 +13,7 @@ import { useChatStore, useProjectStore } from '../../stores';
 import { callHook, HOOKS } from '../../bootstrap/hookRegistry';
 import { Message, MediaAttachment, Project, DownloadedModel, RemoteModel, CacheType } from '../../types';
 import logger from '../../utils/logger';
-import { injectChatContext } from './contextInjection';
+import { buildChatContext } from './contextInjection';
 import { isRemoteGeneration, maybeCaptureMemoryCandidate } from './generationMemoryCapture';
 import { buildMessagesForContext, buildMessagesWithCompactionPrefix } from './generationContextMessages';
 import { generateWithCompactionRetry } from './generationCompactionRetry';
@@ -229,12 +229,13 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
   const conversation = useChatStore.getState().conversations.find(c => c.id === targetConversationId);
   const { enabledTools, rawPrompt, isLiteRT } = resolveToolsAndPrompt(deps, conversation, messageText);
   const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
-  let basePrompt = await injectChatContext({
+  const chatContext = await buildChatContext({
     projectId: conversation?.projectId,
     query: messageText,
     prompt: rawPrompt,
     includeMemory: !isRemote,
   });
+  let basePrompt = chatContext.prompt;
 
   // In voice/audio mode the pro audio feature augments the prompt for spoken
   // output. No-op (returns undefined) in free builds.
@@ -269,6 +270,7 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
       enabledTools: activeTools,
       projectId: conversation?.projectId,
       includePreviousSummary: !isRemote,
+      recalledMemories: chatContext.recalledMemories,
     });
   } catch (error: any) {
     const msg = error?.message || error?.toString?.() || 'Failed to generate response';
@@ -413,12 +415,13 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   const { enabledTools, rawPrompt, isLiteRT: isLiteRTRegen } = resolveToolsAndPrompt(deps, conversation, messageText);
   const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
   const activeTools = enabledTools;
-  const basePrompt = await injectChatContext({
+  const chatContext = await buildChatContext({
     projectId: conversation?.projectId,
     query: messageText,
     prompt: rawPrompt,
     includeMemory: !isRemote,
   });
+  const basePrompt = chatContext.prompt;
   const useTextHint = !isRemote && !isLiteRTRegen && activeTools.length > 0 && !llmService.supportsToolCalling();
   // MCP/extension hints come solely from augmentSystemPromptForTools in the tool loop
   // (see the send path above) — adding them here too would double-inject.
@@ -441,6 +444,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
       enabledTools: activeTools,
       projectId: conversation?.projectId,
       includePreviousSummary: !isRemote,
+      recalledMemories: chatContext.recalledMemories,
     });
   } catch (error: any) {
     const msg = error?.message || 'Failed to generate response';

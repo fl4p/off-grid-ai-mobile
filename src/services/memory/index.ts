@@ -12,6 +12,7 @@ import type {
   MemoryCandidate,
   MemoryItem,
   MemoryKind,
+  MemoryRecallSummary,
   MemorySearchResult,
   MemoryScope,
 } from './types';
@@ -25,6 +26,7 @@ export type {
   MemoryCandidateStatus,
   MemoryItem,
   MemoryKind,
+  MemoryRecallSummary,
   MemoryScope,
   MemorySearchResult,
   MemoryStatus,
@@ -317,6 +319,19 @@ class MemoryService {
       const matches = matchedTerms.length ? `\nMatched: ${matchedTerms.map(safeLine).join(', ')}` : '';
       return `[${index + 1}] Memory #${memory.id}: ${title}\nKind: ${memory.kind} (${reason}, score ${score.toFixed(3)})${tags}${dateLine}${matches}\n${body}`;
     }).join('\n\n---\n\n');
+  }
+
+  formatRecallSummaries(results: MemorySearchResult[]): MemoryRecallSummary[] {
+    return results.map(({ memory, score, reason }) => ({
+      id: memory.id,
+      scope: memory.scope,
+      kind: memory.kind,
+      sourceType: safeLine(memory.source_type || 'manual'),
+      jurisdiction: memory.jurisdiction ? safeLine(memory.jurisdiction) : undefined,
+      asOfDate: memory.as_of_date ? safeLine(memory.as_of_date) : undefined,
+      score,
+      reason,
+    }));
   }
 
   private async embedMemory(memory: MemoryItem): Promise<void> {

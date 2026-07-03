@@ -1,7 +1,3 @@
-/**
- * GenerationService helper implementations — extracted to keep generationService.ts under 350 lines.
- * All functions receive the GenerationService instance as `svc: any` and mutate its internal state.
- */
 import { llmService } from './llm';
 import { liteRTService } from './litert';
 import { getActiveEngineService } from './engines';
@@ -10,6 +6,7 @@ import type { Message, GenerationMeta } from '../types';
 import { runToolLoop, buildLiteRTHistory } from './generationToolLoop';
 import type { ToolResult } from './tools/types';
 import type { GenerationOptions, CompletionResult } from './providers/types';
+import type { MemoryRecallSummary } from './memory';
 import logger from '../utils/logger';
 
 export const FLUSH_INTERVAL_MS = 50; // ~20 updates/sec
@@ -32,6 +29,7 @@ export interface GenerationWithToolsRequest {
   options: {
     enabledToolIds: string[];
     projectId?: string;
+    recalledMemories?: MemoryRecallSummary[];
     onToolCallStart?: (name: string, args: Record<string, any>) => void;
     onToolCallComplete?: (name: string, result: ToolResult) => void;
     onFirstToken?: () => void;
@@ -68,7 +66,9 @@ function buildLiteRTMeta(svc: any, modelName: string | undefined): GenerationMet
 export function buildGenerationMetaImpl(svc: any): GenerationMeta {
   const meta = buildBaseGenerationMeta(svc);
   const routed = svc.state?.routedToolNames;
+  const recalled = svc.currentRuntimeMeta?.recalledMemories;
   if (Array.isArray(routed) && routed.length > 0) meta.routedToolNames = routed;
+  if (!svc.isUsingRemoteProvider() && Array.isArray(recalled) && recalled.length > 0) meta.recalledMemories = recalled;
   return meta;
 }
 function buildBaseGenerationMeta(svc: any): GenerationMeta {

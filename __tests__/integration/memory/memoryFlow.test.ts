@@ -296,6 +296,33 @@ describe('Memory Flow Integration', () => {
     expect(prompt).toContain('Jurisdiction: United States');
   });
 
+  it('builds content-free recall summaries from searched memories', async () => {
+    await memoryService.saveMemory({
+      projectId: 'proj-tax',
+      title: 'Private VAT title contains deadline details',
+      body: 'Private note: verify the VAT filing date against Portal das Financas before filing.',
+      tags: ['private-vat-tag', 'tax'],
+      jurisdiction: 'Portugal',
+      asOfDate: '2026-07-03',
+      sourceType: 'manual',
+    });
+
+    const results = await memoryService.searchMemory({ projectId: 'proj-tax', query: 'VAT filing Portugal' });
+    const summaries = memoryService.formatRecallSummaries(results);
+
+    expect(summaries[0]).toEqual(expect.objectContaining({
+      id: 1,
+      scope: 'project',
+      sourceType: 'manual',
+      jurisdiction: 'Portugal',
+      asOfDate: '2026-07-03',
+    }));
+    expect(JSON.stringify(summaries)).not.toContain('Private note');
+    expect(JSON.stringify(summaries)).not.toContain('Private VAT title');
+    expect(JSON.stringify(summaries)).not.toContain('private-vat-tag');
+    expect(JSON.stringify(summaries)).not.toContain('VAT filing');
+  });
+
   it('keeps project memory scoped while global memory is available everywhere', async () => {
     await memoryService.saveMemory({
       projectId: 'proj-a',

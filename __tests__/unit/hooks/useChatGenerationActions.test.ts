@@ -95,6 +95,7 @@ jest.mock('../../../src/services/memory', () => ({
   memoryService: {
     searchMemory: jest.fn(() => Promise.resolve([])),
     formatForPrompt: jest.fn(() => '<memory_context>mock memory context</memory_context>'),
+    formatRecallSummaries: jest.fn(() => []),
     captureCandidateFromMessage: jest.fn(() => Promise.resolve(null)),
   },
 }));
@@ -139,6 +140,7 @@ const mockGetDocsByProject = ragService.getDocumentsByProject as jest.Mock;
 const mockFormatForPrompt = retrievalService.formatForPrompt as jest.Mock;
 const mockSearchMemory = memoryService.searchMemory as jest.Mock;
 const mockFormatMemoryForPrompt = memoryService.formatForPrompt as jest.Mock;
+const mockFormatRecallSummaries = memoryService.formatRecallSummaries as jest.Mock;
 const mockCaptureCandidateFromMessage = memoryService.captureCandidateFromMessage as jest.Mock;
 
 
@@ -191,6 +193,7 @@ beforeEach(() => {
   mockFormatForPrompt.mockReturnValue('<knowledge_base>mock RAG context</knowledge_base>');
   mockSearchMemory.mockResolvedValue([]);
   mockFormatMemoryForPrompt.mockReturnValue('<memory_context>mock memory context</memory_context>');
+  mockFormatRecallSummaries.mockReturnValue([]);
   mockCaptureCandidateFromMessage.mockResolvedValue(null);
   mockChatStoreGetState.mockReturnValue({ conversations: [], updateCompactionState: jest.fn() });
   mockProjectStoreGetProject.mockReturnValue(null);
@@ -469,7 +472,11 @@ describe('regenerateResponseFn', () => {
       activeConversation: { id: 'conv-1', messages: [userMsg] },
     });
     await regenerateResponseFn(deps, { setDebugInfo: jest.fn(), userMessage: userMsg });
-    expect(mockGenerateResponse).toHaveBeenCalledWith('conv-1', expect.any(Array));
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ recalledMemories: [] }),
+    );
     expect(deps.generatingForConversationRef.current).toBeNull();
   });
 
@@ -777,7 +784,11 @@ describe('startGenerationFn', () => {
 
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'What time is it?' });
 
-    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), { enabledToolIds: ['get_current_datetime'] });
+    expect(mockGenerateWithTools).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ enabledToolIds: ['get_current_datetime'] }),
+    );
   });
 });
 
@@ -862,6 +873,32 @@ describe('RAG context injection in startGenerationFn', () => {
     expect(messagesForDebug[0].content).toContain('<memory_context>');
   });
 
+  it('passes recalled memory summaries into assistant generation metadata', async () => {
+    const recalled = [{
+      id: 1,
+      scope: 'project',
+      kind: 'research_note',
+      sourceType: 'manual',
+      jurisdiction: 'United States',
+      asOfDate: '2026-07-03',
+      score: 0.8,
+      reason: 'lexical',
+    }];
+    const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'filing deadline?', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 1, title: 'Tax filing note' }, score: 0.8 }]);
+    mockFormatRecallSummaries.mockReturnValue(recalled);
+    const deps = makeGenerationDeps();
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'filing deadline?' });
+
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ recalledMemories: recalled }),
+    );
+  });
+
   it('does not inject memory context for remote generation', async () => {
     useRemoteServerStore.setState({ activeServerId: 'srv-1', activeRemoteTextModelId: 'gpt-4' });
     const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
@@ -877,6 +914,11 @@ describe('RAG context injection in startGenerationFn', () => {
     expect(mockSearchMemory).not.toHaveBeenCalled();
     const messagesForDebug = mockGetContextDebugInfo.mock.calls[0][0];
     expect(messagesForDebug[0].content).not.toContain('<memory_context>');
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ recalledMemories: [] }),
+    );
   });
 
   it('injects doc list and RAG context when conversation has a projectId and search returns chunks', async () => {
@@ -1278,12 +1320,22 @@ describe('generateWithCompactionRetry — context full error path', () => {
   });
 
   it('retries with compacted messages on context full error', async () => {
+    const recalled = [{
+      id: 7,
+      scope: 'project',
+      kind: 'research_note',
+      sourceType: 'manual',
+      score: 0.83,
+      reason: 'semantic',
+    }];
     const compactedMsgs = [{ id: 'system', role: 'system', content: 'summary', timestamp: 0 }];
     mockGenerateResponse
       .mockRejectedValueOnce(new Error('context full'))
       .mockResolvedValueOnce(undefined);
     mockIsContextFullError.mockReturnValue(true);
     mockCompact.mockResolvedValue(compactedMsgs);
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 7, title: 'Private title' }, score: 0.83 }]);
+    mockFormatRecallSummaries.mockReturnValue(recalled);
     (llmService.stopGeneration as jest.Mock).mockResolvedValue(undefined);
 
     const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'hi', timestamp: 0 }] };
@@ -1292,15 +1344,27 @@ describe('generateWithCompactionRetry — context full error path', () => {
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
     // Second call should be with the compacted messages
     expect(mockGenerateResponse).toHaveBeenCalledTimes(2);
+    expect(mockGenerateResponse).toHaveBeenNthCalledWith(1, 'conv-1', expect.any(Array), expect.objectContaining({ recalledMemories: recalled }));
+    expect(mockGenerateResponse).toHaveBeenNthCalledWith(2, 'conv-1', compactedMsgs, expect.objectContaining({ recalledMemories: recalled }));
     expect(mockIsContextFullError).toHaveBeenCalled();
   });
 
   it('falls back to recent messages when compact throws', async () => {
+    const recalled = [{
+      id: 8,
+      scope: 'global',
+      kind: 'preference',
+      sourceType: 'manual',
+      score: 0.7,
+      reason: 'lexical',
+    }];
     mockGenerateResponse
       .mockRejectedValueOnce(new Error('context full'))
       .mockResolvedValueOnce(undefined);
     mockIsContextFullError.mockReturnValue(true);
     mockCompact.mockRejectedValue(new Error('compact failed'));
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 8, title: 'Private preference' }, score: 0.7 }]);
+    mockFormatRecallSummaries.mockReturnValue(recalled);
     (llmService.stopGeneration as jest.Mock).mockResolvedValue(undefined);
     mockClearKVCache.mockResolvedValue(undefined);
 
@@ -1313,6 +1377,7 @@ describe('generateWithCompactionRetry — context full error path', () => {
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
     expect(mockClearKVCache).toHaveBeenCalledWith(true);
     expect(mockGenerateResponse).toHaveBeenCalledTimes(2);
+    expect(mockGenerateResponse.mock.calls[1][2]).toEqual(expect.objectContaining({ recalledMemories: recalled }));
   });
 });
 
@@ -1337,9 +1402,13 @@ describe('applyCompactionPrefix — compaction state', () => {
     const deps = makeGenerationDeps();
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'new message' });
     // Should have included compaction summary in messages
-    expect(mockGenerateResponse).toHaveBeenCalledWith('conv-1', expect.arrayContaining([
-      expect.objectContaining({ id: 'compaction-summary' }),
-    ]));
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'compaction-summary' }),
+      ]),
+      expect.objectContaining({ recalledMemories: [] }),
+    );
   });
 
   it('omits persisted compaction summaries for remote generation', async () => {

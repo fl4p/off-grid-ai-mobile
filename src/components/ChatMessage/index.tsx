@@ -12,6 +12,7 @@ import { createStyles } from './styles';
 import { MessageAttachments } from './components/MessageAttachments';
 import { MessageContent } from './components/MessageContent';
 import { GenerationMeta } from './components/GenerationMeta';
+import { MemoryRecallCollapsible } from './components/MemoryRecallCollapsible';
 import { ToolsSentCollapsible } from './components/ToolsSentCollapsible';
 import { ActionMenuSheet, EditSheet, SelectTextSheet } from './components/ActionMenuSheet';
 import { MarkdownText } from '../MarkdownText';
@@ -100,6 +101,12 @@ const RoutedToolsRow: React.FC<{ message: Message; isUser: boolean; isStreaming?
   const names = message.generationMeta?.routedToolNames;
   if (isUser || isStreaming || !names?.length) return null;
   return <ToolsSentCollapsible names={names} styles={styles} colors={colors} />;
+};
+
+const RecalledMemoriesRow: React.FC<{ message: Message; isUser: boolean; isStreaming?: boolean; styles: any; colors: any }> = ({ message, isUser, isStreaming, styles, colors }) => {
+  const memories = message.generationMeta?.recalledMemories;
+  if (isUser || isStreaming || !memories?.length) return null;
+  return <MemoryRecallCollapsible memories={memories} styles={styles} colors={colors} />;
 };
 
 const ToolResultMessage: React.FC<{ message: Message; onImagePress?: (uri: string) => void; styles: any; colors: any }> = ({ message, onImagePress, styles, colors }) => {
@@ -349,6 +356,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         />
       </View>
 
+      <RecalledMemoriesRow message={message} isUser={isUser} isStreaming={isStreaming} styles={styles} colors={colors} />
       <RoutedToolsRow message={message} isUser={isUser} isStreaming={isStreaming} styles={styles} colors={colors} />
 
       <MessageMetaRow

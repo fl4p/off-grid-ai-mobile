@@ -22,6 +22,7 @@ import {
   createDocumentAttachment,
   createGenerationMeta,
 } from '../../utils/factories';
+import type { GenerationMeta } from '../../../src/types';
 
 // The Clipboard warning is expected (deprecated in RN). No additional mock needed
 // as the tests will still work with the deprecated API.
@@ -861,6 +862,39 @@ describe('ChatMessage', () => {
       // Should not crash, just show message without metadata
       expect(getByText('No metadata')).toBeTruthy();
       expect(queryByTestId('generation-meta')).toBeNull();
+    });
+
+    it('shows recalled memories in an expandable local context row', () => {
+      const meta: GenerationMeta = {
+        ...createGenerationMeta(),
+        recalledMemories: [
+          {
+            id: 7,
+            scope: 'project',
+            kind: 'research_note',
+            sourceType: 'manual',
+            jurisdiction: 'Portugal',
+            asOfDate: '2026-07-03',
+            score: 0.8,
+            reason: 'lexical',
+          },
+        ],
+      };
+      const message = createAssistantMessage('Answer with memory context', {
+        generationMeta: meta,
+      });
+
+      const { getByTestId, getByText, queryByText } = render(<ChatMessage message={message} />);
+
+      expect(getByTestId('memory-recall-collapsible')).toBeTruthy();
+      expect(getByText('Memories used (1)')).toBeTruthy();
+      expect(queryByText('Memory #7')).toBeNull();
+
+      fireEvent.press(getByText('Memories used (1)'));
+
+      expect(getByTestId('memory-recall-7')).toBeTruthy();
+      expect(getByText('Memory #7')).toBeTruthy();
+      expect(getByText(/Project.*research note.*Manual.*Portugal.*as of 2026-07-03.*lexical/)).toBeTruthy();
     });
   });
 

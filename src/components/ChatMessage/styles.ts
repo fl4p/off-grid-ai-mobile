@@ -55,6 +55,16 @@ const createBubbleStyles = (colors: ThemeColors) => ({
     color: colors.textSecondary,
     lineHeight: 16,
   },
+  memoryRecallItem: {
+    gap: 2,
+    paddingVertical: 4,
+  },
+  memoryRecallMetaText: {
+    fontSize: 11,
+    fontFamily: FONTS.mono,
+    color: colors.textMuted,
+    lineHeight: 16,
+  },
   bubble: {
     maxWidth: '85%' as const,
     borderRadius: 8,
