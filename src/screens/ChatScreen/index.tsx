@@ -55,11 +55,26 @@ export const ChatScreen: React.FC = () => {
     voice: voiceSummary ?? '—',
     speech: WHISPER_MODELS.find((m) => m.id === whisperModelId)?.name ?? '—',
   };
-  const openModelRow = (type: ModelRowType) => {
+  // Defer opening a picker until the manager sheet has FULLY dismissed —
+  // presenting a second modal while the first is mid-dismiss wedges iOS's modal
+  // system, so the picker never appears. Run the queued action from the sheet's
+  // onClosed. Same pattern HomeScreen already uses.
+  const pendingAfterCloseRef = useRef<(() => void) | null>(null);
+  const closeManagerThen = (action: () => void) => {
+    pendingAfterCloseRef.current = action;
     setModelsManagerOpen(false);
-    if (type === 'text' || type === 'image') chat.setShowModelSelector(true);
-    else if (type === 'speech') setWhisperOpen(true);
-    else setVoiceOpen(true);
+  };
+  const openModelRow = (type: ModelRowType) => {
+    closeManagerThen(() => {
+      if (type === 'text' || type === 'image') chat.setShowModelSelector(true);
+      else if (type === 'speech') setWhisperOpen(true);
+      else setVoiceOpen(true);
+    });
+  };
+  const runPendingAfterClose = () => {
+    const action = pendingAfterCloseRef.current;
+    pendingAfterCloseRef.current = null;
+    action?.();
   };
   const pendingNextRef = useRef<number | null>(null);
 
@@ -253,7 +268,9 @@ export const ChatScreen: React.FC = () => {
         <ModelsManagerSheet
           visible={modelsManagerOpen}
           onClose={() => setModelsManagerOpen(false)}
+          onClosed={runPendingAfterClose}
           labels={modelLabels}
+          subLabels={{ text: chat.activeServerName }}
           loadingState={{ isLoading: !!chat.isModelLoading, type: 'text' }}
           isEjecting={false}
           hasActiveModel={false}

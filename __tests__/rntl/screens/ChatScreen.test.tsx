@@ -431,8 +431,14 @@ jest.mock('../../../src/components/AnimatedPressable', () => ({
 // entry animation, which doesn't flush synchronously in tests, so we render a
 // lightweight stand-in that exposes the same `models-row-*` testIDs and callback.
 jest.mock('../../../src/components/models/ModelsManagerSheet', () => ({
-  ModelsManagerSheet: ({ visible, onOpenRow }: any) => {
+  ModelsManagerSheet: ({ visible, onOpenRow, onClosed }: any) => {
+    const React = require('react');
     const { View, Text, TouchableOpacity } = require('react-native');
+    // Mirror the real sheet: fire onClosed after it goes invisible so actions
+    // deferred through onClosed (opening a picker) actually run in tests.
+    React.useEffect(() => {
+      if (!visible) { onClosed?.(); }
+    }, [visible, onClosed]);
     if (!visible) return null;
     const rows = ['text', 'image', 'voice', 'speech'];
     return (
