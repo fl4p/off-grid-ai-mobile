@@ -3,6 +3,7 @@ package ai.offgridmobile.pdf
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Matrix
 import android.media.ExifInterface
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -14,6 +15,7 @@ import ai.offgridmobile.SafePromise
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import io.legere.pdfiumandroid.PdfDocument
 import io.legere.pdfiumandroid.PdfiumCore
@@ -42,14 +44,44 @@ class PDFExtractorModule(reactContext: ReactApplicationContext) : ReactContextBa
     }
 
     // Bundled Latin recognizer — runs fully offline, no Play Services required.
-    private val recognizerDelegate = lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
-    private val recognizer by recognizerDelegate
+    // Lifecycle is guarded by recognizerLock: OCR workers register in-flight
+    // use so invalidate() (bridge teardown, dev reloads) never closes the
+    // native detector under an active Tasks.await — that would race close()
+    // against process() across the JNI boundary.
+    private val recognizerLock = Any()
+    private var recognizerInstance: TextRecognizer? = null
+    private var ocrInFlight = 0
+    private var recognizerShutDown = false
+
+    /** Returns null once the module has been invalidated. Pair with releaseRecognizer(). */
+    private fun acquireRecognizer(): TextRecognizer? = synchronized(recognizerLock) {
+        if (recognizerShutDown) return null
+        val instance = recognizerInstance
+            ?: TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also { recognizerInstance = it }
+        ocrInFlight++
+        instance
+    }
+
+    private fun releaseRecognizer() {
+        synchronized(recognizerLock) {
+            ocrInFlight--
+            if (recognizerShutDown && ocrInFlight == 0) closeRecognizerLocked()
+        }
+    }
+
+    private fun closeRecognizerLocked() {
+        recognizerInstance?.let { instance ->
+            runCatching { instance.close() }
+                .onFailure { Log.w(NAME, "recognizer.close failed: ${it.message}") }
+        }
+        recognizerInstance = null
+    }
 
     override fun invalidate() {
-        // Release the ML Kit native detector on bridge teardown (dev reloads
-        // instantiate a fresh module each time).
-        if (recognizerDelegate.isInitialized()) {
-            runCatching { recognizer.close() }
+        synchronized(recognizerLock) {
+            recognizerShutDown = true
+            // With workers in flight, the last releaseRecognizer() closes it.
+            if (ocrInFlight == 0) closeRecognizerLocked()
         }
         super.invalidate()
     }
@@ -74,11 +106,16 @@ class PDFExtractorModule(reactContext: ReactApplicationContext) : ReactContextBa
         return text
     }
 
-    private fun ocrBitmap(image: InputImage): String = try {
-        Tasks.await(recognizer.process(image), OCR_TIMEOUT_SECONDS, TimeUnit.SECONDS).text
-    } catch (e: Exception) {
-        Log.w(NAME, "OCR failed: ${e.message}")
-        ""
+    private fun ocrBitmap(image: InputImage): String {
+        val recognizer = acquireRecognizer() ?: return ""
+        return try {
+            Tasks.await(recognizer.process(image), OCR_TIMEOUT_SECONDS, TimeUnit.SECONDS).text
+        } catch (e: Exception) {
+            Log.w(NAME, "OCR failed: ${e.message}")
+            ""
+        } finally {
+            releaseRecognizer()
+        }
     }
 
     /**
@@ -132,16 +169,43 @@ class PDFExtractorModule(reactContext: ReactApplicationContext) : ReactContextBa
         return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sampleSize })
     }
 
-    /** EXIF rotation for camera photos, since we decode manually instead of using fromFilePath. */
-    private fun exifRotationDegrees(path: String): Int = try {
-        when (ExifInterface(path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> 90
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180
-            ExifInterface.ORIENTATION_ROTATE_270 -> 270
-            else -> 0
+    /**
+     * Apply the full EXIF orientation (rotation AND mirroring) to a decoded
+     * bitmap, since we decode manually instead of using fromFilePath and
+     * InputImage's rotationDegrees cannot express the mirrored orientations
+     * (tags 2/4/5/7). Recycles the input when a transform is applied.
+     */
+    private fun applyExifOrientation(bitmap: Bitmap, path: String): Bitmap {
+        val orientation = try {
+            ExifInterface(path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (e: Exception) {
+            ExifInterface.ORIENTATION_NORMAL
         }
-    } catch (e: Exception) {
-        0
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            else -> return bitmap
+        }
+        val transformed = try {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } catch (t: Throwable) {
+            Log.w(NAME, "EXIF transform failed, using untransformed bitmap: ${t.message}")
+            return bitmap
+        }
+        if (transformed != bitmap) bitmap.recycle()
+        return transformed
     }
 
     @ReactMethod
@@ -185,10 +249,14 @@ class PDFExtractorModule(reactContext: ReactApplicationContext) : ReactContextBa
                         }
                         safeResolve(promise, sb.toString())
                     } finally {
-                        doc.close()
+                        // Failures here land after safeResolve (which no-ops a
+                        // second settle) — log so they are not invisible.
+                        runCatching { doc.close() }
+                            .onFailure { Log.w(NAME, "doc.close failed: ${it.message}") }
                     }
                 } finally {
                     runCatching { fd.close() }
+                        .onFailure { Log.w(NAME, "fd.close failed: ${it.message}") }
                 }
             } catch (t: Throwable) {
                 safeReject(promise, "PDF_ERROR", "Failed to extract text: ${t.message}", t)
@@ -206,14 +274,23 @@ class PDFExtractorModule(reactContext: ReactApplicationContext) : ReactContextBa
                     return@Thread
                 }
 
-                val bitmap = decodeCappedBitmap(file.path)
-                if (bitmap == null) {
+                val decoded = decodeCappedBitmap(file.path)
+                if (decoded == null) {
                     safeReject(promise, "OCR_ERROR", "Could not decode image: ${file.path}")
                     return@Thread
                 }
+                val bitmap = applyExifOrientation(decoded, file.path)
                 try {
-                    val image = InputImage.fromBitmap(bitmap, exifRotationDegrees(file.path))
-                    val text = Tasks.await(recognizer.process(image), OCR_TIMEOUT_SECONDS, TimeUnit.SECONDS).text
+                    val recognizer = acquireRecognizer()
+                    if (recognizer == null) {
+                        safeReject(promise, "OCR_ERROR", "OCR engine has been shut down")
+                        return@Thread
+                    }
+                    val text = try {
+                        Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)), OCR_TIMEOUT_SECONDS, TimeUnit.SECONDS).text
+                    } finally {
+                        releaseRecognizer()
+                    }
                     safeResolve(promise, text)
                 } finally {
                     bitmap.recycle()
