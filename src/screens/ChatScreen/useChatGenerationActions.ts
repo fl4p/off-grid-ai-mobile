@@ -3,7 +3,7 @@ import { AlertState, showAlert, hideAlert } from '../../components';
 import { APP_CONFIG } from '../../constants';
 import {
   llmService, intentClassifier, generationService, imageGenerationService,
-  onnxImageGeneratorService, ImageGenerationState, buildToolSystemPromptHint,
+  onnxImageGeneratorService, ImageGenerationState, buildPromptWithToolNote,
   contextCompactionService,
 } from '../../services';
 import { getToolExtensions } from '../../services/tools/extensions';
@@ -285,14 +285,10 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
   // llama.cpp uses text hint only when it lacks native Jinja tool calling support.
   const useTextHint = !isRemote && !isLiteRT && activeTools.length > 0 && !llmService.supportsToolCalling();
 
-  // MCP/extension hints are injected once, centrally, by augmentSystemPromptForTools
-  // in the tool loop (covers every engine + tool path). Do NOT add them here too, or
-  // the hint lands in the system prompt twice. Only the built-in-tools text hint is
-  // added here, and only when the model lacks native Jinja tool calling.
+  // buildPromptWithToolNote adds only the built-in-tools line; MCP/extension hints
+  // come solely from augmentSystemPromptForTools in the tool loop (no double-inject).
   const systemPrompt = applyGemma4ThinkToken(
-    useTextHint
-      ? `${basePrompt}${buildToolSystemPromptHint(activeTools)}`
-      : basePrompt,
+    buildPromptWithToolNote(basePrompt, activeTools, useTextHint),
     isRemote,
     { isLiteRT, thinkingEnabled: deps.settings.thinkingEnabled },
   );
@@ -446,9 +442,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   // MCP/extension hints come solely from augmentSystemPromptForTools in the tool loop
   // (see the send path above) — adding them here too would double-inject.
   const systemPrompt = applyGemma4ThinkToken(
-    useTextHint
-      ? `${basePrompt}${buildToolSystemPromptHint(activeTools)}`
-      : basePrompt,
+    buildPromptWithToolNote(basePrompt, activeTools, useTextHint),
     isRemote,
     { isLiteRT: isLiteRTRegen, thinkingEnabled: deps.settings.thinkingEnabled },
   );

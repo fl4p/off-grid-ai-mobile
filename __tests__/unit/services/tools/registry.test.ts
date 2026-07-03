@@ -9,6 +9,7 @@ import {
   AVAILABLE_TOOLS,
   getToolsAsOpenAISchema,
   buildToolSystemPromptHint,
+  buildNoToolsNote,
 } from '../../../../src/services/tools/registry';
 
 describe('Tool Registry', () => {
@@ -161,6 +162,25 @@ describe('Tool Registry', () => {
       const hint = buildToolSystemPromptHint(['get_current_datetime']);
       expect(hint).toContain('get_current_datetime');
       expect(hint).toContain('date and time');
+    });
+  });
+
+  // ========================================================================
+  // buildNoToolsNote
+  // ========================================================================
+  describe('buildNoToolsNote', () => {
+    it('tells the model it has no tools and not to fake execution', () => {
+      const note = buildNoToolsNote();
+      expect(note).toMatch(/no tools/i);
+      expect(note).toMatch(/run code|make plots/i);
+      expect(note).toMatch(/not pretend/i);
+    });
+
+    it('stays short for small-context models (one line, well under 400 chars)', () => {
+      const note = buildNoToolsNote();
+      expect(note.trim().length).toBeLessThan(400);
+      // Only the leading blank-line separator, no other newlines.
+      expect(note.trimStart().includes('\n')).toBe(false);
     });
   });
 });
