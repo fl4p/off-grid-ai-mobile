@@ -27,6 +27,7 @@ function getToolIcon(toolName?: string): string {
     case 'calculator': return 'hash';
     case 'get_current_datetime': return 'clock';
     case 'get_device_info': return 'smartphone';
+    case 'run_python': return 'terminal';
     default: return 'tool';
   }
 }
@@ -41,6 +42,7 @@ function getToolLabel(toolName?: string, content?: string): string {
     case 'calculator': return content || 'Calculated';
     case 'get_current_datetime': return 'Retrieved date/time';
     case 'get_device_info': return 'Retrieved device info';
+    case 'run_python': return 'Python output';
     default: return toolName || 'Tool result';
   }
 }
@@ -62,7 +64,10 @@ type ToolResultBubbleProps = {
 const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
   toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, attachments, onImagePress, styles, colors,
 }) => {
-  const [expanded, setExpanded] = useState(false);
+  // Python output IS the result the user asked for (like a REPL), so show it by
+  // default instead of hiding it behind the collapse. Still collapsible for long
+  // output. Other tools stay collapsed — their label already summarises them.
+  const [expanded, setExpanded] = useState(toolName === 'run_python');
   return (
     <View testID="tool-message" style={styles.systemInfoContainer}>
       <TouchableOpacity

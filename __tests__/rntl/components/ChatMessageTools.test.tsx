@@ -144,6 +144,22 @@ describe('ChatMessage — Tool message rendering', () => {
       fireEvent.press(getByTestId('generated-image-content-0'));
       expect(onImagePress).toHaveBeenCalledWith('file:///docs/python-plots/plot-p1.png');
     });
+
+    it('shows run_python output by default without needing to expand', () => {
+      // Python output is the result the user asked for, so it renders immediately.
+      const { getByText } = renderToolResult('run_python', 'Hello from Python\n[result] 42');
+      expect(getByText(/Hello from Python/)).toBeTruthy();
+    });
+
+    it('keeps other tool output collapsed by default', () => {
+      const { queryByText } = renderToolResult('web_search', 'Detailed search results here');
+      expect(queryByText('Detailed search results here')).toBeNull();
+    });
+
+    it('labels a run_python result "Python output"', () => {
+      const { getByText } = renderToolResult('run_python', 'x = 1');
+      expect(getByText(/Python output/)).toBeTruthy();
+    });
   });
 
   // ==========================================================================
