@@ -38,6 +38,11 @@ describe('buildPythonPageHtml', () => {
     expect(html).toContain("type: 'boot_error'");
   });
 
+  it('posts boot heartbeats so a stalled boot can be pinpointed', () => {
+    expect(html).toContain("type: 'booting', phase: 'script'");
+    expect(html).toContain("type: 'booting', phase: 'loading-pyodide'");
+  });
+
   it('caps stream output at the source and sanitizes surrogates before the bridge', () => {
     expect(html).toContain(`var MAX_STREAM_CHARS = ${PAGE_MAX_STREAM_CHARS}`);
     expect(html).toContain('[output truncated]');

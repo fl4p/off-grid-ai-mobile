@@ -13,7 +13,7 @@
 
 /** Message from the page to the runtime service. */
 export interface PythonPageMessage {
-  type: 'ready' | 'result' | 'boot_error';
+  type: 'booting' | 'ready' | 'result' | 'boot_error';
   id?: string;
   ok?: boolean;
   stdout?: string;
@@ -21,6 +21,8 @@ export interface PythonPageMessage {
   result?: string;
   error?: string;
   version?: string;
+  /** Boot progress marker (for `type: 'booting'`): which phase the page reached. */
+  phase?: string;
   /** Base64 PNGs of matplotlib figures captured after the run. */
   images?: string[];
 }
@@ -147,7 +149,13 @@ export function buildPythonPageHtml(): string {
     }
   }
 
+  // Boot heartbeats: 'script' proves the page loaded and this script ran (rules
+  // out a blank WebView / failed page load); 'loading-pyodide' means we entered
+  // loadPyodide (the slow WASM fetch+compile). If boot times out, the last phase
+  // the service saw pinpoints where it stalled.
+  post({ type: 'booting', phase: 'script' });
   var bootPromise = (async function () {
+    post({ type: 'booting', phase: 'loading-pyodide' });
     var pyodide = await loadPyodide({ indexURL: './' });
     window.__pyodide = pyodide;
     return pyodide;

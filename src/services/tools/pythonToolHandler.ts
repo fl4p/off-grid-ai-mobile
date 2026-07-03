@@ -39,7 +39,7 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
     await pythonRuntimeService.refreshStatus();
   }
   if (!pythonRuntimeService.isInstalled()) {
-    return 'The Python runtime is not installed on this device. Tell the user to open Settings > Tools and enable Python (a one-time 24 MB download). After that, Python runs fully offline.';
+    return 'The Python runtime is not installed on this device. Tell the user to open Settings > Tools and enable Python (a one-time 33 MB download). After that, Python runs fully offline.';
   }
 
   const packages = parsePackages(call.arguments.packages);

@@ -68,7 +68,7 @@ export const ToolsScreen: React.FC = () => {
   const promptPythonInstall = () => {
     setAlertState(showAlert(
       'Download Python Runtime',
-      'Python needs a one-time 24 MB download (Python 3.12 with numpy and pandas). It runs entirely on your device and works offline afterwards.',
+      'Python needs a one-time 33 MB download (Python 3.12 with numpy, pandas, and matplotlib). It runs entirely on your device and works offline afterwards.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

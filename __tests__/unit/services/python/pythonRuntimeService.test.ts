@@ -8,6 +8,7 @@
 import {
   PYODIDE_ALL_ASSETS,
   PYODIDE_VERSION,
+  PYODIDE_MANIFEST_REVISION,
   PYTHON_RUNTIME_MARKER_FILE,
 } from '../../../../src/services/python/pyodideManifest';
 
@@ -72,8 +73,8 @@ function resetStore(): void {
   });
 }
 
-function writeMarker(version: string = PYODIDE_VERSION): void {
-  const content = JSON.stringify({ version, installedAt: '2026-01-01T00:00:00.000Z' });
+function writeMarker(version: string = PYODIDE_VERSION, revision: number = PYODIDE_MANIFEST_REVISION): void {
+  const content = JSON.stringify({ version, revision, installedAt: '2026-01-01T00:00:00.000Z' });
   mockFiles[MARKER_PATH] = { content, size: content.length };
 }
 
@@ -128,6 +129,19 @@ describe('pythonRuntimeService', () => {
 
     it('forces reinstall when the marker version differs', async () => {
       writeMarker('0.20.0');
+      await pythonRuntimeService.refreshStatus();
+      expect(usePythonRuntimeStore.getState().status).toBe('not_installed');
+    });
+
+    it('forces reinstall when the manifest revision is stale (e.g. matplotlib added)', async () => {
+      writeMarker(PYODIDE_VERSION, PYODIDE_MANIFEST_REVISION - 1);
+      await pythonRuntimeService.refreshStatus();
+      expect(usePythonRuntimeStore.getState().status).toBe('not_installed');
+    });
+
+    it('treats a pre-revision marker (no revision field) as stale', async () => {
+      const content = JSON.stringify({ version: PYODIDE_VERSION, installedAt: '2026-01-01T00:00:00.000Z' });
+      mockFiles[MARKER_PATH] = { content, size: content.length };
       await pythonRuntimeService.refreshStatus();
       expect(usePythonRuntimeStore.getState().status).toBe('not_installed');
     });
@@ -356,6 +370,31 @@ describe('pythonRuntimeService', () => {
       const expectation = expect(promise).rejects.toThrow('shut down');
       pythonRuntimeService.unregisterExecutor();
       await expectation;
+    });
+
+    it('surfaces a WebView page-load failure immediately instead of waiting for boot timeout', async () => {
+      // execute() requests the executor and waits for ready; a load error must
+      // reject the waiter now, not minutes later at the boot timeout.
+      const promise = pythonRuntimeService.execute('1');
+      promise.catch(() => { });
+      await tick();
+      pythonRuntimeService.notifyLoadError('HTTP 404 loading page');
+      await expect(promise).rejects.toThrow(/page failed to load|404/);
+    });
+
+    it('accepts a boot heartbeat message without resolving a waiting execution', async () => {
+      // A 'booting' phase message is informational: it must NOT settle the ready
+      // handshake, so an in-flight execute keeps waiting until a real 'result'.
+      const { promise } = await startExecution('1', { timeoutMs: 5000 }, () => {
+        pythonRuntimeService.handleWebViewMessage(
+          JSON.stringify({ type: 'booting', phase: 'loading-pyodide' }), TRUSTED_URL);
+      });
+      const settled = await Promise.race([promise, tick().then(() => 'still-pending')]);
+      expect(settled).toBe('still-pending');
+      // eslint-disable-next-line jest/valid-expect -- cleanup: unblock the hung promise
+      const cleanup = expect(promise).rejects.toThrow();
+      pythonRuntimeService.unregisterExecutor();
+      await cleanup;
     });
 
     it('drops forged result messages from an untrusted origin', async () => {

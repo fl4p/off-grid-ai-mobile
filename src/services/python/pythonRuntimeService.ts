@@ -19,6 +19,7 @@ import {
   PYODIDE_ALL_ASSETS,
   PYODIDE_TOTAL_BYTES,
   PYODIDE_VERSION,
+  PYODIDE_MANIFEST_REVISION,
   PYTHON_PAGE_FILE,
   PYTHON_RUNTIME_DIR_NAME,
   PYTHON_RUNTIME_MARKER_FILE,
@@ -75,8 +76,12 @@ export const PYTHON_SERVER_MIME_CONFIG = [
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 30000;
 /** Installing packages downloads wheels over the network — allow more headroom. */
 export const PACKAGE_INSTALL_TIMEOUT_MS = 120000;
-/** First boot compiles WASM and imports the stdlib — generous on old phones. */
-const EXECUTOR_BOOT_TIMEOUT_MS = 60000;
+/**
+ * First boot fetches ~13 MB of WASM+stdlib over the loopback server and compiles
+ * it inside the WebView — on a real device this can run well past a minute cold.
+ * 60s was too aggressive (observed boot timeouts on device), so allow 3 minutes.
+ */
+const EXECUTOR_BOOT_TIMEOUT_MS = 180000;
 
 class PythonRuntimeService {
   private executor: PythonExecutor | null = null;
@@ -90,6 +95,10 @@ class PythonRuntimeService {
   // interpreter each call, and the namespace is shared, so overlapping runs would
   // cross-contaminate. Tool calls are sequential today, but this makes it safe.
   private runQueue: Promise<unknown> = Promise.resolve();
+  // Last boot phase the page reported ('script' = page loaded, 'loading-pyodide'
+  // = inside the WASM fetch/compile). Surfaced in the boot-timeout error so a
+  // stall points at where it got stuck instead of a bare "did not start".
+  private lastBootPhase = 'not-started';
 
   getRuntimeDir(): string {
     return `${RNFS.DocumentDirectoryPath}/${PYTHON_RUNTIME_DIR_NAME}`;
@@ -103,12 +112,15 @@ class PythonRuntimeService {
       const markerPath = `${this.getRuntimeDir()}/${PYTHON_RUNTIME_MARKER_FILE}`;
       if (await RNFS.exists(markerPath)) {
         const marker = JSON.parse(await RNFS.readFile(markerPath, 'utf8'));
-        if (marker.version === PYODIDE_VERSION) {
+        // Both must match: a new pyodide version OR a new bundled asset set
+        // (e.g. matplotlib added) requires re-downloading. `?? 1` treats a
+        // pre-revision marker as the original asset set.
+        if (marker.version === PYODIDE_VERSION && (marker.revision ?? 1) === PYODIDE_MANIFEST_REVISION) {
           store.setStatus('installed');
           return;
         }
-        // Different pinned version — force a re-install.
-        logger.log('[PythonRuntime] Version changed, reinstall required:', marker.version, '->', PYODIDE_VERSION);
+        logger.log('[PythonRuntime] Manifest changed, reinstall required:',
+          `${marker.version}/rev${marker.revision ?? 1}`, '->', `${PYODIDE_VERSION}/rev${PYODIDE_MANIFEST_REVISION}`);
       }
       store.setStatus('not_installed');
     } catch (error) {
@@ -140,7 +152,7 @@ class PythonRuntimeService {
     const dir = this.getRuntimeDir();
     try {
       // Clear any prior install first: asset filenames are version-tagged, so a
-      // version bump would otherwise leave the old ~24 MB of wheels/WASM orphaned
+      // version bump would otherwise leave the old ~33 MB of wheels/WASM orphaned
       // on disk, and a half-written retry could leave stale files behind.
       if (await RNFS.exists(dir)) {
         await RNFS.unlink(dir);
@@ -182,7 +194,7 @@ class PythonRuntimeService {
       await RNFS.writeFile(`${dir}/${PYTHON_PAGE_FILE}`, buildPythonPageHtml(), 'utf8');
       await RNFS.writeFile(
         `${dir}/${PYTHON_RUNTIME_MARKER_FILE}`,
-        JSON.stringify({ version: PYODIDE_VERSION, installedAt: new Date().toISOString() }),
+        JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION, installedAt: new Date().toISOString() }),
         'utf8',
       );
 
@@ -247,6 +259,20 @@ class PythonRuntimeService {
     this.flushReadyWaiters(new Error(`Python interpreter unavailable: ${reason}`));
     this.rejectAllPending(new Error(`Python interpreter unavailable: ${reason}`));
     this.stopServer().catch(() => { /* teardown best-effort */ });
+  }
+
+  /**
+   * Called by PythonRuntimeHost when the WebView reports a load failure
+   * (onError / onHttpError). Turns a silent page-load failure — which would
+   * otherwise show only as a boot timeout minutes later — into an immediate,
+   * specific error so the cause (bad origin, 404, ATS block) is visible.
+   */
+  notifyLoadError(detail: string): void {
+    logger.error('[PythonRuntime] WebView failed to load the page:', detail);
+    this.executorReady = false;
+    const err = new Error(`Python page failed to load: ${detail}`);
+    this.flushReadyWaiters(err);
+    this.rejectAllPending(err);
   }
 
   /**
@@ -329,8 +355,15 @@ class PythonRuntimeService {
     const msg = parsePythonPageMessage(raw);
     if (!msg) return;
 
+    if (msg.type === 'booting') {
+      this.lastBootPhase = msg.phase ?? 'unknown';
+      logger.log('[PythonRuntime] Boot phase:', this.lastBootPhase);
+      return;
+    }
+
     if (msg.type === 'ready') {
       logger.log('[PythonRuntime] Interpreter ready, pyodide', msg.version);
+      this.lastBootPhase = 'ready';
       this.executorReady = true;
       this.flushReadyWaiters(null);
       return;
@@ -366,6 +399,7 @@ class PythonRuntimeService {
   private async ensureExecutorReady(): Promise<void> {
     if (this.executorReady && this.executor) return;
 
+    this.lastBootPhase = 'not-started';
     await this.ensureServer();
     usePythonRuntimeStore.getState().setExecutorRequested(true);
 
@@ -375,8 +409,9 @@ class PythonRuntimeService {
         this.readyWaiters = this.readyWaiters.filter(w => w !== waiter);
         // Self-heal: the interpreter never signalled ready (dead WebView/server
         // after backgrounding). Rebuild on the next call instead of failing forever.
-        this.notifyExecutorCrashed('interpreter did not start in time');
-        reject(new Error('Python interpreter did not start in time'));
+        // Include the last boot phase so the stall point is visible in logs/errors.
+        this.notifyExecutorCrashed(`interpreter did not start in time (last phase: ${this.lastBootPhase})`);
+        reject(new Error(`Python interpreter did not start in time (stalled at: ${this.lastBootPhase})`));
       }, EXECUTOR_BOOT_TIMEOUT_MS);
       this.readyWaiters.push(waiter);
       if (this.executorReady) {
