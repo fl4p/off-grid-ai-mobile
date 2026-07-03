@@ -57,7 +57,12 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
   if (sections.length === 0) sections.push('(no output — use print() to see values)');
 
   const output = sections.join('\n');
-  const content = output.length > MAX_OUTPUT_CHARS ? `${sliceCodePointSafe(output, MAX_OUTPUT_CHARS)}\n\n[Output truncated]` : output;
+  // Keep the TAIL, not the head: for a script the end (result, [stderr], plot
+  // note, final prints) is what matters, and the UI shows the last few lines by
+  // default. Head-truncating would drop exactly what the user wants to see.
+  const content = output.length > MAX_OUTPUT_CHARS
+    ? `[earlier output truncated]\n\n${sliceTailCodePointSafe(output, MAX_OUTPUT_CHARS)}`
+    : output;
   return attachments.length ? { content, attachments } : content;
 }
 
@@ -86,14 +91,15 @@ async function savePlotImages(images: string[] | undefined): Promise<MediaAttach
 }
 
 /**
- * Slice to at most `max` UTF-16 code units without splitting a surrogate pair.
+ * Keep the last `max` UTF-16 code units without starting on a lone low surrogate.
  * Python output (emoji, some numpy/pandas symbols) uses astral-plane chars; a
  * naive slice can leave a lone surrogate that corrupts JSON transport downstream.
  */
-function sliceCodePointSafe(text: string, max: number): string {
+function sliceTailCodePointSafe(text: string, max: number): string {
   if (text.length <= max) return text;
-  const code = text.charCodeAt(max - 1);
-  // If the cut lands right after a high surrogate, drop it too.
-  const end = code >= 0xd800 && code <= 0xdbff ? max - 1 : max;
-  return text.slice(0, end);
+  const start = text.length - max;
+  const code = text.charCodeAt(start);
+  // If the cut starts on a low surrogate, step forward one to avoid orphaning it.
+  const begin = code >= 0xdc00 && code <= 0xdfff ? start + 1 : start;
+  return text.slice(begin);
 }

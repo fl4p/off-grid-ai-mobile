@@ -55,6 +55,12 @@ const createBubbleStyles = (colors: ThemeColors) => ({
     color: colors.textSecondary,
     lineHeight: 16,
   },
+  toolPreviewNote: {
+    fontSize: 11,
+    fontFamily: FONTS.mono,
+    color: colors.textMuted,
+    marginBottom: 4,
+  },
   memoryRecallItem: {
     gap: 2,
     paddingVertical: 4,

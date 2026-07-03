@@ -160,6 +160,32 @@ describe('ChatMessage — Tool message rendering', () => {
       const { getByText } = renderToolResult('run_python', 'x = 1');
       expect(getByText(/Python output/)).toBeTruthy();
     });
+
+    it('shows only the last 10 lines of long run_python output by default', () => {
+      const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n');
+      const { getByTestId } = renderToolResult('run_python', lines);
+      const shown = getByTestId('run-python-output').props.children as string;
+      // Tail is kept: line 30 is visible, an early line (line 5) is not.
+      expect(shown).toContain('line 30');
+      expect(shown).toContain('line 21');
+      expect(shown).not.toContain('line 5\n');
+      // And the user is told how many lines were folded away.
+      expect(getByTestId('run-python-hidden-note').props.children).toContain(20);
+    });
+
+    it('expands to the full run_python output when tapped', () => {
+      const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n');
+      const { getByTestId, getByText, queryByTestId } = renderToolResult('run_python', lines);
+      fireEvent.press(getByText(/Python output/));
+      expect(getByTestId('run-python-output').props.children).toContain('line 1');
+      expect(queryByTestId('run-python-hidden-note')).toBeNull();
+    });
+
+    it('shows no expand affordance for short run_python output', () => {
+      const { queryByTestId } = renderToolResult('run_python', 'only line');
+      expect(queryByTestId('run-python-hidden-note')).toBeNull();
+      expect(queryByTestId('run-python-output')?.props.children).toBe('only line');
+    });
   });
 
   // ==========================================================================

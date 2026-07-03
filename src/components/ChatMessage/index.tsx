@@ -61,26 +61,41 @@ type ToolResultBubbleProps = {
   colors: any;
 };
 
+/** How many trailing output lines run_python shows before you tap to expand. */
+const RUN_PYTHON_PREVIEW_LINES = 10;
+
+/** Last `n` lines of `text`, plus how many earlier lines were dropped. */
+function tailPreview(text: string, n: number): { preview: string; hidden: number } {
+  const lines = text.split('\n');
+  if (lines.length <= n) return { preview: text, hidden: 0 };
+  return { preview: lines.slice(-n).join('\n'), hidden: lines.length - n };
+}
+
 const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
   toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, attachments, onImagePress, styles, colors,
 }) => {
-  // Python output IS the result the user asked for (like a REPL), so show it by
-  // default instead of hiding it behind the collapse. Still collapsible for long
-  // output. Other tools stay collapsed — their label already summarises them.
-  const [expanded, setExpanded] = useState(toolName === 'run_python');
+  const [expanded, setExpanded] = useState(false);
+  // Python output IS the result the user asked for (like a REPL), so show it
+  // inline instead of hiding it behind the collapse — but only the last few lines
+  // (usually the result/summary), so a chatty script doesn't wall off the chat.
+  // Tap to expand to the full captured output. Rendered monospace so program
+  // output isn't reflowed by the markdown renderer. Other tools keep their
+  // one-line label + markdown detail behind the collapse.
+  const python = toolName === 'run_python' && hasDetails ? tailPreview(content, RUN_PYTHON_PREVIEW_LINES) : null;
+  const canExpand = python ? python.hidden > 0 : hasDetails;
   return (
     <View testID="tool-message" style={styles.systemInfoContainer}>
       <TouchableOpacity
         style={styles.toolStatusRow}
-        onPress={hasDetails ? () => setExpanded(!expanded) : undefined}
-        activeOpacity={hasDetails ? 0.6 : 1}
-        disabled={!hasDetails}
+        onPress={canExpand ? () => setExpanded(!expanded) : undefined}
+        activeOpacity={canExpand ? 0.6 : 1}
+        disabled={!canExpand}
       >
         <Icon name={toolIcon} size={13} color={colors.textMuted} />
         <Text style={styles.toolStatusText} numberOfLines={expanded ? undefined : 2} testID={`tool-result-label-${toolName || 'unknown'}`}>
           {toolLabel}{durationLabel}
         </Text>
-        {hasDetails && (
+        {canExpand && (
           <Icon
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={12}
@@ -92,10 +107,23 @@ const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
       {!!attachments?.length && (
         <MessageAttachments attachments={attachments} isUser={false} onImagePress={onImagePress} styles={styles} colors={colors} />
       )}
-      {expanded && hasDetails && (
+      {python ? (
         <View style={styles.toolDetailContainer}>
-          <MarkdownText dimmed>{content}</MarkdownText>
+          {!expanded && python.hidden > 0 && (
+            <Text style={styles.toolPreviewNote} testID="run-python-hidden-note">
+              {python.hidden} earlier line{python.hidden > 1 ? 's' : ''} hidden - tap to show all
+            </Text>
+          )}
+          <Text style={styles.toolDetailText} testID="run-python-output">
+            {expanded ? content : python.preview}
+          </Text>
         </View>
+      ) : (
+        expanded && hasDetails && (
+          <View style={styles.toolDetailContainer}>
+            <MarkdownText dimmed>{content}</MarkdownText>
+          </View>
+        )
       )}
     </View>
   );

@@ -74,11 +74,14 @@ describe('run_python handler', () => {
     expect(result.content).toContain('use print()');
   });
 
-  it('truncates very long output', async () => {
-    mockExecute.mockResolvedValue({ ok: true, stdout: 'a'.repeat(10000), stderr: '' });
+  it('truncates very long output, keeping the tail (the end is what matters)', async () => {
+    mockExecute.mockResolvedValue({ ok: true, stdout: `HEAD_MARKER${'a'.repeat(10000)}TAIL_MARKER`, stderr: '' });
     const result = await runPython('print("a" * 10000)');
     expect(result.content.length).toBeLessThan(6200);
-    expect(result.content).toContain('[Output truncated]');
+    expect(result.content).toContain('[earlier output truncated]');
+    // The tail survives, the head is dropped.
+    expect(result.content).toContain('TAIL_MARKER');
+    expect(result.content).not.toContain('HEAD_MARKER');
   });
 
   it('surfaces execution timeouts as tool errors', async () => {
@@ -123,6 +126,6 @@ describe('run_python handler', () => {
     const result = await runPython('print(...)');
     // No unpaired surrogate survives the cut.
     expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result.content)).toBe(false);
-    expect(result.content).toContain('[Output truncated]');
+    expect(result.content).toContain('[earlier output truncated]');
   });
 });
