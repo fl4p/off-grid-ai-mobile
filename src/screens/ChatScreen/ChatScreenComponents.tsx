@@ -7,8 +7,11 @@ import {
   Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AttachStep } from 'react-native-spotlight-tour';
+import { ModelSelectorModal } from '../../components';
 import { AnimatedEntry } from '../../components/AnimatedEntry';
+import { llmService } from '../../services';
 import { createStyles } from './styles';
 import { useTheme } from '../../theme';
 import { getSlot, SLOTS } from '../../bootstrap/slotRegistry';
@@ -21,9 +24,13 @@ export const NoModelScreen: React.FC<{
   colors: ColorsType;
   navigation: any;
   hasAvailableModels: boolean;
+  showModelSelector: boolean;
   setShowModelSelector: (v: boolean) => void;
-}> = ({ styles, colors, navigation, hasAvailableModels, setShowModelSelector }) => (
-  <View style={styles.container}>
+  onSelectModel: (model: any) => void;
+  onUnloadModel: () => void;
+  isModelLoading: boolean;
+}> = ({ styles, colors, navigation, hasAvailableModels, showModelSelector, setShowModelSelector, onSelectModel, onUnloadModel, isModelLoading }) => (
+  <SafeAreaView style={styles.container} edges={['top']}>
     <View style={styles.header}>
       <View style={styles.headerRow}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -51,7 +58,15 @@ export const NoModelScreen: React.FC<{
         </TouchableOpacity>
       )}
     </View>
-  </View>
+    <ModelSelectorModal
+      visible={showModelSelector}
+      onClose={() => setShowModelSelector(false)}
+      onSelectModel={onSelectModel}
+      onUnloadModel={onUnloadModel}
+      isLoading={isModelLoading}
+      currentModelPath={llmService.getLoadedModelPath()}
+    />
+  </SafeAreaView>
 );
 
 export const ChatHeader: React.FC<{
