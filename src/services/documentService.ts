@@ -19,6 +19,14 @@ const PDF_EXTENSION = '.pdf';
 // Image extensions read via on-device OCR (Vision on iOS, ML Kit on Android)
 const IMAGE_OCR_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.heic'];
 
+// HEIC decoding requires Android 9+ (API 28); iOS supports it natively
+function imageOcrExtensions(): string[] {
+  if (Platform.OS === 'android' && Number(Platform.Version) < 28) {
+    return IMAGE_OCR_EXTENSIONS.filter(ext => ext !== '.heic');
+  }
+  return IMAGE_OCR_EXTENSIONS;
+}
+
 // How a file's content gets read
 type ContentKind = 'text' | 'pdf' | 'image';
 
@@ -46,7 +54,7 @@ class DocumentService {
     if (extension === PDF_EXTENSION && pdfExtractor.isAvailable()) {
       return true;
     }
-    if (IMAGE_OCR_EXTENSIONS.includes(extension) && pdfExtractor.supportsImageOcr()) {
+    if (imageOcrExtensions().includes(extension) && pdfExtractor.supportsImageOcr()) {
       return true;
     }
     return TEXT_EXTENSIONS.includes(extension);
@@ -117,7 +125,7 @@ class DocumentService {
 
   private detectContentKind(extension: string): ContentKind {
     if (extension === PDF_EXTENSION) return 'pdf';
-    if (IMAGE_OCR_EXTENSIONS.includes(extension)) return 'image';
+    if (imageOcrExtensions().includes(extension)) return 'image';
     return 'text';
   }
 
@@ -284,7 +292,7 @@ class DocumentService {
       exts.push(PDF_EXTENSION);
     }
     if (pdfExtractor.supportsImageOcr()) {
-      exts.push(...IMAGE_OCR_EXTENSIONS);
+      exts.push(...imageOcrExtensions());
     }
     return exts;
   }

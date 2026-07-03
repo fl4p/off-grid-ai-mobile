@@ -691,6 +691,40 @@ describe('DocumentService', () => {
       expect(extensions).not.toContain('.png');
       expect(extensions).not.toContain('.jpg');
     });
+
+    describe('HEIC platform gating', () => {
+      const originalOS = Platform.OS;
+      const originalVersion = Platform.Version;
+
+      afterEach(() => {
+        Object.defineProperty(Platform, 'OS', { value: originalOS });
+        Object.defineProperty(Platform, 'Version', { value: originalVersion });
+      });
+
+      it('excludes .heic on Android below API 28', () => {
+        Object.defineProperty(Platform, 'OS', { value: 'android' });
+        Object.defineProperty(Platform, 'Version', { value: 27 });
+
+        expect(documentService.getSupportedExtensions()).not.toContain('.heic');
+        expect(documentService.isSupported('photo.heic')).toBe(false);
+        // Other image formats stay supported
+        expect(documentService.isSupported('photo.png')).toBe(true);
+      });
+
+      it('includes .heic on Android API 28+', () => {
+        Object.defineProperty(Platform, 'OS', { value: 'android' });
+        Object.defineProperty(Platform, 'Version', { value: 28 });
+
+        expect(documentService.getSupportedExtensions()).toContain('.heic');
+        expect(documentService.isSupported('photo.heic')).toBe(true);
+      });
+
+      it('includes .heic on iOS', () => {
+        Object.defineProperty(Platform, 'OS', { value: 'ios' });
+
+        expect(documentService.getSupportedExtensions()).toContain('.heic');
+      });
+    });
   });
 
   // ========================================================================

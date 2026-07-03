@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import PDFKit
 import UIKit
 import Vision
@@ -13,6 +14,8 @@ class PDFExtractorModule: NSObject {
   private static let maxOcrPages = 50
   // Render scale for OCR input (1.0 = 72 dpi; 2.0 = 144 dpi).
   private static let ocrRenderScale: CGFloat = 2.0
+  // Cap the longer image side to bound memory for huge pages and photos.
+  private static let maxOcrDimension: CGFloat = 2048
 
   @objc
   static func requiresMainQueueSetup() -> Bool {
@@ -39,11 +42,29 @@ class PDFExtractorModule: NSObject {
   private func renderPageImage(_ page: PDFPage) -> CGImage? {
     let bounds = page.bounds(for: .mediaBox)
     guard bounds.width > 0, bounds.height > 0 else { return nil }
-    let size = CGSize(
+    var size = CGSize(
       width: bounds.width * Self.ocrRenderScale,
       height: bounds.height * Self.ocrRenderScale
     )
+    let longSide = max(size.width, size.height)
+    if longSide > Self.maxOcrDimension {
+      let scale = Self.maxOcrDimension / longSide
+      size = CGSize(width: size.width * scale, height: size.height * scale)
+    }
     return page.thumbnail(of: size, for: .mediaBox).cgImage
+  }
+
+  /// Decode an image file with the long side capped at maxOcrDimension, so a
+  /// full-resolution camera photo cannot OOM the process. ImageIO's thumbnail
+  /// path also applies EXIF orientation.
+  private func loadImageCapped(_ url: URL) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: Self.maxOcrDimension,
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
   }
 
   /// Extract a page's text layer; when it is near-empty (scanned page), render
@@ -156,9 +177,12 @@ class PDFExtractorModule: NSObject {
       var ocrPagesUsed = 0
       for pageIndex in 0..<document.pageCount {
         if let page = document.page(at: pageIndex) {
-          fullText += self.extractPageText(page, ocrPagesUsed: &ocrPagesUsed)
-          if pageIndex < document.pageCount - 1 {
-            fullText += "\n\n"
+          let pageText = self.extractPageText(page, ocrPagesUsed: &ocrPagesUsed)
+          if !pageText.isEmpty {
+            fullText += pageText
+            if pageIndex < document.pageCount - 1 {
+              fullText += "\n\n"
+            }
           }
         }
 
@@ -180,15 +204,29 @@ class PDFExtractorModule: NSObject {
   @objc
   func recognizeImage(_ filePath: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
     DispatchQueue.global(qos: .userInitiated).async {
-      let path: String
-      if filePath.hasPrefix("file://"), let url = URL(string: filePath) {
-        path = url.path
+      // Same URL handling as extractText: reject unparseable file:// URIs
+      // instead of silently degrading to a broken path.
+      var url: URL?
+      if filePath.hasPrefix("file://") {
+        url = URL(string: filePath)
       } else {
-        path = filePath
+        url = URL(fileURLWithPath: filePath)
       }
 
-      guard let image = UIImage(contentsOfFile: path), let cgImage = image.cgImage else {
-        reject("OCR_ERROR", "Could not load image at path: \(path)", nil as NSError?)
+      guard let url = url else {
+        reject("OCR_ERROR", "Invalid file path: \(filePath)", nil as NSError?)
+        return
+      }
+
+      let didStartAccessing = url.startAccessingSecurityScopedResource()
+      defer {
+        if didStartAccessing {
+          url.stopAccessingSecurityScopedResource()
+        }
+      }
+
+      guard let cgImage = self.loadImageCapped(url) else {
+        reject("OCR_ERROR", "Could not load image at path: \(url.path)", nil as NSError?)
         return
       }
 

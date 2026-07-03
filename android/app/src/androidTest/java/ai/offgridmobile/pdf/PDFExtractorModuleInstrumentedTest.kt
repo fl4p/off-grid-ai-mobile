@@ -8,8 +8,8 @@ import android.graphics.Rect
 import android.graphics.pdf.PdfDocument as AndroidPdfDocument
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.facebook.react.bridge.BridgeReactContext
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.WritableMap
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -63,9 +63,12 @@ class PDFExtractorModuleInstrumentedTest {
         override fun reject(message: String) = fail(null, message)
     }
 
+    @Suppress("DEPRECATION")
     private fun newModule(): PDFExtractorModule {
+        // BridgeReactContext is the concrete ReactApplicationContext; the module
+        // only uses it as a plain Android Context (pdfium init, ML Kit decode).
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-        return PDFExtractorModule(ReactApplicationContext(ctx))
+        return PDFExtractorModule(BridgeReactContext(ctx))
     }
 
     /** Draw text into a bitmap — the raster stand-in for a scanned page. */
