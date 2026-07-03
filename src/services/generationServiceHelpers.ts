@@ -376,6 +376,20 @@ export async function generateResponseImpl(
   }
 }
 
+/**
+ * Shared teardown for a remote generation that fails mid-stream (e.g. a TLS/network
+ * drop on flaky wifi). Without it isGenerating stays true, so the stop button sticks
+ * and drainQueue() never releases queued messages. Also flags the server offline.
+ */
+function tearDownFailedRemoteGeneration(svc: any): void {
+  const failedServerId = useRemoteServerStore.getState().activeServerId;
+  if (failedServerId) useRemoteServerStore.getState().updateServerHealth(failedServerId, false);
+  if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
+  svc.tokenBuffer = '';
+  useChatStore.getState().clearStreamingMessage();
+  svc.resetState();
+}
+
 export async function generateRemoteResponseImpl(
   svc: any,
   req: GenerationRequest,
@@ -438,23 +452,14 @@ export async function generateRemoteResponseImpl(
       onError: (error: Error) => {
         if (generationSignal.aborted) return;
         logger.error('[GenerationService] Remote generation error:', error);
-        if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-        svc.tokenBuffer = '';
-        chatStore.clearStreamingMessage();
-        svc.resetState();
+        tearDownFailedRemoteGeneration(svc);
         throw error;
       },
     });
   } catch (error) {
     if (generationSignal.aborted) return;
     logger.error('[GenerationService] Remote generation error:', error);
-    // Mark server as offline so the Remote Servers screen reflects the failure
-    const failedServerId = useRemoteServerStore.getState().activeServerId;
-    if (failedServerId) useRemoteServerStore.getState().updateServerHealth(failedServerId, false);
-    if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-    svc.tokenBuffer = '';
-    chatStore.clearStreamingMessage();
-    svc.resetState();
+    tearDownFailedRemoteGeneration(svc);
     throw error;
   } finally {
     svc.currentRemoteAbortController = null;
@@ -466,35 +471,30 @@ export async function generateRemoteWithToolsImpl(
   req: GenerationWithToolsRequest,
 ): Promise<void> {
   const { conversationId, messages, options } = req;
-  logger.log(`[GenService][DEBUG] generateRemoteWithToolsImpl — conv=${conversationId}, messages=${messages.length}, enabledToolIds=[${options.enabledToolIds.join(', ')}]`);
-  if (!(await prepareGenerationImpl(svc, conversationId))) {
-    logger.log(`[GenService][DEBUG] prepareGeneration returned false, aborting`);
-    return;
-  }
+  if (!(await prepareGenerationImpl(svc, conversationId))) return;
   const provider = svc.getCurrentProvider();
-
   if (!provider) { svc.resetState(); throw new Error('No remote provider available'); }
-  logger.log(`[GenService][DEBUG] Provider ready — type=${provider.type}, capabilities=${JSON.stringify(provider.capabilities)}`);
 
   const { enabledToolIds, projectId, ...callbacks } = options;
-
-  // Use the same tool loop but with remote provider
-  await runToolLoop({
-    conversationId, messages, enabledToolIds, projectId, callbacks,
-    ...buildToolLoopHandlersImpl(svc),
-    forceRemote: true,
-  });
-
-  if (svc.abortRequested) {
-    logger.log(`[GenService][DEBUG] Generation was aborted, skipping finalize`);
-  } else {
-    svc.forceFlushTokens();
-    const generationTime = svc.state.startTime ? Date.now() - svc.state.startTime : undefined;
-    logger.log(`[GenService][DEBUG] Finalizing — streamingContent length=${svc.state.streamingContent?.length || 0}, generationTime=${generationTime}ms`);
-    useChatStore.getState().finalizeStreamingMessage(
-      conversationId, generationTime, buildGenerationMetaImpl(svc),
-    );
-    svc.checkSharePrompt();
-    svc.resetState();
+  try {
+    await runToolLoop({
+      conversationId, messages, enabledToolIds, projectId, callbacks,
+      ...buildToolLoopHandlersImpl(svc),
+      forceRemote: true,
+    });
+  } catch (error) {
+    // A mid-stream failure (e.g. a TLS/network drop on flaky wifi) must tear down
+    // service state, or isGenerating stays true forever and the queue never drains.
+    if (svc.abortRequested) return; // stopGeneration() already cleaned up
+    logger.error('[GenerationService] Remote tool generation error:', error);
+    tearDownFailedRemoteGeneration(svc);
+    throw error;
   }
+
+  if (svc.abortRequested) return; // stopGeneration() already finalized
+  svc.forceFlushTokens();
+  const generationTime = svc.state.startTime ? Date.now() - svc.state.startTime : undefined;
+  useChatStore.getState().finalizeStreamingMessage(conversationId, generationTime, buildGenerationMetaImpl(svc));
+  svc.checkSharePrompt();
+  svc.resetState();
 }
