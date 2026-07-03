@@ -688,7 +688,9 @@ async function runForcedPass(
 ): Promise<{ effectiveToolCalls: ToolCall[]; displayResponse: string }> {
   state.streamedContent = '';
   state.reasoningContent = '';
-  state.firstTokenFired = false;
+  // NB: firstTokenFired is reset once per forceFinalTextResponse (before pass 1), not
+  // per sub-pass — otherwise a second pass that streams would re-fire onThinkingDone /
+  // onFirstToken for the same logical turn (double-counting any TTFT metric).
   const onStream = buildStreamHandler(ctx, state);
   const { fullResponse, toolCalls } = await callLLMWithRetry(req.loopMessages, req.tools, {
     onStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx, toolChoice: req.toolChoice,
@@ -729,15 +731,26 @@ const FORCE_SYNTHESIS_INSTRUCTION =
  *     tool_choice:'none' doesn't reach a DeepSeek model's intent to keep searching, but
  *     a direct "answer now from what you have" turn does — otherwise the user dead-ends
  *     on the generic fallback despite the data we gathered.
+ *
+ * Layer 3 is remote-only. LiteRT does native tool calling (no server-side parser gated
+ * on `tools`), so it never has the "endpoint ignored tool_choice" problem; worse, its
+ * message→context rebuild (buildLiteRTSendText/History) keys tool results off a trailing
+ * `tool` run, and dropping `tools` to [] forces a native session reset — so appending the
+ * synthetic instruction turn would strip the very tool results we ask it to synthesize
+ * from. We skip the synthesis pass for LiteRT and let pass 1's result (or the fallback)
+ * stand, which is the pre-existing on-device behavior.
  */
 async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, req: { loopMessages: Message[]; tools: any[] }): Promise<void> {
+  state.firstTokenFired = false;
   let { effectiveToolCalls, displayResponse } = await runForcedPass(ctx, state, {
     loopMessages: req.loopMessages, tools: req.tools, toolChoice: 'none',
   });
 
   // The endpoint ignored tool_choice:'none' and returned only tool-call markup. Retry
   // with no tools and an explicit instruction so it synthesizes from the gathered results.
-  if (!displayResponse && effectiveToolCalls.length > 0) {
+  // Remote path only — see layer-3 note above for why LiteRT is excluded.
+  const litertActive = isLiteRTActive() && !!ctx.conversationId;
+  if (!displayResponse && effectiveToolCalls.length > 0 && !litertActive) {
     const synthMessages: Message[] = [...req.loopMessages, {
       id: `force-final-${Date.now()}`, role: 'user', content: FORCE_SYNTHESIS_INSTRUCTION, timestamp: Date.now(),
     }];
