@@ -317,7 +317,18 @@ jest.mock('../../../src/components', () => ({
       </View>
     );
   },
-  GenerationSettingsModal: ({ visible, onClose, onDeleteConversation, onOpenProject, onOpenGallery, onOpenMemory, conversationImageCount, activeProjectName }: any) => {
+  GenerationSettingsModal: ({
+    visible,
+    onClose,
+    onDeleteConversation,
+    onOpenProject,
+    onOpenGallery,
+    onOpenMemory,
+    onMemoryEnabledChange,
+    memoryEnabled = true,
+    conversationImageCount,
+    activeProjectName,
+  }: any) => {
     const { View, Text, TouchableOpacity } = require('react-native');
     if (!visible) return null;
     return (
@@ -338,7 +349,7 @@ jest.mock('../../../src/components', () => ({
             <Text>Open Gallery</Text>
           </TouchableOpacity>
         )}
-        {onOpenMemory && (
+        {onOpenMemory && onMemoryEnabledChange && memoryEnabled && (
           <TouchableOpacity testID="open-memory-btn" onPress={onOpenMemory}>
             <Text>Manage Memory</Text>
           </TouchableOpacity>
@@ -1380,6 +1391,51 @@ describe('ChatScreen', () => {
       fireEvent.press(getByTestId('open-memory-btn'));
 
       expect(mockNavigate).toHaveBeenCalledWith('Memory', undefined);
+    });
+
+    it('hides memory management from settings when chat memory is disabled', () => {
+      const { modelId, conversationId } = setupFullChat();
+      useChatStore.setState({
+        conversations: [{
+          ...createConversation({
+            id: conversationId,
+            modelId,
+            messages: [createUserMessage('Hi')],
+          }),
+          memoryEnabled: false,
+        }],
+        activeConversationId: conversationId,
+      });
+      mockRoute.params = { conversationId };
+
+      const { getByTestId, queryByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+
+      expect(queryByTestId('open-memory-btn')).toBeNull();
+    });
+
+    it('hides memory management from settings when project memory is disabled', () => {
+      const { modelId, conversationId } = setupFullChat();
+      const project = {
+        ...createProject({ name: 'Disabled Memory Project' }),
+        memoryEnabled: false,
+      };
+      useProjectStore.setState({ projects: [project] });
+      useChatStore.setState({
+        conversations: [createConversation({
+          id: conversationId,
+          modelId,
+          projectId: project.id,
+          messages: [createUserMessage('Hi')],
+        })],
+        activeConversationId: conversationId,
+      });
+      mockRoute.params = { conversationId };
+
+      const { getByTestId, queryByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+
+      expect(queryByTestId('open-memory-btn')).toBeNull();
     });
 
     it('opens project memory from settings when the chat has a project', () => {

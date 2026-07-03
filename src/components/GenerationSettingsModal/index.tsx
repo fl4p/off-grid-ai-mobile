@@ -103,10 +103,11 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
   const hasConversationActions = hasAnyAction([
     onOpenProject,
     onOpenGallery,
-    onOpenMemory,
     onDeleteConversation,
     onCopyTranscript,
   ]);
+  const openMemoryAfterClose = afterSheetClose(onOpenMemory, runAfterClose);
+  const showManageMemory = !!(onMemoryEnabledChange && memoryEnabled && openMemoryAfterClose);
 
   return (
     <AppSheet
@@ -141,7 +142,6 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
         <ConversationActionsSection
           onOpenProject={afterSheetClose(onOpenProject, runAfterClose)}
           onOpenGallery={afterSheetClose(onOpenGallery, runAfterClose)}
-          onOpenMemory={afterSheetClose(onOpenMemory, runAfterClose)}
           onDeleteConversation={afterSheetClose(onDeleteConversation, runAfterClose)}
           onCopyTranscript={afterSheetClose(onCopyTranscript, runAfterClose)}
           conversationImageCount={conversationImageCount}
@@ -149,24 +149,38 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
         />
 
         {onMemoryEnabledChange && (
-          <View style={styles.memoryControlRow}>
-            <Icon name="bookmark" size={16} color={colors.textSecondary} />
-            <View style={styles.memoryControlText}>
-              <Text style={styles.actionText}>Memory</Text>
-              <Text style={styles.memoryControlDescription}>
-                {memoryDisabledByProject
-                  ? 'Disabled by project settings'
-                  : 'Use local memory recall and suggestions in this chat'}
-              </Text>
+          <View testID="chat-memory-section">
+            <View testID="chat-memory-control-row" style={styles.memoryControlRow}>
+              <Icon name="bookmark" size={16} color={colors.textSecondary} />
+              <View style={styles.memoryControlText}>
+                <Text style={styles.actionText}>Memory</Text>
+                <Text style={styles.memoryControlDescription}>
+                  {memoryDisabledByProject
+                    ? 'Disabled by project settings'
+                    : 'Use local memory recall and suggestions in this chat'}
+                </Text>
+              </View>
+              <Switch
+                testID="chat-memory-toggle"
+                value={memoryEnabled}
+                disabled={memoryDisabledByProject}
+                onValueChange={onMemoryEnabledChange}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.surface}
+              />
             </View>
-            <Switch
-              testID="chat-memory-toggle"
-              value={memoryEnabled}
-              disabled={memoryDisabledByProject}
-              onValueChange={onMemoryEnabledChange}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.surface}
-            />
+
+            {showManageMemory && (
+              <TouchableOpacity
+                testID="chat-manage-memory-row"
+                style={styles.actionRow}
+                onPress={openMemoryAfterClose}
+              >
+                <Icon name="bookmark" size={16} color={colors.textSecondary} />
+                <Text style={styles.actionText}>Manage Memory</Text>
+                <Icon name="chevron-right" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
           </View>
         )}
 

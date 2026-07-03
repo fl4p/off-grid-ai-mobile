@@ -132,15 +132,13 @@ describe('GenerationSettingsModal', () => {
   it('shows conversation actions when callbacks are provided', () => {
     const onOpenProject = jest.fn();
     const onOpenGallery = jest.fn();
-    const onOpenMemory = jest.fn();
     const onDeleteConversation = jest.fn();
 
-    const { getByText } = render(
+    const { getByText, queryByText } = render(
       <GenerationSettingsModal
         {...defaultProps}
         onOpenProject={onOpenProject}
         onOpenGallery={onOpenGallery}
-        onOpenMemory={onOpenMemory}
         onDeleteConversation={onDeleteConversation}
         conversationImageCount={3}
       />,
@@ -148,7 +146,7 @@ describe('GenerationSettingsModal', () => {
 
     expect(getByText(/Project:/)).toBeTruthy();
     expect(getByText('Gallery (3)')).toBeTruthy();
-    expect(getByText('Manage Memory')).toBeTruthy();
+    expect(queryByText('Manage Memory')).toBeNull();
     expect(getByText('Delete Conversation')).toBeTruthy();
   });
 
@@ -810,12 +808,15 @@ describe('GenerationSettingsModal', () => {
   it('closes first and runs onOpenMemory only after the sheet has closed', () => {
     const onClose = jest.fn();
     const onOpenMemory = jest.fn();
+    const onMemoryEnabledChange = jest.fn();
 
     const { getByText, getByTestId } = render(
       <GenerationSettingsModal
         {...defaultProps}
         onClose={onClose}
         onOpenMemory={onOpenMemory}
+        memoryEnabled
+        onMemoryEnabledChange={onMemoryEnabledChange}
       />,
     );
 
@@ -826,6 +827,44 @@ describe('GenerationSettingsModal', () => {
 
     fireEvent.press(getByTestId('app-sheet-closed'));
     expect(onOpenMemory).toHaveBeenCalled();
+  });
+
+  it('shows Manage Memory under the enabled chat memory switch', () => {
+    const onOpenMemory = jest.fn();
+    const onMemoryEnabledChange = jest.fn();
+
+    const { getByTestId, getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onOpenMemory={onOpenMemory}
+        memoryEnabled
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(getByText('Memory')).toBeTruthy();
+    expect(getByText('Manage Memory')).toBeTruthy();
+    const memorySection = getByTestId('chat-memory-section');
+    const childTestIds = memorySection.children
+      .map((child: any) => child.props?.testID)
+      .filter(Boolean);
+    expect(childTestIds).toEqual(['chat-memory-control-row', 'chat-manage-memory-row']);
+  });
+
+  it('hides Manage Memory when chat memory is disabled', () => {
+    const onOpenMemory = jest.fn();
+    const onMemoryEnabledChange = jest.fn();
+
+    const { queryByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onOpenMemory={onOpenMemory}
+        memoryEnabled={false}
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(queryByText('Manage Memory')).toBeNull();
   });
 
   it('shows "Default" when activeProjectName is null', () => {

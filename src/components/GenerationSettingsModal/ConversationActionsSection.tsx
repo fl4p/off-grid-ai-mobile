@@ -11,7 +11,6 @@ interface ConversationActionsSectionProps {
   // old behaviour) deadlocked the app. See GenerationSettingsModal.runAfterClose.
   onOpenProject?: () => void;
   onOpenGallery?: () => void;
-  onOpenMemory?: () => void;
   onDeleteConversation?: () => void;
   onCopyTranscript?: () => void;
   conversationImageCount: number;
@@ -21,7 +20,6 @@ interface ConversationActionsSectionProps {
 export const ConversationActionsSection: React.FC<ConversationActionsSectionProps> = ({
   onOpenProject,
   onOpenGallery,
-  onOpenMemory,
   onDeleteConversation,
   onCopyTranscript,
   conversationImageCount,
@@ -30,7 +28,7 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
 
-  const hasActions = onOpenProject || onOpenGallery || onOpenMemory || onDeleteConversation || onCopyTranscript;
+  const hasActions = onOpenProject || onOpenGallery || onDeleteConversation || onCopyTranscript;
   if (!hasActions) {
     return null;
   }
@@ -52,13 +50,6 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
           <Text style={styles.actionText}>
             Gallery ({conversationImageCount})
           </Text>
-          <Icon name="chevron-right" size={16} color={colors.textMuted} />
-        </TouchableOpacity>
-      )}
-      {onOpenMemory && (
-        <TouchableOpacity style={styles.actionRow} onPress={onOpenMemory}>
-          <Icon name="bookmark" size={16} color={colors.textSecondary} />
-          <Text style={styles.actionText}>Manage Memory</Text>
           <Icon name="chevron-right" size={16} color={colors.textMuted} />
         </TouchableOpacity>
       )}
