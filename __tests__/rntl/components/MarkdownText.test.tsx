@@ -112,6 +112,28 @@ describe('MarkdownText', () => {
     const { toJSON } = render(<MarkdownText>{longUrl}</MarkdownText>);
     expect(toJSON()).toBeTruthy();
   });
+
+  it('renders emoji in the system font so they are not tofu boxes', () => {
+    const { getByText } = render(
+      <MarkdownText>{'Ah, a classic test message! 😄'}</MarkdownText>
+    );
+    const emojiNode = getByText('😄');
+    const fontFamily = Object.assign(
+      {},
+      ...[].concat(emojiNode.props.style as never).filter(Boolean)
+    ).fontFamily;
+    expect(fontFamily).toMatch(/System|sans-serif/);
+    expect(fontFamily).not.toBe('Menlo');
+  });
+
+  it('keeps emoji in bullet list items rendering as color emoji', () => {
+    const { getByText } = render(
+      <MarkdownText>{'- 🐛 Bugs and edge cases\n- 🔒 Security concerns'}</MarkdownText>
+    );
+    expect(getByText('🐛')).toBeTruthy();
+    expect(getByText('🔒')).toBeTruthy();
+    expect(getByText(/Bugs and edge cases/)).toBeTruthy();
+  });
 });
 
 describe('preprocessMarkdown', () => {

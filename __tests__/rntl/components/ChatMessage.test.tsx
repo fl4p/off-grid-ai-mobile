@@ -1527,6 +1527,20 @@ describe('ChatMessage', () => {
       expect(getByText(/\*\*not bold\*\*/)).toBeTruthy();
     });
 
+    it('renders emoji in user messages using the system font', () => {
+      const message = createUserMessage('ship it 🚀');
+
+      const { getByText } = render(<ChatMessage message={message} />);
+
+      const emojiNode = getByText('🚀');
+      const fontFamily = Object.assign(
+        {},
+        ...[].concat(emojiNode.props.style as never).filter(Boolean)
+      ).fontFamily;
+      expect(fontFamily).toMatch(/System|sans-serif/);
+      expect(fontFamily).not.toBe('Menlo');
+    });
+
     it('renders markdown in thinking block content when expanded', () => {
       const message = createAssistantMessage(
         '<think>Step 1: Check the `input` value\nStep 2: **Process** it</think>Done!'
