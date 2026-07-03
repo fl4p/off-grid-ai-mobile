@@ -114,6 +114,18 @@ const createEmptyChatStyles = (colors: ThemeColors) => ({
   projectHintIconText: { ...TYPOGRAPHY.bodySmall, fontWeight: '600' as const, color: colors.primary },
   projectHintText: { ...TYPOGRAPHY.h3, color: colors.primary, fontWeight: '500' as const },
   privacyText: { ...TYPOGRAPHY.h3, color: colors.textMuted, textAlign: 'center' as const, maxWidth: 300 },
+  onlineToolsRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: colors.surface,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: 8,
+    marginTop: SPACING.xl,
+    gap: SPACING.sm,
+    maxWidth: 340,
+  },
+  onlineToolsText: { ...TYPOGRAPHY.bodySmall, flex: 1, color: colors.textSecondary, lineHeight: 18 },
 });
 
 const createStateScreenStyles = (colors: ThemeColors) => ({
