@@ -291,6 +291,7 @@ export const ChatScreen: React.FC = () => {
           handleModelSelect={chat.handleModelSelect}
           handleUnloadModel={chat.handleUnloadModel}
           handleDeleteConversation={chat.handleDeleteConversation}
+          handleSetConversationMemoryEnabled={chat.handleSetConversationMemoryEnabled}
           isModelLoading={chat.isModelLoading}
           imageCount={imageCount}
           activeConversationId={chat.activeConversationId}

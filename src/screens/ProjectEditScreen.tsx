@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  Switch,
   KeyboardAvoidingView,
   Platform,
   InteractionManager,
@@ -49,6 +50,7 @@ export const ProjectEditScreen: React.FC = () => {
     name: '',
     description: '',
     systemPrompt: '',
+    memoryEnabled: true,
   });
 
   useEffect(() => {
@@ -57,6 +59,7 @@ export const ProjectEditScreen: React.FC = () => {
         name: existingProject.name,
         description: existingProject.description,
         systemPrompt: existingProject.systemPrompt,
+        memoryEnabled: existingProject.memoryEnabled !== false,
       });
     }
   }, [existingProject]);
@@ -76,12 +79,14 @@ export const ProjectEditScreen: React.FC = () => {
         name: formData.name.trim(),
         description: formData.description.trim(),
         systemPrompt: formData.systemPrompt.trim(),
+        memoryEnabled: formData.memoryEnabled,
       });
     } else {
       createProject({
         name: formData.name.trim(),
         description: formData.description.trim(),
         systemPrompt: formData.systemPrompt.trim(),
+        memoryEnabled: formData.memoryEnabled,
       });
     }
 
@@ -152,6 +157,20 @@ export const ProjectEditScreen: React.FC = () => {
           <Text style={styles.tip}>
             Tip: Be specific about what you want the AI to do, how it should respond, and any context it needs.
           </Text>
+
+          <View style={styles.memoryRow}>
+            <View style={styles.memoryText}>
+              <Text style={styles.memoryTitle}>Memory</Text>
+              <Text style={styles.memoryDescription}>Allow chats in this project to use local memory recall and suggestions.</Text>
+            </View>
+            <Switch
+              testID="project-memory-toggle"
+              value={formData.memoryEnabled}
+              onValueChange={(value) => setFormData({ ...formData, memoryEnabled: value })}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.surface}
+            />
+          </View>
 
           <View style={styles.bottomPadding} />
         </ScrollView>
@@ -232,6 +251,28 @@ const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     ...TYPOGRAPHY.bodySmall,
     color: colors.textSecondary,
     marginTop: SPACING.md,
+    lineHeight: 18,
+  },
+  memoryRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    padding: SPACING.md,
+    marginTop: SPACING.xl,
+    gap: SPACING.md,
+  },
+  memoryText: {
+    flex: 1,
+  },
+  memoryTitle: {
+    ...TYPOGRAPHY.body,
+    color: colors.text,
+  },
+  memoryDescription: {
+    ...TYPOGRAPHY.bodySmall,
+    color: colors.textSecondary,
+    marginTop: 2,
     lineHeight: 18,
   },
   bottomPadding: {

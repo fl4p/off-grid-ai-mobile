@@ -12,6 +12,7 @@ import {
 } from '../../services';
 import { liteRTService } from '../../services/litert';
 import { memoryService } from '../../services/memory';
+import { filterMemoryToolNames } from '../../services/memory/toolPrivacy';
 import { Message, MediaAttachment, Project, DownloadedModel, DebugInfo, RemoteModel, INFERENCE_BACKENDS } from '../../types';
 import { RootStackParamList } from '../../navigation/types';
 import { ensureModelLoadedFn, ensureTextModelForChatFn, handleModelSelectFn, handleUnloadModelFn, initiateModelLoad, useChatImageModelEffects, useChatModelStateSync } from './useChatModelActions';
@@ -111,7 +112,7 @@ export const useChatScreen = () => {
     activeConversationId, conversations, createConversation, addMessage,
     updateMessageContent, deleteMessagesAfter, streamingMessage, streamingReasoningContent,
     streamingForConversationId, isStreaming, isThinking, clearStreamingMessage,
-    deleteConversation, setActiveConversation, setConversationProject,
+    deleteConversation, setActiveConversation, setConversationProject, setConversationMemoryEnabled,
   } = useChatStore();
 
   const { projects, getProject } = useProjectStore();
@@ -276,7 +277,8 @@ export const useChatScreen = () => {
     await startGenerationFn(genDeps, { setDebugInfo, targetConversationId, messageText });
   };
   startGenerationRef.current = startGeneration;
-  const enabledTools = supportsToolCalling ? (settings.enabledTools || []) : [];
+  const memoryEnabled = activeConversation?.memoryEnabled !== false && activeProject?.memoryEnabled !== false;
+  const enabledTools = supportsToolCalling ? (memoryEnabled ? settings.enabledTools || [] : filterMemoryToolNames(settings.enabledTools || [])) : [];
   const handleToggleTool = (toolId: string) => {
     const cur = settings.enabledTools || [];
     useAppStore.getState().updateSettings({ enabledTools: cur.includes(toolId) ? cur.filter((id: string) => id !== toolId) : [...cur, toolId] });
@@ -380,5 +382,8 @@ export const useChatScreen = () => {
       handleGenerateImageFromMsgFn(prompt, genDeps, { activeConversationId, activeImageModel, setAlertState }),
     handleImagePress: (uri: string) => setViewerImageUri(uri),
     handleSaveImage: () => saveImageToGallery(viewerImageUri, setAlertState),
+    handleSetConversationMemoryEnabled: (enabled: boolean) => {
+      if (activeConversationId) setConversationMemoryEnabled(activeConversationId, enabled);
+    },
   };
 };

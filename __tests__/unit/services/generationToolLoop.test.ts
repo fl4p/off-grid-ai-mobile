@@ -321,6 +321,29 @@ describe('runToolLoop', () => {
       expect(mockedGenerateResponseWithTools).toHaveBeenCalledTimes(2);
     });
 
+    it('does not execute structured tool calls that were not routed this turn', async () => {
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({
+          fullResponse: '',
+          toolCalls: [makeToolCall({ id: 'tc-memory', name: 'search_memory', arguments: { query: 'tax' } })],
+        })
+        .mockResolvedValueOnce({
+          fullResponse: 'Answer without memory.',
+          toolCalls: [],
+        });
+
+      const ctx = createContext({ enabledToolIds: ['web_search'] });
+      await runToolLoop(ctx);
+
+      expect(mockExecuteToolCall).not.toHaveBeenCalled();
+      expect(mockAddMessage).not.toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ toolName: 'search_memory' }),
+      );
+      expect(mockedGenerateResponseWithTools.mock.calls[1][1].tools).toEqual([]);
+      expect(ctx.onFinalResponse).toHaveBeenCalledWith('Answer without memory.');
+    });
+
     // Text-format tool-call parsing — small local models emit tool calls as text
     // (no structured tool_calls). resolveToolCalls must recover them.
     describe('text tool-call format parsing', () => {
@@ -564,6 +587,10 @@ describe('runToolLoop', () => {
       let aborted = false;
       const tc1 = makeToolCall({ id: 'tc-1', name: 'tool_a' });
       const tc2 = makeToolCall({ id: 'tc-2', name: 'tool_b' });
+      mockGetToolsAsOpenAISchema.mockReturnValue([
+        { type: 'function', function: { name: 'tool_a' } },
+        { type: 'function', function: { name: 'tool_b' } },
+      ]);
 
       mockExecuteToolCall.mockImplementation(async (call: ToolCall) => {
         if (call.id === 'tc-1') {
@@ -675,6 +702,10 @@ describe('runToolLoop', () => {
 
       const tc1 = makeToolCall({ id: 'tc-1', name: 'tool_a', arguments: { x: 1 } });
       const tc2 = makeToolCall({ id: 'tc-2', name: 'tool_b', arguments: { y: 2 } });
+      mockGetToolsAsOpenAISchema.mockReturnValue([
+        { type: 'function', function: { name: 'tool_a' } },
+        { type: 'function', function: { name: 'tool_b' } },
+      ]);
 
       mockExecuteToolCall
         .mockResolvedValueOnce(makeToolResult({ name: 'tool_a' }))
@@ -753,7 +784,7 @@ describe('runToolLoop', () => {
       mockedGenerateResponseWithTools
         .mockResolvedValueOnce({
           fullResponse: 'Thinking...',
-          toolCalls: [makeToolCall({ id: 'tc-x', name: 'search', arguments: args })],
+          toolCalls: [makeToolCall({ id: 'tc-x', name: 'web_search', arguments: args })],
         })
         .mockResolvedValueOnce({
           fullResponse: 'Done.',
@@ -1317,6 +1348,24 @@ describe('runToolLoop – resolveToolCalls via embedded tool_call tags', () => {
     expect(ctx.onFinalResponse).toHaveBeenCalledWith('Final answer');
   });
 
+  it('ignores embedded memory tool calls when memory schemas are disabled', async () => {
+    const embeddedResponse = '<tool_call>{"name":"search_memory","arguments":{"query":"tax"}}</tool_call>';
+    mockedGenerateResponseWithTools
+      .mockResolvedValueOnce({ fullResponse: embeddedResponse, toolCalls: [] })
+      .mockResolvedValueOnce({ fullResponse: 'Final answer without memory', toolCalls: [] });
+
+    const ctx = createContext({ enabledToolIds: ['web_search'] });
+    await runToolLoop(ctx);
+
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
+    expect(mockAddMessage).not.toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({ toolName: 'search_memory' }),
+    );
+    expect(mockedGenerateResponseWithTools.mock.calls[1][1].tools).toEqual([]);
+    expect(ctx.onFinalResponse).toHaveBeenCalledWith('Final answer without memory');
+  });
+
   it('returns response as-is when <tool_call> tags parse to no valid calls', async () => {
     mockedGenerateResponseWithTools.mockResolvedValue({
       fullResponse: '<tool_call>{invalid json here}</tool_call>',
@@ -1601,6 +1650,26 @@ describe('runToolLoop – LiteRT tool call cap', () => {
     expect(mockExecuteToolCall).toHaveBeenCalledTimes(3);
     expect(capResult).toContain('Tool call limit reached');
     expect(capResult).toContain('Answer now');
+  });
+
+  it('rejects native LiteRT memory tool calls when memory schemas are disabled', async () => {
+    let capturedToolHandler: ((name: string, args: Record<string, unknown>) => Promise<string>) | undefined;
+    mockedLiteRTService.generateRaw.mockImplementation(async (_text, _images, handlers) => {
+      capturedToolHandler = handlers?.onToolCall;
+      return 'final answer';
+    });
+
+    const ctx = createContext({ enabledToolIds: ['web_search'] });
+    await runToolLoop(ctx);
+
+    const result = await capturedToolHandler?.('search_memory', { query: 'tax' });
+
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
+    expect(result).toContain('not available');
+    expect(mockAddMessage).not.toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({ toolName: 'search_memory' }),
+    );
   });
 
   it('returns Aborted immediately when context is aborted', async () => {

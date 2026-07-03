@@ -116,8 +116,28 @@ class RagDatabase {
   }
 
   private blobToEmbedding(blob: any): number[] {
-    if (blob instanceof ArrayBuffer) return Array.from(new Float32Array(blob));
-    if (blob?.buffer instanceof ArrayBuffer) return Array.from(new Float32Array(blob.buffer));
+    try {
+      if (blob instanceof ArrayBuffer) {
+        return Array.from(new Float32Array(blob));
+      }
+      if (ArrayBuffer.isView(blob)) {
+        const length = Math.floor(blob.byteLength / Float32Array.BYTES_PER_ELEMENT);
+        return Array.from(new Float32Array(blob.buffer, blob.byteOffset, length));
+      }
+      if (typeof blob?.buffer?.byteLength === 'number') {
+        const byteOffset = typeof blob.byteOffset === 'number' ? blob.byteOffset : 0;
+        const byteLength = typeof blob.byteLength === 'number'
+          ? blob.byteLength
+          : blob.buffer.byteLength - byteOffset;
+        const length = Math.floor(byteLength / Float32Array.BYTES_PER_ELEMENT);
+        return Array.from(new Float32Array(blob.buffer, byteOffset, length));
+      }
+      if (typeof blob?.byteLength === 'number') {
+        return Array.from(new Float32Array(blob));
+      }
+    } catch (error) {
+      logger.warn('[RagDB] Failed to decode embedding blob:', error);
+    }
     return [];
   }
 

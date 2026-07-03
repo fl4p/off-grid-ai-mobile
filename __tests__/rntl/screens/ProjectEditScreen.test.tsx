@@ -250,6 +250,7 @@ describe('ProjectEditScreen', () => {
         name: 'Test Project',
         description: 'Test desc',
         systemPrompt: 'Be helpful',
+        memoryEnabled: true,
       });
       expect(mockGoBack).toHaveBeenCalled();
     });
@@ -291,6 +292,7 @@ describe('ProjectEditScreen', () => {
         name: 'My New Project',
         description: 'A description',
         systemPrompt: 'You are helpful',
+        memoryEnabled: true,
       });
       expect(mockGoBack).toHaveBeenCalled();
     });
@@ -308,7 +310,19 @@ describe('ProjectEditScreen', () => {
         name: 'Trimmed Name',
         description: 'Trimmed Desc',
         systemPrompt: 'Trimmed Prompt',
+        memoryEnabled: true,
       });
+    });
+
+    it('saves disabled project memory setting', () => {
+      const { getByText, getByTestId } = render(<ProjectEditScreen />);
+
+      fireEvent(getByTestId('project-memory-toggle'), 'valueChange', false);
+      fireEvent.press(getByText('Save'));
+
+      expect(mockUpdateProject).toHaveBeenCalledWith('proj1', expect.objectContaining({
+        memoryEnabled: false,
+      }));
     });
   });
 

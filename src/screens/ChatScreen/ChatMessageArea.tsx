@@ -258,7 +258,7 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
               supportsVision: chat.supportsVision,
               imageOnly: chat.imageModelLoaded && !chat.hasTextModel,
             })}
-            onToolsPress={() => tabNav.navigate('Tools')}
+            onToolsPress={() => tabNav.navigate('Tools', { memoryEnabled: chat.activeConversation?.memoryEnabled !== false && chat.activeProject?.memoryEnabled !== false })}
             enabledToolCount={freeToolsCount}
             showSettingsDot={showSettingsDot}
             mcpToolCount={proToolsCount}

@@ -58,6 +58,7 @@ function makeFakeExtension(executorMock: jest.Mock): ToolExtension {
   return {
     id: 'mcp',
     getSystemPromptHint: () => MCP_HINT,
+    getOpenAISchemas: () => [{ type: 'function', function: { name: MCP_TOOL_NAME } }],
     parseToolCalls: (text: string): ToolCall[] => {
       const match = /<mcp_call>([\s\S]*?)<\/mcp_call>/.exec(text);
       if (!match) return [];

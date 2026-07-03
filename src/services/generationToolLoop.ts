@@ -231,14 +231,48 @@ function getLastUserQuery(messages: Message[]): string {
     if (messages[i].role === 'user' && messages[i].content.trim()) return messages[i].content.trim();
   return '';
 }
-async function executeToolCalls(ctx: ToolLoopContext, toolCalls: import('./tools/types').ToolCall[], loopMessages: Message[]): Promise<void> {
+
+function getSchemaToolName(schema: any): string | undefined {
+  return typeof schema?.function?.name === 'string' ? schema.function.name : undefined;
+}
+
+function buildAllowedToolNameSet(schemas: any[]): Set<string> {
+  return new Set(schemas.map(getSchemaToolName).filter(Boolean) as string[]);
+}
+
+function isToolCallAllowed(name: string, allowedToolNames: Set<string>): boolean {
+  return allowedToolNames.has(name);
+}
+
+function filterAllowedToolCalls(toolCalls: ToolCall[], allowedToolNames: Set<string>): ToolCall[] {
+  const allowed: ToolCall[] = [];
+  for (const toolCall of toolCalls) {
+    if (isToolCallAllowed(toolCall.name, allowedToolNames)) {
+      allowed.push(toolCall);
+    } else {
+      logger.warn(`[ToolLoop] Ignoring unavailable tool call: ${toolCall.name}`);
+    }
+  }
+  return allowed;
+}
+
+type ToolExecutionState = {
+  loopMessages: Message[];
+  allowedToolNames: Set<string>;
+};
+
+async function executeToolCalls(ctx: ToolLoopContext, toolCalls: import('./tools/types').ToolCall[], state: ToolExecutionState): Promise<void> {
   const chatStore = useChatStore.getState();
   const exts = getToolExtensions();
   for (const tc of toolCalls) {
     if (ctx.isAborted()) break;
+    if (!isToolCallAllowed(tc.name, state.allowedToolNames)) {
+      logger.warn(`[ToolLoop] Skipping unavailable tool execution: ${tc.name}`);
+      continue;
+    }
     // Small models often call web_search with empty args — use user's message as fallback
     if (tc.name === 'web_search' && (!tc.arguments.query || typeof tc.arguments.query !== 'string' || !tc.arguments.query.trim())) {
-      const fallbackQuery = getLastUserQuery(loopMessages);
+      const fallbackQuery = getLastUserQuery(state.loopMessages);
       if (fallbackQuery) {
         tc.arguments = { ...tc.arguments, query: fallbackQuery };
       }
@@ -255,7 +289,7 @@ async function executeToolCalls(ctx: ToolLoopContext, toolCalls: import('./tools
       // Media the tool produced for the user (e.g. run_python matplotlib plots).
       attachments: result.attachments,
     };
-    loopMessages.push(toolResultMsg);
+    state.loopMessages.push(toolResultMsg);
     chatStore.addMessage(ctx.conversationId, toolResultMsg);
   }
 }
@@ -370,12 +404,16 @@ export function buildLiteRTHistory(messages: Message[]): Array<{ role: 'user' | 
     .filter(h => h.content.trim() !== '');
 }
 
-function buildLiteRTToolCallHandler(ctx: ToolLoopContext, conversationId: string) {
+function buildLiteRTToolCallHandler(ctx: ToolLoopContext, conversationId: string, allowedToolNames: Set<string>) {
   // Per-turn counter: this closure is rebuilt once per generation, so it resets each new
   // message and the native loop reuses it for every tool call within the turn.
   let toolCallCount = 0;
   return async (name: string, args: Record<string, unknown>): Promise<string> => {
     if (ctx.isAborted()) return 'Aborted';
+    if (!isToolCallAllowed(name, allowedToolNames)) {
+      logger.warn(`[ToolLoop] LiteRT ignored unavailable tool call: ${name}`);
+      return `Tool "${name}" is not available in this chat. Answer without using it.`;
+    }
     toolCallCount++;
     if (toolCallCount > MAX_LITERT_TOOL_CALLS) {
       return `Tool call limit reached (${MAX_LITERT_TOOL_CALLS} per response). Do not call any more tools. Answer now using the information you already have.`;
@@ -426,7 +464,8 @@ async function callLiteRTForLoop(
     return { fullResponse: '', toolCalls: [] };
   }
   await liteRTService.prepareConversation(conversationId, systemPrompt, { samplerConfig, tools, history });
-  const onToolCall = ctx ? buildLiteRTToolCallHandler(ctx, conversationId) : undefined;
+  const allowedToolNames = buildAllowedToolNameSet(tools);
+  const onToolCall = ctx ? buildLiteRTToolCallHandler(ctx, conversationId, allowedToolNames) : undefined;
   const handlers = {
     onToken: (token: string) => onStream?.({ content: token }),
     onReasoning: (token: string) => onStream?.({ reasoningContent: token }),
@@ -694,6 +733,7 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
   const extSchemas = getToolExtensions().flatMap(e => e.getOpenAISchemas?.() ?? []);
 
   const effectiveSchemas = await selectEffectiveSchemas(ctx, builtInSchemas, extSchemas);
+  const allowedToolNames = buildAllowedToolNameSet(effectiveSchemas);
   ctx.onToolsRouted?.(effectiveSchemas.map((s: any) => s?.function?.name).filter(Boolean));
 
   const loopMessages = [...ctx.messages];
@@ -717,7 +757,8 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
     const { fullResponse, toolCalls } = await callLLMWithRetry(loopMessages, effectiveSchemas, { onStream, forceRemote: ctx.forceRemote, conversationId: ctx.conversationId, ctx });
 
     const { effectiveToolCalls, displayResponse } = resolveToolCalls(fullResponse, toolCalls);
-    const cappedToolCalls = effectiveToolCalls.slice(0, MAX_TOTAL_TOOL_CALLS - totalToolCalls);
+    const allowedToolCalls = filterAllowedToolCalls(effectiveToolCalls, allowedToolNames);
+    const cappedToolCalls = allowedToolCalls.slice(0, MAX_TOTAL_TOOL_CALLS - totalToolCalls);
     totalToolCalls += cappedToolCalls.length;
 
     // No tool calls → model gave a final text response
@@ -749,7 +790,7 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
     loopMessages.push(assistantMsg);
     chatStore.addMessage(ctx.conversationId, assistantMsg);
 
-    await executeToolCalls(ctx, cappedToolCalls, loopMessages);
+    await executeToolCalls(ctx, cappedToolCalls, { loopMessages, allowedToolNames });
 
     chatStore.setIsThinking(true);
     // The pause exists to let an on-device llama context settle between the tool

@@ -680,6 +680,24 @@ describe('dispatchGenerationFn (single routing layer)', () => {
     expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
   });
 
+  it('does not auto-capture when conversation memory is disabled', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember that project memory is off.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', memoryEnabled: false, messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, memoryAutoCaptureEnabled: true },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
   it('does not auto-capture memory candidates for remote text messages', async () => {
     const startText = jest.fn(() => Promise.resolve());
     const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember this private note.', timestamp: 0 };
@@ -1019,6 +1037,77 @@ describe('RAG context injection in startGenerationFn', () => {
       enabledToolIds: ['search_knowledge_base', 'search_memory'],
     }));
   });
+
+  it('skips memory recall and tools when conversation memory is disabled', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', memoryEnabled: false, messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, enabledTools: ['search_memory', 'save_memory', 'get_current_datetime'] },
+    });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockSearchMemory).not.toHaveBeenCalled();
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['get_current_datetime', 'search_knowledge_base'],
+    }));
+  });
+
+  it('scrubs previous memory tool history when conversation memory is disabled', async () => {
+    const conv = {
+      id: 'conv-1',
+      projectId: 'proj-1',
+      memoryEnabled: false,
+      messages: [
+        { id: 'u1', role: 'user', content: 'look up my notes', timestamp: 0 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 0,
+          toolCalls: [
+            { id: 'tc-memory', name: 'search_memory', arguments: '{"query":"tax"}' },
+            { id: 'tc-web', name: 'web_search', arguments: '{"query":"public"}' },
+          ],
+        },
+        { id: 't1', role: 'tool', content: 'PRIVATE TAX MEMORY', timestamp: 0, toolCallId: 'tc-memory', toolName: 'search_memory' },
+        { id: 't2', role: 'tool', content: 'PUBLIC WEB RESULT', timestamp: 0, toolCallId: 'tc-web', toolName: 'web_search' },
+        { id: 'u2', role: 'user', content: 'hello', timestamp: 0 },
+      ],
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+
+    await startGenerationFn(makeGenerationDeps(), { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    const messages = mockGenerateWithTools.mock.calls[0][1];
+    const serialized = JSON.stringify(messages);
+    expect(serialized).not.toContain('PRIVATE TAX MEMORY');
+    expect(serialized).not.toContain('search_memory');
+    expect(serialized).not.toContain('tc-memory');
+    expect(serialized).toContain('PUBLIC WEB RESULT');
+    expect(serialized).toContain('web_search');
+  });
+
+  it('skips memory recall and tools when project memory is disabled', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test', memoryEnabled: false });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, enabledTools: ['search_memory', 'forget_memory'] },
+    });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockSearchMemory).not.toHaveBeenCalled();
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_knowledge_base'],
+    }));
+  });
 });
 
 describe('RAG context injection in regenerateResponseFn', () => {
@@ -1048,6 +1137,43 @@ describe('RAG context injection in regenerateResponseFn', () => {
 
     expect(mockGetDocsByProject).not.toHaveBeenCalled();
     expect(mockSearchProject).not.toHaveBeenCalled();
+  });
+
+  it('scrubs previous memory tool history when regenerating with project memory disabled', async () => {
+    const userMsg = { id: 'u2', role: 'user' as const, content: 'hello again', timestamp: 0 };
+    const conv = {
+      id: 'conv-1',
+      projectId: 'proj-1',
+      messages: [
+        { id: 'u1', role: 'user', content: 'look up my notes', timestamp: 0 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 0,
+          toolCalls: [
+            { id: 'tc-memory', name: 'search_memory', arguments: '{"query":"tax"}' },
+            { id: 'tc-web', name: 'web_search', arguments: '{"query":"public"}' },
+          ],
+        },
+        { id: 't1', role: 'tool', content: 'PRIVATE TAX MEMORY', timestamp: 0, toolCallId: 'tc-memory', toolName: 'search_memory' },
+        { id: 't2', role: 'tool', content: 'PUBLIC WEB RESULT', timestamp: 0, toolCallId: 'tc-web', toolName: 'web_search' },
+        userMsg,
+      ],
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test', memoryEnabled: false });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+
+    await regenerateResponseFn(makeGenerationDeps(), { setDebugInfo: jest.fn(), userMessage: userMsg });
+
+    const messages = mockGenerateWithTools.mock.calls[0][1];
+    const serialized = JSON.stringify(messages);
+    expect(serialized).not.toContain('PRIVATE TAX MEMORY');
+    expect(serialized).not.toContain('search_memory');
+    expect(serialized).not.toContain('tc-memory');
+    expect(serialized).toContain('PUBLIC WEB RESULT');
+    expect(serialized).toContain('web_search');
   });
 });
 
@@ -1429,6 +1555,29 @@ describe('applyCompactionPrefix — compaction state', () => {
       activeModelInfo: { isRemote: true, model: null, modelId: 'gpt-4', modelName: 'GPT-4' },
       activeModel: null,
     });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'new message' });
+
+    const messages = mockGenerateResponse.mock.calls[0][1];
+    expect(messages.find((m: { id?: string }) => m.id === 'compaction-summary')).toBeUndefined();
+    expect(JSON.stringify(messages)).not.toContain('PRIVATE TAX MEMORY');
+  });
+
+  it('omits persisted compaction summaries when conversation memory is disabled', async () => {
+    const msgs = [
+      { id: 'm1', role: 'user', content: 'old message', timestamp: 0 },
+      { id: 'm2', role: 'assistant', content: 'old reply', timestamp: 0 },
+      { id: 'm3', role: 'user', content: 'new message', timestamp: 0 },
+    ];
+    const conv = {
+      id: 'conv-1',
+      memoryEnabled: false,
+      compactionSummary: 'PRIVATE TAX MEMORY summary',
+      compactionCutoffMessageId: 'm2',
+      messages: msgs,
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    const deps = makeGenerationDeps();
 
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'new message' });
 

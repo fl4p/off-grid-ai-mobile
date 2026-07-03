@@ -19,11 +19,13 @@ import { PRO_TOOLS_SCREEN } from '../../../src/hooks/useIsProActive';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
+const mockRoute = { params: undefined as { memoryEnabled?: boolean } | undefined };
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
   return {
     ...actual,
     useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
+    useRoute: () => mockRoute,
   };
 });
 
@@ -97,6 +99,7 @@ describe('ToolsScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     _clearScreensForTesting();
+    mockRoute.params = undefined;
     mockEnabledTools = ['web_search', 'calculator'];
     usePythonRuntimeStore.setState({
       status: 'not_installed',
@@ -145,6 +148,18 @@ describe('ToolsScreen', () => {
     expect(mockUpdateSettings).toHaveBeenCalledWith({
       enabledTools: ['web_search', 'calculator', 'get_current_datetime'],
     });
+  });
+
+  it('hides memory tool rows when chat memory is disabled', () => {
+    mockRoute.params = { memoryEnabled: false };
+    mockEnabledTools = ['web_search', 'search_memory', 'save_memory', 'forget_memory'];
+
+    const { getByTestId, queryByTestId } = render(<ToolsScreen />);
+
+    expect(getByTestId('tool-picker-row-web_search')).toBeTruthy();
+    expect(queryByTestId('tool-picker-row-search_memory')).toBeNull();
+    expect(queryByTestId('tool-picker-row-save_memory')).toBeNull();
+    expect(queryByTestId('tool-picker-row-forget_memory')).toBeNull();
   });
 
   it('navigates back when the back button is pressed', () => {
