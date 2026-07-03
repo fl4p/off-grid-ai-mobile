@@ -317,6 +317,17 @@ describe('ChatsListScreen', () => {
       const { getByText } = render(<ChatsListScreen />);
       expect(getByText('Code Review')).toBeTruthy();
     });
+
+    it('shows stored model id when downloaded model metadata is unavailable', () => {
+      const conv = createConversation({
+        title: 'Hydrating Model Chat',
+        modelId: 'stored-model-id',
+      });
+      useChatStore.setState({ conversations: [conv] });
+
+      const { getByText } = render(<ChatsListScreen />);
+      expect(getByText('stored-model-id')).toBeTruthy();
+    });
   });
 
   // ==========================================================================

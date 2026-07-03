@@ -21,26 +21,8 @@ import { TYPOGRAPHY, SPACING } from '../constants';
 import { useChatStore, useProjectStore, useAppStore, useRemoteServerStore } from '../stores';
 import { useActiveTextModel } from '../hooks/useActiveTextModel';
 import { onnxImageGeneratorService, activeModelService, llmService, remoteServerManager } from '../services';
-import { Conversation, DownloadedModel, RemoteModel } from '../types';
-
-/**
- * Human-readable model name for a conversation row. Remote conversations resolve
- * against discovered models (falling back to the raw id, which is usually
- * readable). Local conversations resolve against downloaded models; a deleted
- * local model yields null so no stale badge is shown.
- */
-function resolveConversationModelName(
-  conv: Conversation,
-  downloadedModels: DownloadedModel[],
-  discoveredModels: Record<string, RemoteModel[]>,
-): string | null {
-  if (!conv.modelId) return null;
-  if (conv.serverId) {
-    const remote = (discoveredModels[conv.serverId] || []).find(m => m.id === conv.modelId);
-    return remote?.name ?? conv.modelId;
-  }
-  return downloadedModels.find(m => m.id === conv.modelId)?.name ?? null;
-}
+import { Conversation } from '../types';
+import { resolveConversationModelName } from './conversationModelLabel';
 import { RootStackParamList, MainTabParamList } from '../navigation/types';
 type NavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'ChatsTab'>,
