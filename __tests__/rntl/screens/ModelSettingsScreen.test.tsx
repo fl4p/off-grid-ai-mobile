@@ -800,6 +800,7 @@ describe('ModelSettingsScreen', () => {
           showGenerationDetails: undefined as any,
           enhanceImagePrompts: undefined as any,
           enabledTools: undefined as any,
+          searchProvider: undefined as any,
           thinkingEnabled: undefined as any,
           liteRTBackend: undefined as any,
           liteRTTemperature: undefined as any,
