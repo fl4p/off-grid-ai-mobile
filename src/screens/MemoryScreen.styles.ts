@@ -59,13 +59,24 @@ export const createStyles = (colors: ThemeColors, _shadows: ThemeShadows) => ({
   list: { flex: 1 },
   listContent: { paddingBottom: SPACING.xxl },
   capturePanel: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  captureRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+  },
+  captureNestedRow: {
+    marginTop: SPACING.md,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  captureRowDisabled: {
+    opacity: 0.55,
   },
   captureIcon: {
     width: 32,

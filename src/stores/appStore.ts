@@ -57,6 +57,7 @@ type AppSettings = {
   enableGpu: boolean; gpuLayers: number; flashAttn: boolean;
   cacheType: CacheType; showGenerationDetails: boolean; enabledTools: string[];
   memoryAutoCaptureEnabled: boolean;
+  memoryAutoSaveEnabled: boolean;
   searchProvider: SearchProviderId;
   thinkingEnabled: boolean;
   inferenceBackend: InferenceBackend;
@@ -177,6 +178,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showGenerationDetails: false,
   enabledTools: ['web_search', 'read_url', 'search_knowledge_base'],
   memoryAutoCaptureEnabled: false,
+  memoryAutoSaveEnabled: false,
   searchProvider: 'brave',
   thinkingEnabled: false,
   liteRTBackend: 'gpu',
@@ -215,6 +217,9 @@ function migratePersistedState(persistedState: any, currentState: AppState): App
   // The 'serpapi' provider was replaced by 'serper'; reset stale selections.
   if (merged.settings?.searchProvider === 'serpapi') {
     merged.settings = { ...merged.settings, searchProvider: 'brave' };
+  }
+  if (!merged.settings?.memoryAutoCaptureEnabled && merged.settings?.memoryAutoSaveEnabled) {
+    merged.settings = { ...merged.settings, memoryAutoSaveEnabled: false };
   }
   if (persistedState?.settings && !persistedState.settings.cacheType) {
     merged.settings = { ...merged.settings, cacheType: persistedState.settings.flashAttn ? 'q8_0' : 'f16', flashAttn: true };
@@ -277,9 +282,13 @@ export const useAppStore = create<AppState>()(
       setModelMaxContext: (ctx) => set({ modelMaxContext: ctx }),
       settings: { ...DEFAULT_SETTINGS },
       updateSettings: (newSettings) =>
-        set((state) => ({
-          settings: { ...state.settings, ...newSettings },
-        })),
+        set((state) => {
+          const settings = { ...state.settings, ...newSettings };
+          if (!settings.memoryAutoCaptureEnabled) {
+            settings.memoryAutoSaveEnabled = false;
+          }
+          return { settings };
+        }),
       resetSettings: () => set({ settings: { ...DEFAULT_SETTINGS } }),
       // Image models (ONNX-based)
       downloadedImageModels: [],

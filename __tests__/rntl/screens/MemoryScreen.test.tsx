@@ -15,6 +15,7 @@ const mockDiscardCandidate = jest.fn();
 const mockUpdateSettings = jest.fn();
 let mockRouteParams: { projectId?: string } | undefined = { projectId: 'proj1' };
 let mockAutoCaptureEnabled = false;
+let mockAutoSaveEnabled = false;
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -48,7 +49,10 @@ jest.mock('../../../src/services/memory', () => ({
 jest.mock('../../../src/stores', () => ({
   useAppStore: jest.fn((selector?: any) => {
     const state = {
-      settings: { memoryAutoCaptureEnabled: mockAutoCaptureEnabled },
+      settings: {
+        memoryAutoCaptureEnabled: mockAutoCaptureEnabled,
+        memoryAutoSaveEnabled: mockAutoSaveEnabled,
+      },
       updateSettings: mockUpdateSettings,
     };
     return selector ? selector(state) : state;
@@ -132,6 +136,7 @@ describe('MemoryScreen', () => {
     jest.clearAllMocks();
     mockRouteParams = { projectId: 'proj1' };
     mockAutoCaptureEnabled = false;
+    mockAutoSaveEnabled = false;
     mockListMemories.mockResolvedValue([projectMemory, globalMemory]);
     mockListPendingCandidates.mockResolvedValue([]);
     mockForgetMemory.mockResolvedValue(true);
@@ -165,12 +170,46 @@ describe('MemoryScreen', () => {
     const { getByTestId, getByText } = render(<MemoryScreen />);
     await flushPromises();
 
-    expect(getByText('Auto-memory suggestions')).toBeTruthy();
-    expect(getByText('Drafts local chat memories for review. Nothing is used until you save it.')).toBeTruthy();
+    expect(getByText('Auto-memory capture')).toBeTruthy();
+    expect(getByText('Extracts local chat memories. Save automatically controls whether you review them first.')).toBeTruthy();
+    expect(getByText('Save automatically')).toBeTruthy();
+    expect(getByText('Save extracted memories immediately instead of adding them to Review Suggestions.')).toBeTruthy();
+    expect(getByTestId('memory-auto-save-toggle').props.disabled).toBe(true);
 
     fireEvent(getByTestId('memory-auto-capture-toggle'), 'valueChange', true);
 
     expect(mockUpdateSettings).toHaveBeenCalledWith({ memoryAutoCaptureEnabled: true });
+  });
+
+  it('toggles direct memory saves when auto-capture is enabled', async () => {
+    mockAutoCaptureEnabled = true;
+
+    const { getByTestId } = render(<MemoryScreen />);
+    await flushPromises();
+
+    expect(getByTestId('memory-auto-save-toggle').props.disabled).toBe(false);
+    expect(getByTestId('memory-auto-save-toggle').props.value).toBe(false);
+
+    fireEvent(getByTestId('memory-auto-save-toggle'), 'valueChange', true);
+
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ memoryAutoSaveEnabled: true });
+  });
+
+  it('shows the direct save toggle as on only when auto-capture is also enabled', async () => {
+    mockAutoCaptureEnabled = false;
+    mockAutoSaveEnabled = true;
+
+    const { getByTestId, rerender } = render(<MemoryScreen />);
+    await flushPromises();
+
+    expect(getByTestId('memory-auto-save-toggle').props.value).toBe(false);
+    expect(getByTestId('memory-auto-save-toggle').props.disabled).toBe(true);
+
+    mockAutoCaptureEnabled = true;
+    rerender(<MemoryScreen />);
+
+    expect(getByTestId('memory-auto-save-toggle').props.value).toBe(true);
+    expect(getByTestId('memory-auto-save-toggle').props.disabled).toBe(false);
   });
 
   it('filters memories by search text', async () => {
@@ -243,6 +282,8 @@ describe('MemoryScreen', () => {
     expect(getByLabelText('Go back')).toBeTruthy();
     expect(getByLabelText('Add memory')).toBeTruthy();
     expect(getByLabelText('Search memories')).toBeTruthy();
+    expect(getByLabelText('Auto-memory capture').props.accessibilityState).toEqual({ checked: false });
+    expect(getByLabelText('Save memories automatically').props.accessibilityState).toEqual({ checked: false, disabled: true });
     expect(getByLabelText('Show all memories').props.accessibilityState).toEqual({ selected: true });
     expect(getByLabelText('Show project memories').props.accessibilityState).toEqual({ selected: false });
     expect(getByLabelText('Save memory suggestion Solar permit deadline')).toBeTruthy();

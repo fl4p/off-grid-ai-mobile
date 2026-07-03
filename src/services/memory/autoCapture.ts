@@ -81,7 +81,11 @@ function titleFromBody(body: string): string {
 
 function hasQuestionShape(text: string): boolean {
   const trimmed = text.trim();
-  return trimmed.endsWith('?') || /^(what|when|where|why|how|can|could|should|would|is|are|do|does)\b/i.test(trimmed);
+  return (
+    trimmed.endsWith('?') ||
+    /^(what|where|why|how|can|could|should|would|is|are|do|does)\b/i.test(trimmed) ||
+    /^when\s+(?:is|are|was|were|do|does|did|can|could|should|would|will)\b/i.test(trimmed)
+  );
 }
 
 function inferTags(text: string): string[] {

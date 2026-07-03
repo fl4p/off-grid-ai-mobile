@@ -29,6 +29,18 @@ describe('memory auto-capture extraction', () => {
     }));
   });
 
+  it('extracts explicit plot defaults for automatic saving', () => {
+    const candidate = extractMemoryCandidateFromText(
+      'Remember: when I ask you to plot, use line width 2 unless I say otherwise.',
+    );
+
+    expect(candidate).toEqual(expect.objectContaining({
+      scope: 'global',
+      title: 'When I ask you to plot, use line width 2 unless I say otherwise',
+      body: 'when I ask you to plot, use line width 2 unless I say otherwise.',
+    }));
+  });
+
   it('adds jurisdiction and as-of date hints when available', () => {
     const candidate = extractMemoryCandidateFromText(
       'Note that the IRS EV credit note is current as of 2026-07-03 for federal filing research.',
@@ -43,6 +55,7 @@ describe('memory auto-capture extraction', () => {
 
   it('skips ordinary questions and short statements', () => {
     expect(extractMemoryCandidateFromText('What is the tax deadline?')).toBeNull();
+    expect(extractMemoryCandidateFromText('Remember: when is the tax filing deadline?')).toBeNull();
     expect(extractMemoryCandidateFromText('Remember this.')).toBeNull();
   });
 

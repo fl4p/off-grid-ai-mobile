@@ -164,6 +164,11 @@ function buildApprovedMemoryInput(candidate: MemoryCandidate, edits: ApproveMemo
   };
 }
 
+type CaptureMessageParams = {
+  message: Pick<Message, 'id' | 'role' | 'content'>;
+  projectId?: string;
+};
+
 class MemoryService {
   async ensureReady(): Promise<void> {
     await memoryDatabase.ensureReady();
@@ -190,7 +195,7 @@ class MemoryService {
     return candidate;
   }
 
-  async captureCandidateFromMessage(params: { message: Pick<Message, 'id' | 'role' | 'content'>; projectId?: string }): Promise<MemoryCandidate | null> {
+  async captureCandidateFromMessage(params: CaptureMessageParams): Promise<MemoryCandidate | null> {
     const content = stripControlTokens(params.message.content).trim();
     if (params.message.role !== 'user' || !content) return null;
     await this.ensureReady();
@@ -211,7 +216,28 @@ class MemoryService {
     });
   }
 
-  async rememberMessage(params: { message: Pick<Message, 'id' | 'role' | 'content'>; projectId?: string }): Promise<MemoryItem> {
+  async captureMemoryFromMessage(params: CaptureMessageParams): Promise<MemoryItem | null> {
+    const content = stripControlTokens(params.message.content).trim();
+    if (params.message.role !== 'user' || !content) return null;
+    await this.ensureReady();
+    const scope = params.projectId ? 'project' : 'global';
+    const existingMemory = memoryDatabase.getActiveMemoryBySource('auto_capture', params.message.id, params.projectId);
+    if (existingMemory) return existingMemory;
+    const existingCandidate = memoryDatabase.getCandidateBySource('auto_capture', params.message.id, params.projectId);
+    if (existingCandidate) return null;
+    const extracted = extractMemoryCandidateFromText(content, { projectId: params.projectId });
+    if (!extracted) return null;
+    return this.saveMemory({
+      ...extracted,
+      scope,
+      projectId: params.projectId,
+      sourceType: 'auto_capture',
+      sourceId: params.message.id,
+      sourceExcerpt: content,
+    });
+  }
+
+  async rememberMessage(params: CaptureMessageParams): Promise<MemoryItem> {
     const content = stripControlTokens(params.message.content).trim();
     if (!content) throw new Error('Nothing to remember from this message.');
     await this.ensureReady();

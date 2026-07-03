@@ -97,6 +97,7 @@ jest.mock('../../../src/services/memory', () => ({
     formatForPrompt: jest.fn(() => '<memory_context>mock memory context</memory_context>'),
     formatRecallSummaries: jest.fn(() => []),
     captureCandidateFromMessage: jest.fn(() => Promise.resolve(null)),
+    captureMemoryFromMessage: jest.fn(() => Promise.resolve(null)),
   },
 }));
 
@@ -142,6 +143,7 @@ const mockSearchMemory = memoryService.searchMemory as jest.Mock;
 const mockFormatMemoryForPrompt = memoryService.formatForPrompt as jest.Mock;
 const mockFormatRecallSummaries = memoryService.formatRecallSummaries as jest.Mock;
 const mockCaptureCandidateFromMessage = memoryService.captureCandidateFromMessage as jest.Mock;
+const mockCaptureMemoryFromMessage = memoryService.captureMemoryFromMessage as jest.Mock;
 
 
 const mockChatStoreGetState = jest.fn(() => ({ conversations: [] as any[], updateCompactionState: jest.fn() }));
@@ -195,6 +197,7 @@ beforeEach(() => {
   mockFormatMemoryForPrompt.mockReturnValue('<memory_context>mock memory context</memory_context>');
   mockFormatRecallSummaries.mockReturnValue([]);
   mockCaptureCandidateFromMessage.mockResolvedValue(null);
+  mockCaptureMemoryFromMessage.mockResolvedValue(null);
   mockChatStoreGetState.mockReturnValue({ conversations: [], updateCompactionState: jest.fn() });
   mockProjectStoreGetProject.mockReturnValue(null);
 });
@@ -693,6 +696,33 @@ describe('dispatchGenerationFn (single routing layer)', () => {
       message: userMessage,
       projectId: 'proj-1',
     });
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
+  it('saves auto-captured memory directly when full-auto memory is enabled', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember: when I ask you to plot, use line width 2.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      settings: {
+        ...makeGenerationDeps().settings,
+        memoryAutoCaptureEnabled: true,
+        memoryAutoSaveEnabled: true,
+      },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: 'proj-1',
+    });
+    expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
     expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
   });
 
@@ -711,6 +741,7 @@ describe('dispatchGenerationFn (single routing layer)', () => {
     await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
 
     expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
     expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
   });
 
@@ -731,6 +762,7 @@ describe('dispatchGenerationFn (single routing layer)', () => {
     await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
 
     expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
     expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
   });
 });

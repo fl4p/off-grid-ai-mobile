@@ -403,6 +403,33 @@ describe('Memory Flow Integration', () => {
     expect(events.some(event => event.action === 'candidate_approved')).toBe(true);
   });
 
+  it('captures, saves, and recalls a memory directly for full-auto memory', async () => {
+    const saved = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-auto-save-1',
+        role: 'user',
+        content: 'Remember: when I ask you to plot, use line width 2 unless I say otherwise.',
+      },
+      projectId: 'proj-tax',
+    });
+    const pending = await memoryService.listPendingCandidates('proj-tax');
+    const results = await memoryService.searchMemory({ projectId: 'proj-tax', query: 'plot line width 2' });
+
+    expect(saved).toEqual(expect.objectContaining({
+      id: 1,
+      scope: 'project',
+      project_id: 'proj-tax',
+      source_type: 'auto_capture',
+      source_id: 'msg-auto-save-1',
+      body: 'when I ask you to plot, use line width 2 unless I say otherwise.',
+    }));
+    expect(pending).toHaveLength(0);
+    expect(candidates).toHaveLength(0);
+    expect(results.map(result => result.memory.id)).toContain(saved!.id);
+    expect(events.some(event => event.action === 'created')).toBe(true);
+    expect(events.some(event => event.action === 'candidate_created')).toBe(false);
+  });
+
   it('saves a chat message once when remembered repeatedly', async () => {
     const message = {
       id: 'chat-msg-1',

@@ -256,6 +256,42 @@ describe('MemoryService', () => {
     expect(mockCreateCandidate).not.toHaveBeenCalled();
   });
 
+  it('captures and saves memory from a user message when direct auto-save is enabled', async () => {
+    const saved = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-auto-save-1',
+        role: 'user',
+        content: 'Remember: when I ask you to plot, use line width 2 unless I say otherwise.',
+      },
+    });
+
+    expect(saved).toEqual(baseMemory);
+    expect(mockGetActiveMemoryBySource).toHaveBeenCalledWith('auto_capture', 'msg-auto-save-1', undefined);
+    expect(mockGetCandidateBySource).toHaveBeenCalledWith('auto_capture', 'msg-auto-save-1', undefined);
+    expect(mockCreateMemory).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'global',
+      projectId: undefined,
+      sourceType: 'auto_capture',
+      sourceId: 'msg-auto-save-1',
+      body: 'when I ask you to plot, use line width 2 unless I say otherwise.',
+    }));
+    expect(mockCreateCandidate).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    mockGetActiveMemoryBySource.mockReturnValueOnce(baseMemory);
+
+    const duplicate = await memoryService.captureMemoryFromMessage({
+      message: {
+        id: 'msg-auto-save-1',
+        role: 'user',
+        content: 'Remember: when I ask you to plot, use line width 2 unless I say otherwise.',
+      },
+    });
+
+    expect(duplicate).toEqual(baseMemory);
+    expect(mockCreateMemory).not.toHaveBeenCalled();
+  });
+
   it('does not capture assistant messages or messages that already became memories', async () => {
     await expect(memoryService.captureCandidateFromMessage({
       message: { id: 'assistant-1', role: 'assistant', content: 'Remember this note.' },

@@ -18,6 +18,7 @@ export function isRemoteGeneration(params: { activeModelInfo?: ActiveModelInfo |
 
 export async function maybeCaptureMemoryCandidate(params: {
   memoryAutoCaptureEnabled?: boolean;
+  memoryAutoSaveEnabled?: boolean;
   activeModelInfo?: ActiveModelInfo | null;
   projectId?: string;
   userMessage?: Pick<Message, 'id' | 'role' | 'content'>;
@@ -26,6 +27,13 @@ export async function maybeCaptureMemoryCandidate(params: {
   if (isRemoteGeneration({ activeModelInfo: params.activeModelInfo })) return;
 
   try {
+    if (params.memoryAutoSaveEnabled) {
+      await memoryService.captureMemoryFromMessage({
+        message: params.userMessage,
+        projectId: params.projectId,
+      });
+      return;
+    }
     await memoryService.captureCandidateFromMessage({
       message: params.userMessage,
       projectId: params.projectId,

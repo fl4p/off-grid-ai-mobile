@@ -51,6 +51,7 @@ export type GenerationDeps = {
     cacheType?: CacheType;
     thinkingEnabled?: boolean;
     memoryAutoCaptureEnabled?: boolean;
+    memoryAutoSaveEnabled?: boolean;
   };
   downloadedModels: DownloadedModel[];
   setAlertState: SetState<AlertState>;
@@ -348,6 +349,7 @@ export async function dispatchGenerationFn(
   const project = conversation?.projectId ? useProjectStore.getState().getProject(conversation.projectId) : null;
   await maybeCaptureMemoryCandidate({
     memoryAutoCaptureEnabled: deps.settings.memoryAutoCaptureEnabled && isMemoryEnabledForContext(conversation, project),
+    memoryAutoSaveEnabled: deps.settings.memoryAutoSaveEnabled,
     activeModelInfo: deps.activeModelInfo,
     projectId: conversation?.projectId,
     userMessage,

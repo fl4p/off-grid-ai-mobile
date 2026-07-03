@@ -1,9 +1,11 @@
 const mockCaptureCandidateFromMessage = jest.fn();
+const mockCaptureMemoryFromMessage = jest.fn();
 const mockLoggerError = jest.fn();
 
 jest.mock('../../../../src/services/memory', () => ({
   memoryService: {
     captureCandidateFromMessage: (...args: any[]) => mockCaptureCandidateFromMessage(...args),
+    captureMemoryFromMessage: (...args: any[]) => mockCaptureMemoryFromMessage(...args),
   },
 }));
 
@@ -71,6 +73,30 @@ describe('generationMemoryCapture', () => {
       message,
       projectId: 'proj-1',
     });
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+  });
+
+  it('saves local user messages directly when full-auto memory is enabled', async () => {
+    const message = { id: 'msg-1', role: 'user' as const, content: 'Remember: when I ask you to plot, use line width 2.' };
+
+    await maybeCaptureMemoryCandidate({
+      memoryAutoCaptureEnabled: true,
+      memoryAutoSaveEnabled: true,
+      activeModelInfo: {
+        isRemote: false,
+        model: null,
+        modelId: 'local-model',
+        modelName: 'Local Model',
+      },
+      projectId: 'proj-1',
+      userMessage: message,
+    });
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message,
+      projectId: 'proj-1',
+    });
+    expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
   });
 
   it('skips capture when generation is remote', async () => {
@@ -86,6 +112,7 @@ describe('generationMemoryCapture', () => {
     });
 
     expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
   });
 
   it('logs and does not throw when candidate capture fails', async () => {

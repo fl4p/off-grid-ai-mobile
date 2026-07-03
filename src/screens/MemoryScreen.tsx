@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Switch,
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +17,7 @@ import { useAppStore, useProjectStore } from '../stores';
 import { memoryService, type MemoryCandidate, type MemoryItem } from '../services/memory';
 import { RootStackParamList } from '../navigation/types';
 import { createStyles } from './MemoryScreen.styles';
+import { MemoryCapturePanel } from './MemoryCapturePanel';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RouteProps = RouteProp<RootStackParamList, 'Memory'>;
@@ -112,6 +112,7 @@ export const MemoryScreen: React.FC = () => {
   const styles = useThemedStyles(createStyles);
   const project = useProjectStore((s) => projectId ? s.getProject(projectId) : null);
   const autoCaptureEnabled = useAppStore((s) => s.settings.memoryAutoCaptureEnabled);
+  const autoSaveEnabled = useAppStore((s) => s.settings.memoryAutoSaveEnabled);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [candidates, setCandidates] = useState<MemoryCandidate[]>([]);
@@ -323,22 +324,13 @@ export const MemoryScreen: React.FC = () => {
 
   const renderListHeader = () => (
     <View>
-      <View style={styles.capturePanel}>
-        <View style={styles.captureIcon}>
-          <Icon name="cpu" size={16} color={colors.primary} />
-        </View>
-        <View style={styles.captureText}>
-          <Text style={styles.captureTitle}>Auto-memory suggestions</Text>
-          <Text style={styles.captureSubtitle}>Drafts local chat memories for review. Nothing is used until you save it.</Text>
-        </View>
-        <Switch
-          testID="memory-auto-capture-toggle"
-          value={autoCaptureEnabled}
-          onValueChange={(value) => updateSettings({ memoryAutoCaptureEnabled: value })}
-          trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={colors.surface}
-        />
-      </View>
+      <MemoryCapturePanel
+        autoCaptureEnabled={autoCaptureEnabled}
+        autoSaveEnabled={autoSaveEnabled}
+        colors={colors}
+        styles={styles}
+        updateSettings={updateSettings}
+      />
       <View style={styles.controlsPanel}>
         <View style={styles.searchRow}>
           <Icon name="search" size={16} color={colors.textMuted} />
