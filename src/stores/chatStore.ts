@@ -125,6 +125,7 @@ interface ChatState {
   setActiveConversation: (conversationId: string | null) => void;
   getActiveConversation: () => Conversation | null;
   setConversationProject: (conversationId: string, projectId: string | null) => void;
+  setConversationMemoryEnabled: (conversationId: string, enabled: boolean) => void;
   addMessage: (conversationId: string, message: Omit<Message, 'id' | 'timestamp'>) => Message;
   updateMessageContent: (conversationId: string, messageId: string, content: string) => void;
   updateMessageThinking: (conversationId: string, messageId: string, isThinking: boolean) => void;
@@ -201,6 +202,16 @@ export const useChatStore = create<ChatState>()(
               ? conv
               : { ...conv, projectId: projectId || undefined, updatedAt: nextUpdatedAt(conv.updatedAt) }
           ),
+        }));
+      },
+
+      setConversationMemoryEnabled: (conversationId, enabled) => {
+        set((state) => ({
+          conversations: mapConversation(state.conversations, conversationId, (conv) => ({
+            ...conv,
+            memoryEnabled: enabled,
+            updatedAt: nextUpdatedAt(conv.updatedAt),
+          })),
         }));
       },
 

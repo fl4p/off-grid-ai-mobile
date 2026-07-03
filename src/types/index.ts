@@ -246,6 +246,7 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   projectId?: string;
+  memoryEnabled?: boolean;
   compactionSummary?: string;
   compactionCutoffMessageId?: string;
 }
@@ -375,6 +376,7 @@ export interface Project {
   description: string;
   systemPrompt: string;
   icon?: string;
+  memoryEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }

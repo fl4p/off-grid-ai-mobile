@@ -203,6 +203,30 @@ describe('chatStore', () => {
     });
   });
 
+  describe('setConversationMemoryEnabled', () => {
+    it('sets memoryEnabled on a conversation', () => {
+      const { createConversation, setConversationMemoryEnabled } = useChatStore.getState();
+
+      createConversation('test-model');
+      const id = getChatState().conversations[0].id;
+      setConversationMemoryEnabled(id, false);
+
+      expect(getChatState().conversations[0].memoryEnabled).toBe(false);
+    });
+
+    it('updates updatedAt when memory setting changes', () => {
+      const { createConversation, setConversationMemoryEnabled } = useChatStore.getState();
+
+      createConversation('test-model');
+      const conversation = getChatState().conversations[0];
+      jest.advanceTimersByTime(10);
+
+      setConversationMemoryEnabled(conversation.id, false);
+
+      expect(getChatState().conversations[0].updatedAt).not.toBe(conversation.updatedAt);
+    });
+  });
+
   // ============================================================================
   // Message Management
   // ============================================================================

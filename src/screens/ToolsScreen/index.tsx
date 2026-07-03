@@ -1,20 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Switch, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import IconMC from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme, useThemedStyles } from '../../theme';
 import { FONTS, TYPOGRAPHY, SPACING } from '../../constants';
 import { AVAILABLE_TOOLS } from '../../services/tools';
+import { filterMemoryToolNames, isMemoryToolName } from '../../services/memory/toolPrivacy';
 import { useAppStore } from '../../stores';
 import { usePythonRuntimeStore } from '../../stores/pythonRuntimeStore';
 import { pythonRuntimeService } from '../../services/python/pythonRuntimeService';
 import { useOpenProTools } from '../../hooks/useOpenProTools';
 import { CustomAlert, showAlert, hideAlert, AlertState, initialAlertState } from '../../components/CustomAlert';
 import type { ThemeColors, ThemeShadows } from '../../theme';
+import type { RootStackParamList } from '../../navigation/types';
 
 const TOOL_WARNING_COLOR = '#F59E0B';
+type ToolsRouteProp = RouteProp<RootStackParamList, 'Tools'>;
 
 /**
  * Full-page tool picker (replaces the old bottom-sheet drawer). Lists the free
@@ -25,11 +28,15 @@ const TOOL_WARNING_COLOR = '#F59E0B';
  */
 export const ToolsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const route = useRoute<ToolsRouteProp>();
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
   const openProTools = useOpenProTools();
 
   const enabledTools = useAppStore(st => st.settings.enabledTools) || [];
+  const memoryEnabled = route.params?.memoryEnabled !== false;
+  const visibleEnabledTools = memoryEnabled ? enabledTools : filterMemoryToolNames(enabledTools);
+  const visibleTools = memoryEnabled ? AVAILABLE_TOOLS : AVAILABLE_TOOLS.filter(tool => !isMemoryToolName(tool.id));
   const updateSettings = useAppStore(st => st.updateSettings);
   const toolCountHintDismissed = useAppStore(st => st.toolCountHintDismissed);
   const setToolCountHintDismissed = useAppStore(st => st.setToolCountHintDismissed);
@@ -76,6 +83,7 @@ export const ToolsScreen: React.FC = () => {
   };
 
   const handleToggleTool = (toolId: string) => {
+    if (!memoryEnabled && isMemoryToolName(toolId)) return;
     const cur = useAppStore.getState().settings.enabledTools || [];
     const enabling = !cur.includes(toolId);
     if (toolId === 'run_python' && enabling && usePythonRuntimeStore.getState().status !== 'installed') {
@@ -93,7 +101,7 @@ export const ToolsScreen: React.FC = () => {
     });
   };
 
-  const showHint = enabledTools.length > 3 && !toolCountHintDismissed;
+  const showHint = visibleEnabledTools.length > 3 && !toolCountHintDismissed;
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -140,8 +148,8 @@ export const ToolsScreen: React.FC = () => {
           </View>
         )}
 
-        {AVAILABLE_TOOLS.map(tool => {
-          const isEnabled = enabledTools.includes(tool.id);
+        {visibleTools.map(tool => {
+          const isEnabled = visibleEnabledTools.includes(tool.id);
           const isPythonDownloading = tool.id === 'run_python' && pythonStatus === 'downloading';
           const description = isPythonDownloading
             ? `Downloading Python runtime... ${Math.round(pythonProgress * 100)}%`

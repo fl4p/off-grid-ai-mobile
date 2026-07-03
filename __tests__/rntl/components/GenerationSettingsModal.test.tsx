@@ -307,6 +307,37 @@ describe('GenerationSettingsModal', () => {
     expect(getByText('Project: My Project')).toBeTruthy();
   });
 
+  it('calls onMemoryEnabledChange from the chat memory switch', () => {
+    const onMemoryEnabledChange = jest.fn();
+    const { getByTestId, getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        memoryEnabled
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(getByText('Memory')).toBeTruthy();
+    fireEvent(getByTestId('chat-memory-toggle'), 'valueChange', false);
+
+    expect(onMemoryEnabledChange).toHaveBeenCalledWith(false);
+  });
+
+  it('locks the chat memory switch when project memory is disabled', () => {
+    const onMemoryEnabledChange = jest.fn();
+    const { getByTestId, getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        memoryEnabled={false}
+        memoryDisabledByProject
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(getByText('Disabled by project settings')).toBeTruthy();
+    expect(getByTestId('chat-memory-toggle').props.disabled).toBe(true);
+  });
+
   // ============================================================================
   // NEW TESTS: Auto-detection method toggle
   // ============================================================================

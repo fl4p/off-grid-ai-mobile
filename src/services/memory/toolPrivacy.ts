@@ -8,6 +8,10 @@ export function isMemoryToolName(name?: string | null): boolean {
   return !!name && MEMORY_TOOL_NAMES.has(name);
 }
 
+export function filterMemoryToolNames(names: string[]): string[] {
+  return names.filter(name => !isMemoryToolName(name));
+}
+
 export function collectMemoryToolCallIds(messages: ToolPrivacyMessage[]): Set<string> {
   const ids = new Set<string>();
   for (const msg of messages) {

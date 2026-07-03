@@ -31,6 +31,7 @@ type ChatModalSectionProps = {
   handleModelSelect: (m: any) => void;
   handleUnloadModel: () => void;
   handleDeleteConversation: () => void;
+  handleSetConversationMemoryEnabled: (enabled: boolean) => void;
   isModelLoading: boolean;
   imageCount: number;
   activeConversationId: string | null | undefined;
@@ -48,7 +49,7 @@ export const ChatModalSection: React.FC<ChatModalSectionProps> = ({
   showModelSelector, setShowModelSelector,
   showSettingsPanel, setShowSettingsPanel,
   debugInfo, activeProject, activeConversation, settings, projects,
-  handleSelectProject, handleModelSelect, handleUnloadModel, handleDeleteConversation,
+  handleSelectProject, handleModelSelect, handleUnloadModel, handleDeleteConversation, handleSetConversationMemoryEnabled,
   isModelLoading, imageCount, activeConversationId, navigation,
   viewerImageUri, setViewerImageUri, handleSaveImage,
   isRemote,
@@ -88,6 +89,9 @@ export const ChatModalSection: React.FC<ChatModalSectionProps> = ({
       conversationImageCount={imageCount}
       activeProjectName={activeProject?.name || null}
       isRemote={isRemote}
+      memoryEnabled={activeConversation?.memoryEnabled !== false && activeProject?.memoryEnabled !== false}
+      memoryDisabledByProject={activeProject?.memoryEnabled === false}
+      onMemoryEnabledChange={activeConversation ? handleSetConversationMemoryEnabled : undefined}
     />
     <ImageViewerModal
       styles={styles} colors={colors}

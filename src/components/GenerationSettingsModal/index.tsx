@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Switch } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { AppSheet } from '../AppSheet';
 import { useTheme, useThemedStyles } from '../../theme';
@@ -31,6 +31,9 @@ interface GenerationSettingsModalProps {
   conversationImageCount?: number;
   activeProjectName?: string | null;
   isRemote?: boolean;
+  memoryEnabled?: boolean;
+  memoryDisabledByProject?: boolean;
+  onMemoryEnabledChange?: (enabled: boolean) => void;
 }
 
 export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = ({
@@ -43,6 +46,9 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
   conversationImageCount = 0,
   activeProjectName,
   isRemote,
+  memoryEnabled = true,
+  memoryDisabledByProject = false,
+  onMemoryEnabledChange,
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -105,6 +111,28 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
           conversationImageCount={conversationImageCount}
           activeProjectName={activeProjectName}
         />
+
+        {onMemoryEnabledChange && (
+          <View style={styles.memoryControlRow}>
+            <Icon name="bookmark" size={16} color={colors.textSecondary} />
+            <View style={styles.memoryControlText}>
+              <Text style={styles.actionText}>Memory</Text>
+              <Text style={styles.memoryControlDescription}>
+                {memoryDisabledByProject
+                  ? 'Disabled by project settings'
+                  : 'Use local memory recall and suggestions in this chat'}
+              </Text>
+            </View>
+            <Switch
+              testID="chat-memory-toggle"
+              value={memoryEnabled}
+              disabled={memoryDisabledByProject}
+              onValueChange={onMemoryEnabledChange}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.surface}
+            />
+          </View>
+        )}
 
         {/* IMAGE GENERATION SETTINGS */}
         <TouchableOpacity
