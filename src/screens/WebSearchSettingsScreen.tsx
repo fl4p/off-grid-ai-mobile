@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -33,6 +34,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
   const styles = useThemedStyles(createStyles);
 
   const searchProvider = useAppStore(s => s.settings.searchProvider);
+  const onlineToolsEnabled = useAppStore(s => s.settings.onlineToolsEnabled);
   const updateSettings = useAppStore(s => s.updateSettings);
 
   const selectedOption = SEARCH_PROVIDER_OPTIONS.find(o => o.id === searchProvider);
@@ -99,6 +101,24 @@ export const WebSearchSettingsScreen: React.FC = () => {
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+        <Card style={styles.section}>
+          <View style={styles.masterRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Allow tools to go online</Text>
+              <Text style={styles.settingHint}>
+                When off, the model can't search the web, open links, or install Python packages, so nothing leaves your device. Turn it on to let these tools reach the network.
+              </Text>
+            </View>
+            <Switch
+              testID="online-tools-switch"
+              value={!!onlineToolsEnabled}
+              onValueChange={v => updateSettings({ onlineToolsEnabled: v })}
+              trackColor={{ false: colors.border, true: `${colors.primary}80` }}
+              thumbColor={onlineToolsEnabled ? colors.primary : colors.textMuted}
+            />
+          </View>
+        </Card>
+
         <Card style={styles.section}>
           <Text style={styles.sectionTitle}>Search Provider</Text>
           {SEARCH_PROVIDER_OPTIONS.map((option, index) => {
@@ -243,6 +263,12 @@ const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     color: colors.textMuted,
     marginBottom: SPACING.md,
     letterSpacing: 0.3,
+  },
+  masterRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    gap: SPACING.md,
   },
   optionRow: {
     flexDirection: 'row' as const,

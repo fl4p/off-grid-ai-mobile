@@ -73,6 +73,7 @@ export const resetStores = (): void => {
       memoryAutoCaptureEnabled: false,
       memoryAutoSaveEnabled: false,
       searchProvider: 'brave' as const,
+      onlineToolsEnabled: false,
       thinkingEnabled: true,
       liteRTBackend: 'gpu' as const,
       liteRTTemperature: 0.7,

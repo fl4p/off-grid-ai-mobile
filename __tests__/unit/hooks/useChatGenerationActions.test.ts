@@ -244,6 +244,9 @@ function makeGenerationDeps(overrides: Record<string, unknown> = {}): any {
       systemPrompt: 'Be helpful',
       imageSteps: 8,
       imageGuidanceScale: 2,
+      // These tests exercise the UI/tool gate, not the online-tools gate (which
+      // has its own tests), so keep network tools available by default.
+      onlineToolsEnabled: true,
     },
     downloadedModels: [baseModel],
     setAlertState: jest.fn(),

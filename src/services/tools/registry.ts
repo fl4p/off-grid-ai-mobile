@@ -151,6 +151,9 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     // Flag it so the tool list shows the network indicator, matching the app's
     // transparency convention for any tool that can reach out.
     requiresNetwork: true,
+    // Offline-capable: stays usable when online tools are off; only the PyPI
+    // install path is blocked (see handleRunPython).
+    offlineCapable: true,
     parameters: {
       code: {
         type: 'string',
@@ -267,6 +270,24 @@ export function resolveEnabledToolIds(enabledToolIds: string[]): string[] {
   const merged = new Set(enabledToolIds);
   for (const id of PYTHON_COMPANION_TOOL_IDS) merged.add(id);
   return [...merged];
+}
+
+/**
+ * Apply the global "online tools" gate to a list of enabled tool ids.
+ *
+ * When online tools are off, any tool that needs the network is withheld from
+ * the model so it cannot silently reach out (matching the "Off Grid" promise).
+ * Offline-capable tools (e.g. run_python) stay — their network path is refused
+ * at execution time instead. Unknown ids (Pro/MCP tools registered elsewhere)
+ * are left untouched; they carry their own gating.
+ */
+export function filterToolsByNetworkAccess(enabledToolIds: string[], onlineToolsEnabled: boolean): string[] {
+  if (onlineToolsEnabled) return enabledToolIds;
+  return enabledToolIds.filter(id => {
+    const tool = AVAILABLE_TOOLS.find(t => t.id === id);
+    if (!tool) return true;
+    return !tool.requiresNetwork || tool.offlineCapable === true;
+  });
 }
 
 export function getToolsAsOpenAISchema(enabledToolIds: string[]) {

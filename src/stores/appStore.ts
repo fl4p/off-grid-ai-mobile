@@ -60,6 +60,13 @@ type AppSettings = {
   memoryAutoCaptureEnabled: boolean;
   memoryAutoSaveEnabled: boolean;
   searchProvider: SearchProviderId;
+  /**
+   * Master switch for tools that reach the network (web_search, read_url, and
+   * run_python's PyPI installs). Off by default so nothing leaves the device
+   * until the user opts in. Gates tools regardless of their per-tool enabled
+   * state — see filterToolsByNetworkAccess.
+   */
+  onlineToolsEnabled: boolean;
   thinkingEnabled: boolean;
   inferenceBackend: InferenceBackend;
   liteRTBackend: LiteRTBackend;
@@ -181,6 +188,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   memoryAutoCaptureEnabled: false,
   memoryAutoSaveEnabled: false,
   searchProvider: 'brave',
+  onlineToolsEnabled: false,
   thinkingEnabled: false,
   liteRTBackend: 'gpu',
   liteRTTemperature: 0.7,

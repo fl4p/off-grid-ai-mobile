@@ -6,6 +6,7 @@ import {
   onnxImageGeneratorService, ImageGenerationState, buildPromptWithToolNote,
   contextCompactionService, ragService, memoryService,
 } from '../../services';
+import { filterToolsByNetworkAccess } from '../../services/tools/registry';
 import { liteRTService } from '../../services/litert';
 import { getToolExtensions } from '../../services/tools/extensions';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
@@ -49,6 +50,7 @@ export type GenerationDeps = {
     imageSteps?: number;
     imageGuidanceScale?: number;
     enabledTools?: string[];
+    onlineToolsEnabled?: boolean;
     cacheType?: CacheType;
     thinkingEnabled?: boolean;
     memoryAutoCaptureEnabled?: boolean;
@@ -213,7 +215,10 @@ async function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _m
   // Honour the UI gate: "N/A" (supportsToolCalling === false) means the picker is unreachable, so don't inject tools the user can't disable.
   const canUseTools = deps.supportsToolCalling !== false && (llmService.supportsToolCalling() || isRemote || isLiteRT);
 
-  let enabledTools = canUseTools ? (deps.settings.enabledTools || []) : [];
+  // Online-tools switch off: withhold network tools so the model can't silently search/fetch.
+  let enabledTools = canUseTools
+    ? filterToolsByNetworkAccess(deps.settings.enabledTools || [], deps.settings.onlineToolsEnabled ?? false)
+    : [];
   if (isRemote) {
     enabledTools = filterMemoryToolNames(enabledTools);
   }

@@ -21,6 +21,14 @@ export interface ToolDefinition {
   requiresPython?: boolean;
   /** Not shown as its own row in the Tools settings list (unlocked via another tool). */
   hidden?: boolean;
+  /**
+   * The tool's core function runs on-device; it only reaches the network for an
+   * optional extra (e.g. run_python installs PyPI packages but numpy/pandas are
+   * offline). Such tools stay available when the global "online tools" switch is
+   * off — the network path is refused at execution time instead of hiding the
+   * tool. Distinct from `requiresNetwork` tools, which are removed entirely.
+   */
+  offlineCapable?: boolean;
 }
 
 export interface ToolParameter {
