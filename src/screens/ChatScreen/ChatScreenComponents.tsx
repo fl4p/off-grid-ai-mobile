@@ -65,6 +65,7 @@ export const NoModelScreen: React.FC<{
       onUnloadModel={onUnloadModel}
       isLoading={isModelLoading}
       currentModelPath={llmService.getLoadedModelPath()}
+      onSelectionComplete={() => setShowModelSelector(false)}
     />
   </SafeAreaView>
 );

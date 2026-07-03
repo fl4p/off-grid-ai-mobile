@@ -137,13 +137,13 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
 
   // Handle selecting a remote text model
   const handleSelectRemoteTextModel = async (model: RemoteModel, serverId: string) => {
+    onSelectionComplete?.();
     try {
       // Unload any active local model first — only one active model at a time
       if (llmService.isModelLoaded()) {
         await activeModelService.unloadTextModel();
       }
       await remoteServerManager.setActiveRemoteTextModel(serverId, model.id);
-      onSelectionComplete?.();
     } catch (error) {
       logger.error('[ModelSelectorModal] Failed to set remote text model:', error);
       setAlertState(showAlert('Failed to Select Model', (error as Error).message));
@@ -152,9 +152,9 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
 
   // Handle selecting a remote vision model
   const handleSelectRemoteVisionModel = async (model: RemoteModel, serverId: string) => {
+    onSelectionComplete?.();
     try {
       await remoteServerManager.setActiveRemoteImageModel(serverId, model.id);
-      onSelectionComplete?.();
     } catch (error) {
       logger.error('[ModelSelectorModal] Failed to set remote vision model:', error);
       setAlertState(showAlert('Failed to Select Model', (error as Error).message));

@@ -77,6 +77,7 @@ export const ChatModalSection: React.FC<ChatModalSectionProps> = ({
       isLoading={isModelLoading}
       currentModelPath={llmService.getLoadedModelPath()}
       onAddServer={() => navigation.navigate('RemoteServers')}
+      onSelectionComplete={() => setShowModelSelector(false)}
     />
     <GenerationSettingsModal
       visible={showSettingsPanel}
