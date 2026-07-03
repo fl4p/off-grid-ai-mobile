@@ -282,6 +282,36 @@ describe('runToolLoop', () => {
       expect(lastMsg.role).toBe('user');
       expect(lastMsg.content).toMatch(/stop searching/i);
     });
+
+    it('does NOT run the no-tools synthesis pass for LiteRT (it would wipe the native tool-result context)', async () => {
+      // LiteRT rebuilds context from the message array and keys tool results off a
+      // trailing `tool` run; appending the synthesis instruction (and dropping tools to
+      // [] → native session reset) would strip the very results we ask it to summarize.
+      // So the synthesis pass must be skipped on-device.
+      mockAppState = {
+        ...mockAppState,
+        downloadedModels: [{ id: 'litert-1', engine: 'litert' }],
+        activeModelId: 'litert-1',
+      };
+      mockedLiteRTService.isModelLoaded.mockReturnValue(true);
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      // Model emits tool-call markup as text every turn, so the loop hits the cap and
+      // the forced pass comes back with markup-only (no prose).
+      const markup = '<tool_call>{"name":"web_search","arguments":{"query":"portugal"}}</tool_call>';
+      mockedLiteRTService.generateRaw.mockResolvedValue(markup);
+
+      const onFinalResponse = jest.fn();
+      const ctx = createContext({ onFinalResponse });
+      await runToolLoop(ctx);
+
+      // 3 generateRaw calls: iterations 0 and 1, plus the single forced pass 1. A 4th
+      // (the synthesis pass) must NOT happen for LiteRT.
+      expect(mockedLiteRTService.generateRaw).toHaveBeenCalledTimes(3);
+      // The remote/local path is never used on the LiteRT route.
+      expect(mockedGenerateResponseWithTools).not.toHaveBeenCalled();
+      const finalText = String(onFinalResponse.mock.calls[onFinalResponse.mock.calls.length - 1]?.[0] ?? '');
+      expect(finalText).not.toContain('tool_call');
+    });
   });
 
   describe('LiteRT image forwarding', () => {
