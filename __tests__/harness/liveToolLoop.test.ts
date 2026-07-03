@@ -124,6 +124,11 @@ class NodeXHR {
     // Point web_search at the chosen provider and feed it the real key (keychain is
     // mocked by jest.setup; override the read to return our env key).
     useAppStore.getState().updateSettings({ searchProvider: SEARCH_PROVIDER });
+    // Some endpoints reject sampling params (Anthropic's OpenAI-compat layer rejects
+    // temperature on its newest models, and temperature+top_p together on others).
+    // Let a run drop them so the tool loop can still be exercised against those models.
+    if (process.env.LIVE_OMIT_TEMP === '1') useAppStore.getState().updateSettings({ temperature: undefined as any });
+    if (process.env.LIVE_OMIT_TOPP === '1') useAppStore.getState().updateSettings({ topP: undefined as any });
     (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(
       SEARCH_KEY ? { password: SEARCH_KEY } : false,
     );
