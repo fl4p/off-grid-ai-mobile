@@ -635,6 +635,25 @@ class PythonRuntimeService {
     });
   }
 
+  /**
+   * Read one file's full text from a project's workspace, for the in-app HTML
+   * preview. Loads the project first (like exportProjectZip) so it works even if
+   * that project hasn't run code this session. Returns the whole file over the
+   * control channel, so a large self-contained page isn't clipped by the stdout cap.
+   */
+  async readWorkspaceFile(path: string, projectId?: string): Promise<string> {
+    return this.enqueue(async () => {
+      if (!this.isInstalled()) throw new Error('Python runtime is not installed');
+      await this.ensureExecutorReady();
+      if (projectId !== undefined) {
+        await this.ensureWorkspaceLoaded(projectId);
+      } else if (this.activeWorkspaceKey === null) {
+        await this.ensureWorkspaceLoaded(undefined);
+      }
+      return this.injectControl('__fsReadFile', path);
+    });
+  }
+
   /** Reload the WebView page: kills a hung script, resets Python globals. */
   private resetExecutor(): void {
     this.executorReady = false;

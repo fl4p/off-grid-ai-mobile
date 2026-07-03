@@ -29,6 +29,14 @@ jest.mock('react-native-edge-to-edge', () => ({
   NavigationBar: () => null,
 }));
 
+// react-native-webview reaches a native TurboModule at import; stub it so any
+// suite that pulls in a screen using it (HtmlPreview, PythonRuntimeHost, or the
+// whole navigator) loads. Tests that assert WebView props override this locally.
+jest.mock('react-native-webview', () => ({
+  __esModule: true,
+  WebView: () => null,
+}));
+
 // ============================================================================
 // AsyncStorage Mock
 // ============================================================================

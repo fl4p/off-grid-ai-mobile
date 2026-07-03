@@ -13,6 +13,7 @@ export { MemoryScreen } from './MemoryScreen';
 export { MemoryEditorScreen } from './MemoryEditorScreen';
 export { ProjectChatsScreen } from './ProjectChatsScreen';
 export { DocumentPreviewScreen } from './DocumentPreviewScreen';
+export { HtmlPreviewScreen } from './HtmlPreviewScreen';
 export { ChatsListScreen } from './ChatsListScreen';
 export { LockScreen } from './LockScreen';
 export { PassphraseSetupScreen } from './PassphraseSetupScreen';

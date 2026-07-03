@@ -57,6 +57,24 @@ function getToolLabel(toolName?: string, content?: string): string {
   }
 }
 
+/**
+ * If a write_file/edit_file result names an .html file, return its workspace path so
+ * the chat can offer to open it in the preview. Parses the fixed result strings from
+ * the fs tool handlers (write: "... to <path> (new file)"; edit: "... in <path>").
+ */
+export function htmlPathFromToolResult(toolName?: string, content?: string): string | null {
+  if (!content) return null;
+  let match: RegExpExecArray | null = null;
+  if (toolName === 'write_file') {
+    match = / to (.+?) \((?:new file|overwrote existing)\)\s*$/.exec(content);
+  } else if (toolName === 'edit_file') {
+    match = / in (.+?)\s*$/.exec(content);
+  }
+  const path = match?.[1]?.trim();
+  if (!path) return null;
+  return /\.html?$/i.test(path) ? path : null;
+}
+
 
 type ToolResultBubbleProps = {
   toolIcon: string;
@@ -67,6 +85,7 @@ type ToolResultBubbleProps = {
   hasDetails: boolean;
   attachments?: import('../../types').MediaAttachment[];
   onImagePress?: (uri: string) => void;
+  onOpenHtml?: (path: string) => void;
   styles: ReturnType<typeof createStyles>;
   colors: any;
 };
@@ -82,9 +101,10 @@ function tailPreview(text: string, n: number): { preview: string; hidden: number
 }
 
 const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
-  toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, attachments, onImagePress, styles, colors,
+  toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, attachments, onImagePress, onOpenHtml, styles, colors,
 }) => {
   const [expanded, setExpanded] = useState(false);
+  const htmlPath = onOpenHtml ? htmlPathFromToolResult(toolName, content) : null;
   // Python output IS the result the user asked for (like a REPL), so show it
   // inline instead of hiding it behind the collapse — but only the last few lines
   // (usually the result/summary), so a chatty script doesn't wall off the chat.
@@ -116,6 +136,17 @@ const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
       {/* Tool-produced media (e.g. run_python plots) always shows, not behind the collapse. */}
       {!!attachments?.length && (
         <MessageAttachments attachments={attachments} isUser={false} onImagePress={onImagePress} styles={styles} colors={colors} />
+      )}
+      {htmlPath && (
+        <TouchableOpacity
+          style={styles.openHtmlButton}
+          onPress={() => onOpenHtml?.(htmlPath)}
+          testID="tool-open-html"
+          activeOpacity={0.6}
+        >
+          <Icon name="external-link" size={13} color={colors.primary} />
+          <Text style={styles.openHtmlText}>Open in browser</Text>
+        </TouchableOpacity>
       )}
       {python ? (
         <View style={styles.toolDetailContainer}>
@@ -152,12 +183,12 @@ const RecalledMemoriesRow: React.FC<{ message: Message; isUser: boolean; isStrea
   return <MemoryRecallCollapsible memories={memories} styles={styles} colors={colors} />;
 };
 
-const ToolResultMessage: React.FC<{ message: Message; onImagePress?: (uri: string) => void; styles: any; colors: any }> = ({ message, onImagePress, styles, colors }) => {
+const ToolResultMessage: React.FC<{ message: Message; onImagePress?: (uri: string) => void; onOpenHtml?: (path: string) => void; styles: any; colors: any }> = ({ message, onImagePress, onOpenHtml, styles, colors }) => {
   const toolIcon = getToolIcon(message.toolName);
   const toolLabel = getToolLabel(message.toolName, message.content);
   const durationLabel = message.generationTimeMs == null ? '' : ` (${message.generationTimeMs}ms)`;
   const hasDetails = !!(message.content && message.content.length > 0 && !message.content.startsWith('No results'));
-  return <ToolResultBubble toolIcon={toolIcon} toolLabel={toolLabel} toolName={message.toolName || 'unknown'} durationLabel={durationLabel} content={message.content} hasDetails={hasDetails} attachments={message.attachments} onImagePress={onImagePress} styles={styles} colors={colors} />;
+  return <ToolResultBubble toolIcon={toolIcon} toolLabel={toolLabel} toolName={message.toolName || 'unknown'} durationLabel={durationLabel} content={message.content} hasDetails={hasDetails} attachments={message.attachments} onImagePress={onImagePress} onOpenHtml={onOpenHtml} styles={styles} colors={colors} />;
 };
 
 const ToolCallMessage: React.FC<{ message: Message; styles: any; colors: any }> = ({ message, styles, colors }) => (
@@ -252,6 +283,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   message,
   isStreaming,
   onImagePress,
+  onOpenHtml,
   onCopy,
   onRetry,
   onEdit,
@@ -360,7 +392,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     return <SystemInfoMessage content={displayContent} styles={styles}
       alertState={alertState} onCloseAlert={() => setAlertState(hideAlert())} />;
   }
-  if (message.role === 'tool') return <ToolResultMessage message={message} onImagePress={onImagePress} styles={styles} colors={colors} />;
+  if (message.role === 'tool') return <ToolResultMessage message={message} onImagePress={onImagePress} onOpenHtml={onOpenHtml} styles={styles} colors={colors} />;
   if (message.role === 'assistant' && message.toolCalls?.length) {
     return <ToolCallWithThinking message={message} showThinking={showThinking}
       onToggle={() => setShowThinking(!showThinking)} styles={styles} colors={colors} />;

@@ -31,6 +31,7 @@ import {
   MemoryScreen,
   MemoryEditorScreen,
   DocumentPreviewScreen,
+  HtmlPreviewScreen,
   DownloadManagerScreen,
   ModelSettingsScreen,
   DeviceInfoScreen,
@@ -243,6 +244,7 @@ export const AppNavigator: React.FC = () => {
         <RootStack.Screen name="Memory" component={MemoryScreen} />
         <RootStack.Screen name="MemoryEditor" component={MemoryEditorScreen} />
         <RootStack.Screen name="DocumentPreview" component={DocumentPreviewScreen} />
+        <RootStack.Screen name="HtmlPreview" component={HtmlPreviewScreen} />
         <RootStack.Screen name="ModelSettings" component={ModelSettingsScreen} />
         <RootStack.Screen name="RemoteServers" component={RemoteServersScreen} />
         <RootStack.Screen name="DeviceInfo" component={DeviceInfoScreen} />

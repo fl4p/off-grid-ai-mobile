@@ -244,6 +244,13 @@ export const ChatScreen: React.FC = () => {
       onEdit={chat.handleEditMessage}
       onGenerateImage={chat.handleGenerateImageFromMessage}
       onImagePress={chat.handleImagePress}
+      onOpenHtml={(path) =>
+        rootNavigation.navigate('HtmlPreview', {
+          path,
+          projectId: chat.activeConversation?.projectId,
+          title: path,
+        })
+      }
     />
   );
 

@@ -401,4 +401,38 @@ describe('ChatMessage — Tool message rendering', () => {
       });
     });
   });
+
+  // ==========================================================================
+  // "Open in browser" affordance for agent-written HTML files
+  // ==========================================================================
+  describe('open-html button', () => {
+    const renderWithOpen = (toolName: string, content: string, onOpenHtml = jest.fn()) => {
+      const message = makeMessage({ role: 'tool', content, toolName });
+      const utils = render(<ChatMessage message={message} onOpenHtml={onOpenHtml} />);
+      return { ...utils, onOpenHtml };
+    };
+
+    it('shows the button and opens the path for a written .html file', () => {
+      const { getByTestId, onOpenHtml } = renderWithOpen('write_file', 'Wrote 1234 bytes to snake.html (new file)');
+      fireEvent.press(getByTestId('tool-open-html'));
+      expect(onOpenHtml).toHaveBeenCalledWith('snake.html');
+    });
+
+    it('shows the button for an edited .html file', () => {
+      const { getByTestId, onOpenHtml } = renderWithOpen('edit_file', 'Made 1 replacement in index.html');
+      fireEvent.press(getByTestId('tool-open-html'));
+      expect(onOpenHtml).toHaveBeenCalledWith('index.html');
+    });
+
+    it('does not show the button for a non-html write', () => {
+      const { queryByTestId } = renderWithOpen('write_file', 'Wrote 10 bytes to main.py (new file)');
+      expect(queryByTestId('tool-open-html')).toBeNull();
+    });
+
+    it('does not show the button when no onOpenHtml handler is provided', () => {
+      const message = makeMessage({ role: 'tool', content: 'Wrote 5 bytes to a.html (new file)', toolName: 'write_file' });
+      const { queryByTestId } = render(<ChatMessage message={message} />);
+      expect(queryByTestId('tool-open-html')).toBeNull();
+    });
+  });
 });
