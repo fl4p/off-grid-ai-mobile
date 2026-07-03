@@ -226,6 +226,38 @@ describe('OpenAICompatibleProvider', () => {
       expect(onToken).toHaveBeenCalledWith(' world');
     });
 
+    it('omits max_tokens for normal remote chat generation', async () => {
+      await provider.loadModel('test-model');
+
+      const mockCreateStreamingRequest = httpClient.createStreamingRequest as jest.Mock;
+      mockCreateStreamingRequest.mockImplementation(async () => { });
+
+      await provider.generate(
+        [{ id: '1', role: 'user', content: 'Hi', timestamp: 0 }],
+        { maxTokens: 123 },
+        { onToken: jest.fn(), onComplete: jest.fn(), onError: jest.fn() }
+      );
+
+      const requestBody = mockCreateStreamingRequest.mock.calls[0][1].body;
+      expect(requestBody.max_tokens).toBeUndefined();
+    });
+
+    it('includes max_tokens for bounded internal completions', async () => {
+      await provider.loadModel('test-model');
+
+      const mockCreateStreamingRequest = httpClient.createStreamingRequest as jest.Mock;
+      mockCreateStreamingRequest.mockImplementation(async () => { });
+
+      await provider.generate(
+        [{ id: '1', role: 'user', content: 'Summarize', timestamp: 0 }],
+        { maxTokens: 123, limitOutputTokens: true },
+        { onToken: jest.fn(), onComplete: jest.fn(), onError: jest.fn() }
+      );
+
+      const requestBody = mockCreateStreamingRequest.mock.calls[0][1].body;
+      expect(requestBody.max_tokens).toBe(123);
+    });
+
     it('should include API key in headers when provided', async () => {
       const secureProvider = new OpenAICompatibleProvider('secure', {
         endpoint: 'http://api.example.com',
@@ -847,6 +879,43 @@ describe('OpenAICompatibleProvider', () => {
       const userMsg = capturedBody.messages.find((m: any) => m.role === 'user');
       expect(userMsg).toBeDefined();
       expect(userMsg.images).toBeUndefined();
+    });
+
+    it('includes num_predict only for bounded internal Ollama completions', async () => {
+      const ollamaProvider = new OpenAICompatibleProvider('ollama-server', {
+        endpoint: 'http://192.168.1.10:11434',
+        modelId: 'llama3',
+      });
+      await ollamaProvider.loadModel('llama3');
+
+      const mockNDJSON = httpClient.createNDJSONStreamingRequest as jest.Mock;
+      let normalBody: any;
+      let boundedBody: any;
+      mockNDJSON
+        .mockImplementationOnce((_url: string, _req: any, onLine: Function) => {
+          normalBody = _req.body;
+          onLine({ message: { content: 'Hello.' }, done: true });
+          return Promise.resolve();
+        })
+        .mockImplementationOnce((_url: string, _req: any, onLine: Function) => {
+          boundedBody = _req.body;
+          onLine({ message: { content: 'Summary.' }, done: true });
+          return Promise.resolve();
+        });
+
+      await ollamaProvider.generate(
+        [{ id: '1', role: 'user', content: 'Hello', timestamp: 0 }],
+        { maxTokens: 123 },
+        { onToken: jest.fn(), onComplete: jest.fn(), onError: jest.fn() }
+      );
+      await ollamaProvider.generate(
+        [{ id: '2', role: 'user', content: 'Summarize', timestamp: 0 }],
+        { maxTokens: 123, limitOutputTokens: true },
+        { onToken: jest.fn(), onComplete: jest.fn(), onError: jest.fn() }
+      );
+
+      expect(normalBody.options.num_predict).toBeUndefined();
+      expect(boundedBody.options.num_predict).toBe(123);
     });
   });
 

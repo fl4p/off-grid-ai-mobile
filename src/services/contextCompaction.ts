@@ -14,6 +14,8 @@
  */
 import { llmService } from './llm';
 import { useChatStore } from '../stores/chatStore';
+import { useRemoteServerStore } from '../stores/remoteServerStore';
+import { providerRegistry } from './providers';
 import { Message } from '../types';
 import logger from '../utils/logger';
 
@@ -22,6 +24,10 @@ const CONTEXT_FULL_PATTERNS = [
   'not enough context space',
   'context window exceeded',
   'context length exceeded',
+  'maximum context length',
+  'maximum number of tokens',
+  'prompt too long',
+  'too many tokens',
 ];
 
 /** Fraction of context reserved for the prompt (rest is for output) */
@@ -72,8 +78,30 @@ class ContextCompactionService {
     try {
       return await llmService.getTokenCount(text);
     } catch {
+      const provider = this.getActiveRemoteProvider();
+      if (provider) {
+        try {
+          return await provider.getTokenCount(text);
+        } catch {
+          // Fall through to the local estimate.
+        }
+      }
       return Math.ceil(text.length / CHARS_PER_TOKEN_ESTIMATE);
     }
+  }
+
+  private getActiveRemoteProvider() {
+    const activeServerId = useRemoteServerStore.getState().activeServerId;
+    if (!activeServerId || !providerRegistry.hasProvider(activeServerId)) return null;
+    return providerRegistry.getProvider(activeServerId) ?? null;
+  }
+
+  private getContextLength(): number {
+    if (!llmService.isModelLoaded()) {
+      const remoteContextLength = this.getActiveRemoteProvider()?.capabilities?.maxContextLength;
+      if (remoteContextLength && remoteContextLength > 0) return remoteContextLength;
+    }
+    return llmService.getPerformanceSettings().contextLength || 2048;
   }
 
   /**
@@ -94,7 +122,7 @@ class ContextCompactionService {
     try {
       await llmService.clearKVCache(true);
 
-      const ctxLength = llmService.getPerformanceSettings().contextLength || 2048;
+      const ctxLength = this.getContextLength();
       const summaryTokenBudget = Math.floor(ctxLength * SUMMARY_BUDGET_RATIO);
       const systemTokens = await this.countTokens(systemPrompt);
       const recentTokenBudget = Math.max(0, Math.floor(ctxLength * PROMPT_BUDGET_RATIO) - summaryTokenBudget - systemTokens);
@@ -187,7 +215,7 @@ class ContextCompactionService {
       : '';
 
     // Cap transcript to fit within context alongside the summarize instruction
-    const ctxLength = llmService.getPerformanceSettings().contextLength || 2048;
+    const ctxLength = this.getContextLength();
     const instructionOverhead = SUMMARIZER_INSTRUCTION_OVERHEAD_TOKENS;
     const inputBudget = ctxLength - summaryTokenBudget - instructionOverhead;
     const inputCharBudget = inputBudget * CHARS_PER_TOKEN_ESTIMATE;
@@ -212,7 +240,30 @@ class ContextCompactionService {
       },
     ];
 
-    return await llmService.generateWithMaxTokens(summaryMessages, summaryTokenBudget);
+    if (llmService.isModelLoaded()) {
+      return await llmService.generateWithMaxTokens(summaryMessages, summaryTokenBudget);
+    }
+
+    const remoteProvider = this.getActiveRemoteProvider();
+    if (!remoteProvider) {
+      throw new Error('No local or remote model available for compaction summary');
+    }
+
+    return await new Promise<string>((resolve, reject) => {
+      let fullResponse = '';
+      remoteProvider.generate(
+        summaryMessages,
+        { maxTokens: summaryTokenBudget, limitOutputTokens: true, enableThinking: false },
+        {
+          onToken: (token) => { fullResponse += token; },
+          onReasoning: () => {},
+          onComplete: (result) => {
+            resolve((result.content || fullResponse).trim());
+          },
+          onError: reject,
+        },
+      ).catch(reject);
+    });
   }
 
   /** Clear persisted compaction state when a conversation is deleted */

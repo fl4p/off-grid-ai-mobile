@@ -68,6 +68,8 @@ export interface GenerationOptions {
   stopSequences?: string[];
   /** Whether to enable thinking/reasoning mode (Ollama: sends "think" param; others: parsed from response) */
   enableThinking?: boolean;
+  /** Apply maxTokens to the provider request. Used for internal bounded completions, not normal chat. */
+  limitOutputTokens?: boolean;
 }
 
 /** Tool definition for function calling */
