@@ -144,9 +144,9 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     id: 'run_python',
     name: 'run_python',
     displayName: 'Python',
-    description: 'Execute Python 3.12 code in a sandboxed on-device interpreter and return stdout, stderr, and the value of the last expression. numpy and pandas are preinstalled and run fully offline. Installing other pure-Python packages reaches the network: import micropip, then await micropip.install("package") - top-level await is supported. Write a complete script and print() what you need to see. Variables persist between calls in the same session.',
+    description: 'Execute Python 3.12 code in a sandboxed on-device interpreter and return stdout, stderr, and the value of the last expression. numpy and pandas are preinstalled and run fully offline. To use other packages, list them in "packages" and they install from PyPI before the code runs (needs network). matplotlib plots are captured automatically and shown to the user in the chat - just build a figure with matplotlib (add matplotlib to packages); you do not need to call savefig or plt.show. Write a complete script and print() what you need to see. Variables persist between calls in the same session.',
     icon: 'terminal',
-    // Core use (numpy/pandas) is offline, but micropip installs fetch from PyPI.
+    // Core use (numpy/pandas) is offline, but package installs fetch from PyPI.
     // Flag it so the tool list shows the network indicator, matching the app's
     // transparency convention for any tool that can reach out.
     requiresNetwork: true,
@@ -155,6 +155,10 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
         type: 'string',
         description: 'Python source code to execute',
         required: true,
+      },
+      packages: {
+        type: 'string',
+        description: 'Optional comma-separated PyPI packages to install before running, e.g. "matplotlib, requests". Omit for numpy/pandas (already installed).',
       },
     },
   },

@@ -117,6 +117,16 @@ describe('ChatMessage — Tool message rendering', () => {
       const { getByTestId } = renderToolResult('calculator', '');
       expect(getByTestId('tool-message')).toBeTruthy();
     });
+
+    it('renders run_python plot attachments inline (not behind the collapse)', () => {
+      const { getByTestId } = renderToolResult('run_python', '[1 plot shown to the user]', {
+        attachments: [
+          { id: 'p1', type: 'image', uri: 'file:///docs/python-plots/plot-p1.png', mimeType: 'image/png' },
+        ],
+      });
+      // The plot image shows without needing to expand the tool bubble.
+      expect(getByTestId('generated-image-content')).toBeTruthy();
+    });
   });
 
   // ==========================================================================

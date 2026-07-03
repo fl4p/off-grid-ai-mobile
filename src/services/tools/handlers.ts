@@ -1,10 +1,15 @@
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { ToolCall, ToolResult } from './types';
+import type { MediaAttachment } from '../../types';
+import { handleRunPython, type PythonDispatchResult } from './pythonToolHandler';
 import logger from '../../utils/logger';
 
-function makeResult(call: ToolCall, start: number, opts: { content: string; error?: string }): ToolResult {
-  return { toolCallId: call.id, name: call.name, content: opts.content, error: opts.error, durationMs: Date.now() - start };
+/** A handler may return plain text, or text plus media to show the user. */
+type DispatchResult = PythonDispatchResult;
+
+function makeResult(call: ToolCall, start: number, opts: { content: string; error?: string; attachments?: MediaAttachment[] }): ToolResult {
+  return { toolCallId: call.id, name: call.name, content: opts.content, error: opts.error, attachments: opts.attachments, durationMs: Date.now() - start };
 }
 function requireString(call: ToolCall, param: string): string | null {
   const val = call.arguments[param];
@@ -14,15 +19,16 @@ function requireString(call: ToolCall, param: string): string | null {
 export async function executeToolCall(call: ToolCall): Promise<ToolResult> {
   const start = Date.now();
   try {
-    const content = await dispatchTool(call);
-    return makeResult(call, start, { content });
+    const dispatched = await dispatchTool(call);
+    const norm = typeof dispatched === 'string' ? { content: dispatched } : dispatched;
+    return makeResult(call, start, norm);
   } catch (error: any) {
     logger.error(`[Tools] Error executing ${call.name}:`, error);
     return makeResult(call, start, { content: '', error: error.message || 'Tool execution failed' });
   }
 }
 
-async function dispatchTool(call: ToolCall): Promise<string> {
+async function dispatchTool(call: ToolCall): Promise<DispatchResult> {
   switch (call.name) {
     case 'web_search': {
       const q = requireString(call, 'query');
@@ -57,7 +63,7 @@ async function dispatchTool(call: ToolCall): Promise<string> {
     case 'run_python': {
       const code = requireString(call, 'code');
       if (!code) throw new Error('Missing required parameter: code');
-      return handleRunPython(code);
+      return handleRunPython(call, code);
     }
     default:
       throw new Error(`Unknown tool: ${call.name}`);
@@ -389,43 +395,6 @@ async function handleReadUrl(rawUrl: string): Promise<string> {
   } finally { clearTimeout(timeout); }
 }
 
-async function handleRunPython(code: string): Promise<string> {
-  const MAX_CHARS = 6000;
-  const { pythonRuntimeService } = require('../python/pythonRuntimeService'); // NOSONAR
-  const { usePythonRuntimeStore } = require('../../stores/pythonRuntimeStore'); // NOSONAR
-
-  if (usePythonRuntimeStore.getState().status === 'unknown') {
-    await pythonRuntimeService.refreshStatus();
-  }
-  if (!pythonRuntimeService.isInstalled()) {
-    return 'The Python runtime is not installed on this device. Tell the user to open Settings > Tools and enable Python (a one-time 24 MB download). After that, Python runs fully offline.';
-  }
-
-  const res = await pythonRuntimeService.execute(code);
-
-  const sections: string[] = [];
-  if (res.stdout) sections.push(res.stdout);
-  if (res.ok && res.result !== undefined && res.result !== '') sections.push(`[result] ${res.result}`);
-  if (res.stderr) sections.push(`[stderr]\n${res.stderr}`);
-  if (!res.ok) sections.push(`[error]\n${res.error || 'Execution failed'}`);
-  if (sections.length === 0) sections.push('(no output — use print() to see values)');
-
-  const output = sections.join('\n');
-  return output.length > MAX_CHARS ? `${sliceCodePointSafe(output, MAX_CHARS)}\n\n[Output truncated]` : output;
-}
-
-/**
- * Slice to at most `max` UTF-16 code units without splitting a surrogate pair.
- * Python output (emoji, some numpy/pandas symbols) uses astral-plane chars; a
- * naive slice can leave a lone surrogate that corrupts JSON transport downstream.
- */
-function sliceCodePointSafe(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const code = text.charCodeAt(max - 1);
-  // If the cut lands right after a high surrogate, drop it too.
-  const end = code >= 0xd800 && code <= 0xdbff ? max - 1 : max;
-  return text.slice(0, end);
-}
 
 async function handleSearchKnowledgeBase(query: string, projectId?: string): Promise<string> {
   if (!projectId) return 'No project context. Knowledge base requires an active project.';

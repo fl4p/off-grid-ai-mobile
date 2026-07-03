@@ -32,6 +32,14 @@ export interface PythonExecutionResult {
   stderr: string;
   result?: string;
   error?: string;
+  /** Base64 PNGs of matplotlib figures produced by the run. */
+  images?: string[];
+}
+
+export interface ExecuteOptions {
+  timeoutMs?: number;
+  /** PyPI/pyodide packages to install (micropip) before running the code. */
+  packages?: string[];
 }
 
 /** Bridge the PythonRuntimeHost WebView registers while mounted. */
@@ -47,6 +55,8 @@ interface PendingExecution {
 }
 
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 30000;
+/** Installing packages downloads wheels over the network — allow more headroom. */
+export const PACKAGE_INSTALL_TIMEOUT_MS = 120000;
 /** First boot compiles WASM and imports the stdlib — generous on old phones. */
 const EXECUTOR_BOOT_TIMEOUT_MS = 60000;
 
@@ -226,7 +236,7 @@ class PythonRuntimeService {
    * first use and keeps them warm; interpreter globals persist across calls
    * until a timeout forces a reload.
    */
-  async execute(code: string, opts: { timeoutMs?: number } = {}): Promise<PythonExecutionResult> {
+  async execute(code: string, opts: ExecuteOptions = {}): Promise<PythonExecutionResult> {
     // Chain onto the previous run so calls never overlap on the shared interpreter.
     // A prior failure must not break the chain, so swallow it before running ours.
     const run = this.runQueue
@@ -236,7 +246,7 @@ class PythonRuntimeService {
     return run;
   }
 
-  private async runExecution(code: string, opts: { timeoutMs?: number }): Promise<PythonExecutionResult> {
+  private async runExecution(code: string, opts: ExecuteOptions): Promise<PythonExecutionResult> {
     if (usePythonRuntimeStore.getState().status === 'unknown') {
       await this.refreshStatus();
     }
@@ -246,7 +256,9 @@ class PythonRuntimeService {
     await this.ensureExecutorReady();
 
     const id = generateId();
-    const timeoutMs = opts.timeoutMs ?? DEFAULT_EXECUTION_TIMEOUT_MS;
+    const packages = opts.packages?.length ? opts.packages : undefined;
+    // Package installs pull wheels over the network — give them a longer budget.
+    const timeoutMs = opts.timeoutMs ?? (packages ? PACKAGE_INSTALL_TIMEOUT_MS : DEFAULT_EXECUTION_TIMEOUT_MS);
 
     return new Promise<PythonExecutionResult>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -258,7 +270,7 @@ class PythonRuntimeService {
 
       this.pending.set(id, { resolve, reject, timer });
       try {
-        this.executor!.inject(buildRunInjection({ id, code }));
+        this.executor!.inject(buildRunInjection({ id, code, packages }));
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);
@@ -322,6 +334,7 @@ class PythonRuntimeService {
       stderr: msg.stderr ?? '',
       result: msg.result,
       error: msg.error,
+      images: Array.isArray(msg.images) && msg.images.length ? msg.images : undefined,
     });
   }
 

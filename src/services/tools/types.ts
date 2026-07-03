@@ -28,4 +28,10 @@ export interface ToolResult {
   content: string;
   error?: string;
   durationMs: number;
+  /**
+   * Media the tool produced for the user to see (e.g. matplotlib plots from
+   * run_python). Rendered on the tool-result message; not sent to the model,
+   * which only receives `content` text.
+   */
+  attachments?: import('../../types').MediaAttachment[];
 }

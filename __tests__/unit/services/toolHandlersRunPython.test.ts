@@ -23,8 +23,8 @@ jest.mock('../../../src/stores/pythonRuntimeStore', () => ({
   usePythonRuntimeStore: { getState: () => ({ status: mockStatus }) },
 }));
 
-function runPython(code: unknown) {
-  return executeToolCall({ id: 'call_1', name: 'run_python', arguments: { code } });
+function runPython(code: unknown, extra: Record<string, unknown> = {}) {
+  return executeToolCall({ id: 'call_1', name: 'run_python', arguments: { code, ...extra } });
 }
 
 describe('run_python handler', () => {
@@ -85,6 +85,35 @@ describe('run_python handler', () => {
     mockExecute.mockRejectedValue(new Error('Python execution timed out after 30s'));
     const result = await runPython('while True: pass');
     expect(result.error).toContain('timed out');
+  });
+
+  it('passes a comma-separated packages arg through to execute', async () => {
+    mockExecute.mockResolvedValue({ ok: true, stdout: 'done', stderr: '' });
+    await runPython('import requests', { packages: 'requests, beautifulsoup4' });
+    expect(mockExecute).toHaveBeenCalledWith('import requests', { packages: ['requests', 'beautifulsoup4'] });
+  });
+
+  it('omits the packages option when none are requested', async () => {
+    mockExecute.mockResolvedValue({ ok: true, stdout: 'x', stderr: '' });
+    await runPython('print(1)');
+    expect(mockExecute).toHaveBeenCalledWith('print(1)', {});
+  });
+
+  it('saves returned plot images as attachments and notes them for the model', async () => {
+    mockExecute.mockResolvedValue({ ok: true, stdout: '', stderr: '', images: ['iVBORw0KGgo=', 'AAAA'] });
+    const result = await runPython('plt.plot(...)', { packages: 'matplotlib' });
+
+    expect(result.attachments).toHaveLength(2);
+    expect(result.attachments![0]).toMatchObject({ type: 'image', mimeType: 'image/png' });
+    expect(result.attachments![0].uri).toMatch(/^file:\/\/.*\/python-plots\/plot-.*\.png$/);
+    // The model can't see the image, so the text tells it a plot was shown.
+    expect(result.content).toContain('2 plots shown to the user');
+  });
+
+  it('returns no attachments when the run produced no images', async () => {
+    mockExecute.mockResolvedValue({ ok: true, stdout: 'hi', stderr: '' });
+    const result = await runPython('print("hi")');
+    expect(result.attachments).toBeUndefined();
   });
 
   it('truncates without splitting a surrogate pair', async () => {

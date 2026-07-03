@@ -227,7 +227,7 @@ describe('pythonRuntimeService', () => {
      */
     async function startExecution(
       code: string,
-      opts: { timeoutMs?: number },
+      opts: { timeoutMs?: number; packages?: string[] },
       inject: (js: string) => void,
       reload: () => void = () => { },
     ): Promise<{ promise: Promise<import('../../../../src/services/python/pythonRuntimeService').PythonExecutionResult> }> {
@@ -269,6 +269,20 @@ describe('pythonRuntimeService', () => {
       expect(injected).toHaveLength(1);
       expect(parseInjectedRequest(injected[0]).code).toBe('print("hello")\n42');
       expect(result).toEqual({ ok: true, stdout: 'hello', stderr: '', result: '42', error: undefined });
+    });
+
+    it('threads requested packages into the injected request and returns captured images', async () => {
+      let injectedReq: { packages?: string[] } = {};
+      const { promise } = await startExecution('import numpy', { packages: ['numpy', 'requests'] }, js => {
+        injectedReq = parseInjectedRequest(js) as { packages?: string[] };
+        const req = parseInjectedRequest(js);
+        setTimeout(() => pythonRuntimeService.handleWebViewMessage(
+          JSON.stringify({ type: 'result', id: req.id, ok: true, stdout: '', stderr: '', images: ['b64png'] }), TRUSTED_URL), 0);
+      });
+
+      const result = await promise;
+      expect(injectedReq.packages).toEqual(['numpy', 'requests']);
+      expect(result.images).toEqual(['b64png']);
     });
 
     it('resolves failed executions with the python error', async () => {

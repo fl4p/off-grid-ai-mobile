@@ -10,6 +10,7 @@ import {
   buildRunInjection,
   parsePythonPageMessage,
   PAGE_MAX_STREAM_CHARS,
+  MAX_FIGURES,
 } from '../../../../src/services/python/pythonPage';
 
 describe('buildPythonPageHtml', () => {
@@ -43,12 +44,37 @@ describe('buildPythonPageHtml', () => {
     expect(html).toContain('sanitizeSurrogates(JSON.stringify(msg))');
     expect(html).toContain('\\uFFFD');
   });
+
+  it('installs requested packages via micropip before running, reporting failures distinctly', () => {
+    expect(html).toContain('req.packages');
+    expect(html).toContain("pyodide.loadPackage('micropip')");
+    expect(html).toContain('micropip.install(req.packages)');
+    expect(html).toContain('Package install failed');
+  });
+
+  it('captures matplotlib figures only when matplotlib was imported', () => {
+    // Guarded on sys.modules so non-plotting code never force-loads the backend.
+    expect(html).toContain('"matplotlib" not in _sys.modules');
+    expect(html).toContain('savefig');
+    expect(html).toContain('b64encode');
+    // Figures are closed and the count is capped via the page's MAX_FIGURES var.
+    expect(html).toContain('_plt.close("all")');
+    expect(html).toContain(`var MAX_FIGURES = ${MAX_FIGURES}`);
+    expect(html).toContain('get_fignums()[:');
+    expect(html).toContain('images: images');
+  });
 });
 
 describe('buildRunInjection', () => {
   it('produces a JS statement carrying the request as JSON', () => {
     const js = buildRunInjection({ id: 'abc', code: 'print("hi")' });
     expect(js).toBe('window.__runPython({"id":"abc","code":"print(\\"hi\\")"}); true;');
+  });
+
+  it('carries the packages list to the page when present', () => {
+    const js = buildRunInjection({ id: '1', code: 'import x', packages: ['numpy', 'requests'] });
+    const parsed = JSON.parse(/window\.__runPython\((.*)\); true;/.exec(js)![1]);
+    expect(parsed.packages).toEqual(['numpy', 'requests']);
   });
 
   it('safely encodes newlines and quotes in code', () => {

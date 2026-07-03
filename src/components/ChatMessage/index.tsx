@@ -52,12 +52,13 @@ type ToolResultBubbleProps = {
   durationLabel: string;
   content: string;
   hasDetails: boolean;
+  attachments?: import('../../types').MediaAttachment[];
   styles: ReturnType<typeof createStyles>;
   colors: any;
 };
 
 const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
-  toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, styles, colors,
+  toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, attachments, styles, colors,
 }) => {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -80,6 +81,10 @@ const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
           />
         )}
       </TouchableOpacity>
+      {/* Tool-produced media (e.g. run_python plots) always shows, not behind the collapse. */}
+      {!!attachments?.length && (
+        <MessageAttachments attachments={attachments} isUser={false} styles={styles} colors={colors} />
+      )}
       {expanded && hasDetails && (
         <View style={styles.toolDetailContainer}>
           <MarkdownText dimmed>{content}</MarkdownText>
@@ -101,7 +106,7 @@ const ToolResultMessage: React.FC<{ message: Message; styles: any; colors: any }
   const toolLabel = getToolLabel(message.toolName, message.content);
   const durationLabel = message.generationTimeMs == null ? '' : ` (${message.generationTimeMs}ms)`;
   const hasDetails = !!(message.content && message.content.length > 0 && !message.content.startsWith('No results'));
-  return <ToolResultBubble toolIcon={toolIcon} toolLabel={toolLabel} toolName={message.toolName || 'unknown'} durationLabel={durationLabel} content={message.content} hasDetails={hasDetails} styles={styles} colors={colors} />;
+  return <ToolResultBubble toolIcon={toolIcon} toolLabel={toolLabel} toolName={message.toolName || 'unknown'} durationLabel={durationLabel} content={message.content} hasDetails={hasDetails} attachments={message.attachments} styles={styles} colors={colors} />;
 };
 
 const ToolCallMessage: React.FC<{ message: Message; styles: any; colors: any }> = ({ message, styles, colors }) => (
@@ -183,6 +188,15 @@ const ToolCallWithThinking: React.FC<{
   );
 };
 
+function canMessageSpeak(params: {
+  isUser: boolean;
+  isStreaming: boolean | undefined;
+  canSpeakProp: boolean;
+  ttsCanSpeak: boolean;
+}): boolean {
+  return !params.isUser && !params.isStreaming && (params.canSpeakProp || params.ttsCanSpeak);
+}
+
 export const ChatMessage: React.FC<ChatMessageProps> = ({
   message,
   isStreaming,
@@ -190,6 +204,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onCopy,
   onRetry,
   onEdit,
+  onRemember,
   onGenerateImage,
   showActions = true,
   canGenerateImage = false,
@@ -245,6 +260,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     setTimeout(() => setShowSelectText(true), 350);
   };
 
+  const handleRemember = async () => {
+    setShowActionMenu(false);
+    try {
+      await onRemember?.(message);
+      triggerHaptic('notificationSuccess');
+      setAlertState(showAlert('Saved to Memory', 'This message is now available to local recall.'));
+    } catch (err: any) {
+      setAlertState(showAlert('Memory Error', err?.message || 'Failed to save memory.'));
+    }
+  };
+
   const handleSaveEdit = () => {
     const trimmed = editedContent.trim();
     if (trimmed !== message.content) onEdit?.(message, trimmed);
@@ -268,7 +294,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     setShowActionMenu(false);
   };
 
-  const canSpeak = !isUser && !isStreaming && (canSpeakProp || ttsCanSpeak);
+  const canSpeak = canMessageSpeak({ isUser, isStreaming, canSpeakProp, ttsCanSpeak });
 
   const handleSpeak = () => {
     setShowActionMenu(false);
@@ -353,6 +379,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         canSpeak={canSpeak}
         styles={styles}
         onCopy={handleCopy}
+        onRemember={onRemember ? handleRemember : undefined}
         onEdit={handleEdit}
         onRetry={handleRetry}
         onGenerateImage={handleGenerateImage}

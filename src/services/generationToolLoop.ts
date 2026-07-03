@@ -252,6 +252,8 @@ async function executeToolCalls(ctx: ToolLoopContext, toolCalls: import('./tools
       id: `tool-result-${Date.now()}-${tc.id || tc.name}`, role: 'tool',
       content: result.error ? `Error: ${result.error}` : result.content, timestamp: Date.now(),
       toolCallId: tc.id, toolName: tc.name, generationTimeMs: result.durationMs,
+      // Media the tool produced for the user (e.g. run_python matplotlib plots).
+      attachments: result.attachments,
     };
     loopMessages.push(toolResultMsg);
     chatStore.addMessage(ctx.conversationId, toolResultMsg);
