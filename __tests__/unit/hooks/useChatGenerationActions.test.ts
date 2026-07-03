@@ -95,6 +95,7 @@ jest.mock('../../../src/services/memory', () => ({
   memoryService: {
     searchMemory: jest.fn(() => Promise.resolve([])),
     formatForPrompt: jest.fn(() => '<memory_context>mock memory context</memory_context>'),
+    captureCandidateFromMessage: jest.fn(() => Promise.resolve(null)),
   },
 }));
 
@@ -138,6 +139,7 @@ const mockGetDocsByProject = ragService.getDocumentsByProject as jest.Mock;
 const mockFormatForPrompt = retrievalService.formatForPrompt as jest.Mock;
 const mockSearchMemory = memoryService.searchMemory as jest.Mock;
 const mockFormatMemoryForPrompt = memoryService.formatForPrompt as jest.Mock;
+const mockCaptureCandidateFromMessage = memoryService.captureCandidateFromMessage as jest.Mock;
 
 
 const mockChatStoreGetState = jest.fn(() => ({ conversations: [] as any[], updateCompactionState: jest.fn() }));
@@ -189,6 +191,7 @@ beforeEach(() => {
   mockFormatForPrompt.mockReturnValue('<knowledge_base>mock RAG context</knowledge_base>');
   mockSearchMemory.mockResolvedValue([]);
   mockFormatMemoryForPrompt.mockReturnValue('<memory_context>mock memory context</memory_context>');
+  mockCaptureCandidateFromMessage.mockResolvedValue(null);
   mockChatStoreGetState.mockReturnValue({ conversations: [], updateCompactionState: jest.fn() });
   mockProjectStoreGetProject.mockReturnValue(null);
 });
@@ -663,6 +666,47 @@ describe('dispatchGenerationFn (single routing layer)', () => {
     expect(startText).not.toHaveBeenCalled();
     expect(mockGenerateImage).not.toHaveBeenCalled();
     expect(setPendingMessage).toHaveBeenCalledWith('Hi', undefined);
+  });
+
+  it('captures a memory candidate for local text messages when enabled', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember that the solar permit office closes at 3 PM.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, memoryAutoCaptureEnabled: true },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureCandidateFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: 'proj-1',
+    });
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
+  it('does not auto-capture memory candidates for remote text messages', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'Remember this private note.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      settings: { ...makeGenerationDeps().settings, memoryAutoCaptureEnabled: true },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
   });
 });
 
@@ -1312,6 +1356,32 @@ describe('applyCompactionPrefix — compaction state', () => {
     expect(mockGenerateResponse).toHaveBeenCalledWith('conv-1', expect.arrayContaining([
       expect.objectContaining({ id: 'compaction-summary' }),
     ]));
+  });
+
+  it('omits persisted compaction summaries for remote generation', async () => {
+    useRemoteServerStore.setState({ activeServerId: 'srv-1', activeRemoteTextModelId: 'gpt-4' });
+    const msgs = [
+      { id: 'm1', role: 'user', content: 'old message', timestamp: 0 },
+      { id: 'm2', role: 'assistant', content: 'old reply', timestamp: 0 },
+      { id: 'm3', role: 'user', content: 'new message', timestamp: 0 },
+    ];
+    const conv = {
+      id: 'conv-1',
+      compactionSummary: 'PRIVATE TAX MEMORY summary',
+      compactionCutoffMessageId: 'm2',
+      messages: msgs,
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    const deps = makeGenerationDeps({
+      activeModelInfo: { isRemote: true, model: null, modelId: 'gpt-4', modelName: 'GPT-4' },
+      activeModel: null,
+    });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'new message' });
+
+    const messages = mockGenerateResponse.mock.calls[0][1];
+    expect(messages.find((m: { id?: string }) => m.id === 'compaction-summary')).toBeUndefined();
+    expect(JSON.stringify(messages)).not.toContain('PRIVATE TAX MEMORY');
   });
 
   it('includes all messages when cutoffMessageId is not found', async () => {

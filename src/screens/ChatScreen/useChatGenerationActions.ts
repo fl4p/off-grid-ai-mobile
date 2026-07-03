@@ -6,17 +6,18 @@ import {
   onnxImageGeneratorService, ImageGenerationState, buildPromptWithToolNote,
   contextCompactionService,
 } from '../../services';
-import { getToolExtensions } from '../../services/tools/extensions';
 import { liteRTService } from '../../services/litert';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
 import { abortPreload } from '../../services/modelPreloader';
-import { useChatStore, useProjectStore, useRemoteServerStore } from '../../stores';
+import { useChatStore, useProjectStore } from '../../stores';
 import { callHook, HOOKS } from '../../bootstrap/hookRegistry';
 import { Message, MediaAttachment, Project, DownloadedModel, RemoteModel, CacheType } from '../../types';
 import logger from '../../utils/logger';
 import { injectChatContext } from './contextInjection';
+import { isRemoteGeneration, maybeCaptureMemoryCandidate } from './generationMemoryCapture';
+import { buildMessagesForContext, buildMessagesWithCompactionPrefix } from './generationContextMessages';
+import { generateWithCompactionRetry } from './generationCompactionRetry';
 type SetState<T> = Dispatch<SetStateAction<T>>;
-const FALLBACK_RECENT_MESSAGE_COUNT = 2;
 const MEMORY_TOOL_IDS = ['search_memory', 'save_memory', 'forget_memory'];
 
 export type GenerationDeps = {
@@ -46,13 +47,14 @@ export type GenerationDeps = {
     enabledTools?: string[];
     cacheType?: CacheType;
     thinkingEnabled?: boolean;
+    memoryAutoCaptureEnabled?: boolean;
   };
   downloadedModels: DownloadedModel[];
   setAlertState: SetState<AlertState>;
   setIsClassifying: SetState<boolean>;
   setAppImageGenerationStatus: (v: string | null) => void;
   setAppIsGeneratingImage: (v: boolean) => void;
-  addMessage: (convId: string, msg: any) => void;
+  addMessage: (convId: string, msg: any) => Message;
   clearStreamingMessage: () => void;
   deleteConversation: (convId: string) => void;
   setActiveConversation: (convId: string | null) => void;
@@ -69,28 +71,10 @@ export type GenerationDeps = {
   createConversation: (modelId: string, title?: string, projectId?: string, serverId?: string) => string;
   pendingProjectId?: string;
 };
-function applyCompactionPrefix(conversation: any, systemPrompt: string, messages: Message[]): { prefix: Message[]; filtered: Message[] } {
-  const prefix: Message[] = [{ id: 'system', role: 'system', content: systemPrompt, timestamp: 0 }];
-  let filtered = messages;
-  if (conversation?.compactionSummary && conversation?.compactionCutoffMessageId) {
-    prefix.push({ id: 'compaction-summary', role: 'assistant', content: `[Previous conversation summary]\n${conversation.compactionSummary}`, timestamp: 0 });
-    const cutoffIdx = messages.findIndex(m => m.id === conversation.compactionCutoffMessageId);
-    if (cutoffIdx !== -1) filtered = messages.slice(cutoffIdx + 1);
-  }
-  return { prefix, filtered };
-}
 function appendAttachmentText(text: string, attachments?: MediaAttachment[]): string {
   if (!attachments) return text;
   return attachments.filter(a => a.type === 'document' && a.textContent)
     .reduce((acc, doc) => `${acc}\n\n---\n📄 **Attached Document: ${doc.fileName || 'document'}**\n\`\`\`\n${doc.textContent}\n\`\`\`\n---`, text);
-}
-function buildMessagesForContext(conversationId: string, messageText: string, systemPrompt: string): Message[] {
-  const conversation = useChatStore.getState().conversations.find(c => c.id === conversationId);
-  const allMessages = (conversation?.messages || []).filter(m => !m.isSystemInfo);
-  const { prefix, filtered } = applyCompactionPrefix(conversation, systemPrompt, allMessages);
-  const lastMsg = filtered.at(-1);
-  const userMessageForContext = (lastMsg?.role === 'user' ? { ...lastMsg, content: messageText } : lastMsg) as Message;
-  return [...prefix, ...filtered.slice(0, -1), userMessageForContext];
 }
 export async function shouldRouteToImageGenerationFn(
   deps: Pick<GenerationDeps, 'isGeneratingImage' | 'settings' | 'imageModelLoaded' | 'downloadedModels' | 'setIsClassifying' | 'setAppImageGenerationStatus' | 'setAppIsGeneratingImage' | 'hasTextModel'>,
@@ -198,29 +182,6 @@ async function prepareContext(setDebugInfo: SetState<any>, systemPrompt: string,
     }
   } catch { /* ignore */ }
 }
-/** Run generation; if context is full, compact old messages and retry once. */
-async function generateWithCompactionRetry(
-  opts: { id: string; prompt: string; messages: Message[] },
-  enabledTools: string[],
-  projectId?: string,
-): Promise<void> {
-  const extCount = getToolExtensions().reduce((n, e) => n + e.enabledToolCount(), 0);
-  const gen = (msgs: Message[]) => (enabledTools.length > 0 || extCount > 0)
-    ? generationService.generateWithTools(opts.id, msgs, { enabledToolIds: enabledTools, projectId })
-    : generationService.generateResponse(opts.id, msgs);
-  try { await gen(opts.messages); } catch (error: any) {
-    if (!contextCompactionService.isContextFullError(error)) throw error;
-    await llmService.stopGeneration().catch(() => { });
-    const conversation = useChatStore.getState().conversations.find(c => c.id === opts.id);
-    const previousSummary = conversation?.compactionSummary;
-    const compacted = await contextCompactionService.compact({ conversationId: opts.id, systemPrompt: opts.prompt, allMessages: opts.messages, previousSummary }).catch(async () => {
-      await llmService.clearKVCache(true).catch(() => { });
-      const recent = opts.messages.filter(m => m.role !== 'system').slice(-FALLBACK_RECENT_MESSAGE_COUNT);
-      return [{ id: 'system', role: 'system', content: opts.prompt, timestamp: 0 } as Message, ...recent];
-    });
-    await gen(compacted);
-  }
-}
 /** Gemma 4 E2B/E4B need <|think|> prepended to activate thinking mode — both llama.cpp and LiteRT. */
 const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLiteRT?: boolean; thinkingEnabled?: boolean }): string => {
   const { isLiteRT = false, thinkingEnabled = false } = opts ?? {};
@@ -230,11 +191,10 @@ const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLit
 };
 function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _messageText: string): { enabledTools: string[]; rawPrompt: string; isLiteRT: boolean } {
   const project = conversation?.projectId ? useProjectStore.getState().getProject(conversation.projectId) : null;
-  const { activeServerId, activeRemoteTextModelId } = useRemoteServerStore.getState();
   const isLiteRT = deps.activeModel?.engine === 'litert' && liteRTService.isModelLoaded();
-  const isRemote = deps.activeModelInfo?.isRemote === true || !!(activeServerId && activeRemoteTextModelId);
+  const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
   // Honour the UI gate: "N/A" (supportsToolCalling === false) means the picker is unreachable, so don't inject tools the user can't disable.
-  const canUseTools = deps.supportsToolCalling !== false && (llmService.supportsToolCalling() || !!(activeServerId && activeRemoteTextModelId) || isLiteRT);
+  const canUseTools = deps.supportsToolCalling !== false && (llmService.supportsToolCalling() || isRemote || isLiteRT);
 
   let enabledTools = canUseTools ? (deps.settings.enabledTools || []) : [];
   if (isRemote) {
@@ -268,7 +228,7 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
   }
   const conversation = useChatStore.getState().conversations.find(c => c.id === targetConversationId);
   const { enabledTools, rawPrompt, isLiteRT } = resolveToolsAndPrompt(deps, conversation, messageText);
-  const isRemote = deps.activeModelInfo?.isRemote === true || !!useRemoteServerStore.getState().activeRemoteTextModelId;
+  const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
   let basePrompt = await injectChatContext({
     projectId: conversation?.projectId,
     query: messageText,
@@ -292,10 +252,20 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
     isRemote,
     { isLiteRT, thinkingEnabled: deps.settings.thinkingEnabled },
   );
-  const messagesForContext = buildMessagesForContext(targetConversationId, messageText, systemPrompt);
+  const messagesForContext = buildMessagesForContext({
+    conversationId: targetConversationId,
+    messageText,
+    systemPrompt,
+    includeCompactionSummary: !isRemote,
+  });
   await prepareContext(setDebugInfo, systemPrompt, messagesForContext);
   try {
-    await generateWithCompactionRetry({ id: targetConversationId, prompt: systemPrompt, messages: messagesForContext }, activeTools, conversation?.projectId);
+    await generateWithCompactionRetry({
+      generation: { id: targetConversationId, prompt: systemPrompt, messages: messagesForContext },
+      enabledTools: activeTools,
+      projectId: conversation?.projectId,
+      includePreviousSummary: !isRemote,
+    });
   } catch (error: any) {
     const msg = error?.message || error?.toString?.() || 'Failed to generate response';
     logger.error('[ChatGen] Generation failed:', msg, error);
@@ -363,7 +333,14 @@ export async function dispatchGenerationFn(
     }
   }
   if (shouldGenerateImage && !deps.activeImageModel) messageText = `[User wanted an image but no image model is loaded] ${messageText}`;
-  deps.addMessage(conversationId, { role: 'user', content: text, attachments });
+  const userMessage = deps.addMessage(conversationId, { role: 'user', content: text, attachments });
+  const conversation = useChatStore.getState().conversations.find(c => c.id === conversationId);
+  await maybeCaptureMemoryCandidate({
+    memoryAutoCaptureEnabled: deps.settings.memoryAutoCaptureEnabled,
+    activeModelInfo: deps.activeModelInfo,
+    projectId: conversation?.projectId,
+    userMessage,
+  });
   await startTextGeneration(conversationId, messageText);
 }
 export type SendCall = { text: string; attachments?: MediaAttachment[]; imageMode?: 'auto' | 'force' | 'disabled'; startGeneration: (convId: string, text: string) => Promise<void>; setDebugInfo: SetState<any> };
@@ -432,7 +409,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   const messagesUpToUser = messages.slice(0, messages.findIndex((m: Message) => m.id === userMessage.id) + 1)
     .map(m => m.id === userMessage.id ? { ...m, content: messageText } : m);
   const { enabledTools, rawPrompt, isLiteRT: isLiteRTRegen } = resolveToolsAndPrompt(deps, conversation, messageText);
-  const isRemote = deps.activeModelInfo?.isRemote === true || !!useRemoteServerStore.getState().activeRemoteTextModelId;
+  const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
   const activeTools = enabledTools;
   const basePrompt = await injectChatContext({
     projectId: conversation?.projectId,
@@ -448,9 +425,19 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
     isRemote,
     { isLiteRT: isLiteRTRegen, thinkingEnabled: deps.settings.thinkingEnabled },
   );
-  const { prefix, filtered } = applyCompactionPrefix(conversation, systemPrompt, messagesUpToUser);
+  const messagesForContext = buildMessagesWithCompactionPrefix({
+    conversation,
+    systemPrompt,
+    messages: messagesUpToUser,
+    includeCompactionSummary: !isRemote,
+  });
   try {
-    await generateWithCompactionRetry({ id: targetConversationId, prompt: systemPrompt, messages: [...prefix, ...filtered] }, activeTools, conversation?.projectId);
+    await generateWithCompactionRetry({
+      generation: { id: targetConversationId, prompt: systemPrompt, messages: messagesForContext },
+      enabledTools: activeTools,
+      projectId: conversation?.projectId,
+      includePreviousSummary: !isRemote,
+    });
   } catch (error: any) {
     const msg = error?.message || 'Failed to generate response';
     const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens') || msg.includes('Input token ids');

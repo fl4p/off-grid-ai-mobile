@@ -28,6 +28,8 @@ import {
   ProjectEditScreen,
   ProjectChatsScreen,
   KnowledgeBaseScreen,
+  MemoryScreen,
+  MemoryEditorScreen,
   DocumentPreviewScreen,
   DownloadManagerScreen,
   ModelSettingsScreen,
@@ -231,6 +233,8 @@ export const AppNavigator: React.FC = () => {
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />
         <RootStack.Screen name="KnowledgeBase" component={KnowledgeBaseScreen} />
+        <RootStack.Screen name="Memory" component={MemoryScreen} />
+        <RootStack.Screen name="MemoryEditor" component={MemoryEditorScreen} />
         <RootStack.Screen name="DocumentPreview" component={DocumentPreviewScreen} />
         <RootStack.Screen name="ModelSettings" component={ModelSettingsScreen} />
         <RootStack.Screen name="RemoteServers" component={RemoteServersScreen} />

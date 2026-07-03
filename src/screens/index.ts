@@ -9,6 +9,8 @@ export { ProjectsScreen } from './ProjectsScreen';
 export { ProjectDetailScreen } from './ProjectDetailScreen';
 export { ProjectEditScreen } from './ProjectEditScreen';
 export { KnowledgeBaseScreen } from './KnowledgeBaseScreen';
+export { MemoryScreen } from './MemoryScreen';
+export { MemoryEditorScreen } from './MemoryEditorScreen';
 export { ProjectChatsScreen } from './ProjectChatsScreen';
 export { DocumentPreviewScreen } from './DocumentPreviewScreen';
 export { ChatsListScreen } from './ChatsListScreen';

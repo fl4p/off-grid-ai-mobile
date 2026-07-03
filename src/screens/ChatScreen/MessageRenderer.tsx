@@ -16,6 +16,7 @@ type MessageRendererProps = {
   isGeneratingImage: boolean;
   showGenerationDetails: boolean;
   onCopy: (content: string) => void;
+  onRemember: (message: Message) => Promise<void> | void;
   onRetry: (message: Message) => void;
   onEdit: (message: Message, newContent: string) => void;
   onGenerateImage: (prompt: string) => void;
@@ -33,6 +34,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
     isGeneratingImage,
     showGenerationDetails,
     onCopy,
+    onRemember,
     onRetry,
     onEdit,
     onGenerateImage,
@@ -78,6 +80,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
       message={msg}
       isStreaming={isStreamingThis}
       onCopy={onCopy}
+      onRemember={onRemember}
       onRetry={onRetry}
       onEdit={onEdit}
       onGenerateImage={onGenerateImage}

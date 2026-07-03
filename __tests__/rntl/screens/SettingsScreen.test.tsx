@@ -116,6 +116,7 @@ describe('SettingsScreen', () => {
     const { getByText } = render(<SettingsScreen />);
     expect(getByText('Model Settings')).toBeTruthy();
     expect(getByText('Remote Servers')).toBeTruthy();
+    expect(getByText('Memory')).toBeTruthy();
     expect(getByText('Security')).toBeTruthy();
     expect(getByText('Device Information')).toBeTruthy();
     expect(getByText('Storage')).toBeTruthy();
@@ -132,6 +133,7 @@ describe('SettingsScreen', () => {
     const { getByText } = render(<SettingsScreen />);
     expect(getByText('System prompt, generation, and performance')).toBeTruthy();
     expect(getByText('Connect to Ollama, LM Studio, and more')).toBeTruthy();
+    expect(getByText('Saved local facts and research notes')).toBeTruthy();
     expect(getByText('Passphrase and app lock')).toBeTruthy();
     expect(getByText('Hardware and compatibility')).toBeTruthy();
     expect(getByText('Models and data usage')).toBeTruthy();
@@ -148,6 +150,9 @@ describe('SettingsScreen', () => {
 
     fireEvent.press(getByText('Remote Servers'));
     expect(mockNavigate).toHaveBeenCalledWith('RemoteServers');
+
+    fireEvent.press(getByText('Memory'));
+    expect(mockNavigate).toHaveBeenCalledWith('Memory');
 
     fireEvent.press(getByText('Security'));
     expect(mockNavigate).toHaveBeenCalledWith('SecuritySettings');

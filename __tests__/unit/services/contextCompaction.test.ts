@@ -321,6 +321,49 @@ describe('compact', () => {
     const result = await compactWith(messages);
     expect(result.length).toBeGreaterThanOrEqual(2);
   });
+
+  it('does not summarize or retain memory tool calls and results', async () => {
+    mockTokenCounts(500);
+
+    const messages = [
+      createMessage({ id: 'old-user', role: 'user', content: 'old question' }),
+      createMessage({
+        id: 'memory-call',
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: 'tc-memory', name: 'search_memory', arguments: '{"query":"tax"}' },
+          { id: 'tc-web', name: 'web_search', arguments: '{"query":"public"}' },
+        ],
+      }),
+      createMessage({
+        id: 'memory-result',
+        role: 'tool',
+        content: 'PRIVATE TAX MEMORY',
+        toolCallId: 'tc-memory',
+        toolName: 'search_memory',
+      }),
+      createMessage({
+        id: 'web-result',
+        role: 'tool',
+        content: 'PUBLIC WEB RESULT',
+        toolCallId: 'tc-web',
+        toolName: 'web_search',
+      }),
+      createMessage({ id: 'latest', role: 'user', content: 'latest question' }),
+    ];
+
+    const result = await compactWith(messages);
+    const summaryMessages = mockedLlmService.generateWithMaxTokens.mock.calls[0][0];
+    const summaryInput = summaryMessages.find((m: Message) => m.role === 'user')!.content;
+    const resultPayload = JSON.stringify(result);
+
+    expect(summaryInput).not.toContain('PRIVATE TAX MEMORY');
+    expect(summaryInput).not.toContain('search_memory');
+    expect(summaryInput).toContain('PUBLIC WEB RESULT');
+    expect(resultPayload).not.toContain('PRIVATE TAX MEMORY');
+    expect(resultPayload).not.toContain('search_memory');
+  });
 });
 
 describe('clearSummary', () => {

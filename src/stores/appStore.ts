@@ -55,6 +55,7 @@ type AppSettings = {
   imageUseOpenCL: boolean; enhanceImagePrompts: boolean;
   enableGpu: boolean; gpuLayers: number; flashAttn: boolean;
   cacheType: CacheType; showGenerationDetails: boolean; enabledTools: string[];
+  memoryAutoCaptureEnabled: boolean;
   thinkingEnabled: boolean;
   inferenceBackend: InferenceBackend;
   liteRTBackend: LiteRTBackend;
@@ -173,6 +174,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   cacheType: 'q8_0' as CacheType,
   showGenerationDetails: false,
   enabledTools: ['web_search', 'read_url', 'search_knowledge_base'],
+  memoryAutoCaptureEnabled: false,
   thinkingEnabled: false,
   liteRTBackend: 'gpu',
   liteRTTemperature: 0.7,

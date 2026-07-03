@@ -264,7 +264,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const handleRemember = async () => {
     setShowActionMenu(false);
     try {
-      await onRemember?.(message);
+      await onRemember?.({ ...message, content: displayContent });
       triggerHaptic('notificationSuccess');
       setAlertState(showAlert('Saved to Memory', 'This message is now available to local recall.'));
     } catch (err: any) {

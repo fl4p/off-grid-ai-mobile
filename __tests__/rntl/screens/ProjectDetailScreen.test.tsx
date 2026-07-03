@@ -241,6 +241,11 @@ describe('ProjectDetailScreen', () => {
       expect(getByText('Chats')).toBeTruthy();
     });
 
+    it('shows Memory section title', () => {
+      const { getByText } = render(<ProjectDetailScreen />);
+      expect(getByText('Memory')).toBeTruthy();
+    });
+
     it('shows Delete Project button', () => {
       const { getByText } = render(<ProjectDetailScreen />);
       expect(getByText('Delete Project')).toBeTruthy();
@@ -261,6 +266,12 @@ describe('ProjectDetailScreen', () => {
       const { getByText } = render(<ProjectDetailScreen />);
       fireEvent.press(getByText('edit-2'));
       expect(mockNavigate).toHaveBeenCalledWith('ProjectEdit', { projectId: 'proj1' });
+    });
+
+    it('memory section navigates to project Memory screen', () => {
+      const { getByText } = render(<ProjectDetailScreen />);
+      fireEvent.press(getByText('Memory'));
+      expect(mockNavigate).toHaveBeenCalledWith('Memory', { projectId: 'proj1' });
     });
   });
 
