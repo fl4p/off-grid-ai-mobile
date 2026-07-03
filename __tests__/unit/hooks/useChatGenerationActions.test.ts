@@ -470,14 +470,21 @@ describe('regenerateResponseFn', () => {
     expect(deps.generatingForConversationRef.current).toBeNull();
   });
 
-  it('shows alert when generateResponse throws', async () => {
+  it('adds an inline error message when regeneration throws (Issue #9/#11)', async () => {
     mockGenerateResponse.mockRejectedValueOnce(new Error('Server error'));
     const userMsg = { id: 'm1', role: 'user' as const, content: 'hi', timestamp: 0 };
     const deps = makeGenerationDeps({
       activeConversation: { id: 'conv-1', messages: [userMsg] },
     });
     await regenerateResponseFn(deps, { setDebugInfo: jest.fn(), userMessage: userMsg });
-    expect(deps.setAlertState).toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.setAlertState).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.addMessage).toHaveBeenCalledWith('conv-1', expect.objectContaining({
+      role: 'assistant',
+      isError: true,
+      isSystemInfo: true,
+      content: expect.stringContaining('Generation failed: Server error'),
+      errorDetails: expect.stringContaining('Request:'),
+    }));
   });
 });
 
