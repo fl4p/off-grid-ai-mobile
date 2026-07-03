@@ -108,3 +108,14 @@ export interface MemorySearchResult {
   reason: 'semantic' | 'lexical';
   matchedTerms: string[];
 }
+
+export interface MemoryRecallSummary {
+  id: number;
+  scope: MemoryScope;
+  kind: MemoryKind;
+  sourceType: string;
+  jurisdiction?: string;
+  asOfDate?: string;
+  score: number;
+  reason: 'semantic' | 'lexical';
+}

@@ -7,6 +7,7 @@ import { Message, GenerationMeta, MediaAttachment } from '../types';
 import { runToolLoop } from './generationToolLoop';
 import type { ToolResult } from './tools/types';
 import { providerRegistry } from './providers';
+import type { MemoryRecallSummary } from './memory';
 import logger from '../utils/logger';
 import { shouldShowSharePrompt, emitSharePrompt } from '../utils/sharePrompt';
 import { checkProPromptForText } from '../utils/proPrompt';
@@ -22,6 +23,12 @@ import {
 
 const SHARE_PROMPT_DELAY_MS = 1500;
 type StreamChunk = string | { content?: string; reasoningContent?: string };
+export type GenerationRuntimeMeta = {
+  recalledMemories?: MemoryRecallSummary[];
+};
+export type GenerationResponseOptions = GenerationRuntimeMeta & {
+  onFirstToken?: () => void;
+};
 
 export interface QueuedMessage {
   id: string; conversationId: string; text: string;
@@ -52,6 +59,7 @@ class GenerationService {
   private queueProcessor: QueueProcessor | null = null;
   private currentRemoteAbortController: AbortController | null = null;
   private remoteTimeToFirstToken: number | undefined;
+  private currentRuntimeMeta: GenerationRuntimeMeta | undefined;
 
   // Token batching — collect tokens and flush to UI at a controlled rate
   private tokenBuffer: string = '';
@@ -144,8 +152,16 @@ class GenerationService {
   async generateResponse(
     conversationId: string,
     messages: Message[],
-    onFirstToken?: () => void,
+    optionsOrOnFirstToken?: GenerationResponseOptions | (() => void),
   ): Promise<void> {
+    const onFirstToken = typeof optionsOrOnFirstToken === 'function'
+      ? optionsOrOnFirstToken
+      : optionsOrOnFirstToken?.onFirstToken;
+    if (!this.state.isGenerating) {
+      this.currentRuntimeMeta = typeof optionsOrOnFirstToken === 'function'
+        ? undefined
+        : optionsOrOnFirstToken;
+    }
     // Route to remote provider if active
     if (this.isUsingRemoteProvider()) {
       return this.generateRemoteResponse(conversationId, messages, onFirstToken);
@@ -160,17 +176,26 @@ class GenerationService {
     options: {
       enabledToolIds: string[];
       projectId?: string;
+      recalledMemories?: MemoryRecallSummary[];
       onToolCallStart?: (name: string, args: Record<string, any>) => void;
       onToolCallComplete?: (name: string, result: ToolResult) => void;
       onFirstToken?: () => void;
     },
   ): Promise<void> {
+    if (!this.state.isGenerating) {
+      this.currentRuntimeMeta = { recalledMemories: options.recalledMemories };
+    }
     // Route to remote provider if active
     if (this.isUsingRemoteProvider()) {
       return this.generateRemoteWithTools(conversationId, messages, options);
     }
     // Local generation with tools
-    const { enabledToolIds, projectId, ...callbacks } = options;
+    const { enabledToolIds, projectId } = options;
+    const callbacks = {
+      onToolCallStart: options.onToolCallStart,
+      onToolCallComplete: options.onToolCallComplete,
+      onFirstToken: options.onFirstToken,
+    };
     if (!(await this.prepareGeneration(conversationId))) return;
     const chatStore = useChatStore.getState();
 
@@ -336,6 +361,7 @@ class GenerationService {
     this.reasoningBuffer = '';
     this.totalReasoningLength = 0;
     this.remoteTimeToFirstToken = undefined;
+    this.currentRuntimeMeta = undefined;
     this.updateState({
       isGenerating: false,
       isThinking: false,
