@@ -328,8 +328,8 @@ export const MemoryScreen: React.FC = () => {
           <Icon name="cpu" size={16} color={colors.primary} />
         </View>
         <View style={styles.captureText}>
-          <Text style={styles.captureTitle}>Auto-capture review</Text>
-          <Text style={styles.captureSubtitle}>Local chats can create suggestions for approval.</Text>
+          <Text style={styles.captureTitle}>Suggest memories from chats</Text>
+          <Text style={styles.captureSubtitle}>Local chats draft suggestions. Nothing is used until you save it.</Text>
         </View>
         <Switch
           testID="memory-auto-capture-toggle"
