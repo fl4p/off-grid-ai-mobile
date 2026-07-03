@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -54,6 +54,61 @@ const fadeInImageStyles = StyleSheet.create({
   },
 });
 
+/**
+ * Full-width image for tool-produced figures (e.g. run_python matplotlib plots).
+ * Unlike a user attachment thumbnail, a plot is the result the user asked for, so
+ * it spans the full content width and keeps its own aspect ratio (measured from
+ * the file) instead of being cropped into a fixed square.
+ */
+function PlotImage({ uri, testID, wrapperTestID, onPress }: Omit<FadeInImageProps, 'imageStyle'>) {
+  const opacity = useSharedValue(0);
+  const fadeStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  // Fallback ratio until the real size loads; matplotlib's default figure is ~4:3.
+  const [aspectRatio, setAspectRatio] = useState(4 / 3);
+  useEffect(() => {
+    let alive = true;
+    Image.getSize(
+      uri,
+      (w, h) => { if (alive && w > 0 && h > 0) setAspectRatio(w / h); },
+      () => { /* keep the fallback ratio */ },
+    );
+    return () => { alive = false; };
+  }, [uri]);
+  return (
+    <Animated.View style={[plotImageStyles.wrapper, fadeStyle]}>
+      <TouchableOpacity testID={wrapperTestID} onPress={onPress} activeOpacity={0.9}>
+        <Image
+          testID={testID}
+          source={{ uri }}
+          style={[plotImageStyles.image, { aspectRatio }]}
+          resizeMode="contain"
+          onLoad={() => { opacity.value = withTiming(1, { duration: 300 }); }}
+        />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+const plotImageStyles = StyleSheet.create({
+  // Full-width column so plots stack edge to edge instead of shrinking to a
+  // thumbnail row. alignSelf stretches past the tool bubble's centered layout.
+  generatedContainer: {
+    width: '100%',
+    alignSelf: 'stretch',
+    marginBottom: 8,
+  },
+  wrapper: {
+    width: '100%',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginVertical: 4,
+  },
+  image: {
+    width: '100%',
+    borderRadius: 12,
+  },
+});
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) { return `${bytes}B`; }
   if (bytes < 1024 * 1024) { return `${(bytes / 1024).toFixed(0)}KB`; }
@@ -76,7 +131,7 @@ export function MessageAttachments({
   onImagePress,
 }: MessageAttachmentsProps) {
   return (
-    <View testID="message-attachments" style={styles.attachmentsContainer}>
+    <View testID="message-attachments" style={isUser ? styles.attachmentsContainer : plotImageStyles.generatedContainer}>
       {attachments.map((attachment, index) =>
         attachment.type === 'audio' ? (
           <View
@@ -151,13 +206,21 @@ export function MessageAttachments({
               </Text>
             )}
           </TouchableOpacity>
-        ) : (
+        ) : isUser ? (
           <FadeInImage
             key={attachment.id}
             uri={attachment.uri}
             imageStyle={styles.attachmentImage}
-            wrapperTestID={isUser ? `message-attachment-${index}` : `generated-image-${index}`}
-            testID={isUser ? `message-image-${index}` : `generated-image-content-${index}`}
+            wrapperTestID={`message-attachment-${index}`}
+            testID={`message-image-${index}`}
+            onPress={() => onImagePress?.(attachment.uri)}
+          />
+        ) : (
+          <PlotImage
+            key={attachment.id}
+            uri={attachment.uri}
+            wrapperTestID={`generated-image-${index}`}
+            testID={`generated-image-content-${index}`}
             onPress={() => onImagePress?.(attachment.uri)}
           />
         )
