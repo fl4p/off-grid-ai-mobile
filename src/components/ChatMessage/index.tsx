@@ -28,6 +28,11 @@ function getToolIcon(toolName?: string): string {
     case 'get_current_datetime': return 'clock';
     case 'get_device_info': return 'smartphone';
     case 'run_python': return 'terminal';
+    case 'read_file': return 'file-text';
+    case 'write_file': return 'file-plus';
+    case 'edit_file': return 'edit-3';
+    case 'list_files': return 'folder';
+    case 'grep': return 'search';
     default: return 'tool';
   }
 }

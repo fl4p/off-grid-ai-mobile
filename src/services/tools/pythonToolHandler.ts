@@ -31,7 +31,18 @@ function parsePackages(raw: unknown): string[] {
   return [];
 }
 
-export async function handleRunPython(call: ToolCall, code: string): Promise<PythonDispatchResult> {
+/**
+ * Ensure the Python runtime is installed before a Python-backed tool runs.
+ * Returns null when ready, or a model-facing message to return as the tool result
+ * when it is not (which also kicks off the download so it self-heals).
+ *
+ * Reaching the not-installed branch means a Python-backed tool is enabled (only
+ * enabled tools are offered to the model) but the runtime is not installed at the
+ * current revision - usually a bundled-asset update (e.g. matplotlib) invalidated a
+ * prior install. install() dedupes with any download already running from the Tools
+ * screen.
+ */
+export async function ensurePythonRuntimeReady(): Promise<string | null> {
   const { pythonRuntimeService } = require('../python/pythonRuntimeService'); // NOSONAR
   const { usePythonRuntimeStore } = require('../../stores/pythonRuntimeStore'); // NOSONAR
 
@@ -39,14 +50,17 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
     await pythonRuntimeService.refreshStatus();
   }
   if (!pythonRuntimeService.isInstalled()) {
-    // Reaching here means run_python is enabled (only enabled tools are offered to
-    // the model) but the runtime is not installed at the current revision - usually
-    // a bundled-asset update (e.g. matplotlib) invalidated a prior install. Kick off
-    // the download so it self-heals instead of dead-ending; install() dedupes with
-    // any download already running from the Tools screen.
     pythonRuntimeService.install().catch(() => { /* status surfaced via the store */ });
     return 'The Python runtime is downloading a required update (about 33 MB) and runs fully offline once ready. Tell the user it is updating - they can watch progress in Settings > Tools - and to try again in a moment.';
   }
+  return null;
+}
+
+export async function handleRunPython(call: ToolCall, code: string): Promise<PythonDispatchResult> {
+  const { pythonRuntimeService } = require('../python/pythonRuntimeService'); // NOSONAR
+
+  const notReady = await ensurePythonRuntimeReady();
+  if (notReady) return notReady;
 
   const packages = parsePackages(call.arguments.packages);
   const res = await pythonRuntimeService.execute(code, packages.length ? { packages } : {});
