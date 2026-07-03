@@ -21,3 +21,15 @@ export interface SearchProvider {
 }
 
 export type SearchProviderId = 'brave' | 'serper';
+
+/**
+ * Outcome of checking a candidate API key against a provider.
+ * - valid: the provider accepted the key.
+ * - invalid: the provider rejected the key (wrong/expired).
+ * - unknown: couldn't reach the provider or it returned an unexpected status,
+ *   so we can't tell (network offline, rate limit, 5xx).
+ */
+export type KeyValidationResult =
+  | { status: 'valid' }
+  | { status: 'invalid'; message: string }
+  | { status: 'unknown'; message: string };

@@ -1,12 +1,23 @@
-import type { SearchProvider, SearchResult } from './types';
+import type { KeyValidationResult, SearchProvider, SearchResult } from './types';
 
 /** Label shared by both Brave backends (keyless scrape and official API). */
 export const BRAVE_LABEL = 'Brave';
+
+const BRAVE_API_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 
 /** Shape of the official Brave Web Search API fields we consume. */
 type BraveApiResponse = {
   web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
 };
+
+/** Shared request builder so search() and validateBraveKey() stay in sync. */
+function braveApiRequest(apiKey: string, params: { q: string; count: number }, signal?: AbortSignal): Promise<Response> {
+  const url = `${BRAVE_API_ENDPOINT}?q=${encodeURIComponent(params.q)}&count=${params.count}`;
+  return fetch(url, {
+    signal,
+    headers: { 'X-Subscription-Token': apiKey.trim(), Accept: 'application/json' },
+  });
+}
 
 /**
  * Official Brave Web Search API (api.search.brave.com). Opt-in: the query still
@@ -24,11 +35,7 @@ export function createBraveProvider(apiKey: string): SearchProvider {
       if (!apiKey.trim()) {
         throw new Error('Brave API key is missing. Add it in Settings > Web Search.');
       }
-      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`;
-      const response = await fetch(url, {
-        signal,
-        headers: { 'X-Subscription-Token': apiKey.trim(), Accept: 'application/json' },
-      });
+      const response = await braveApiRequest(apiKey, { q: query, count: 10 }, signal);
       if (response.status === 401 || response.status === 403) {
         throw new Error(`Brave rejected the API key (${response.status}). Check it in Settings > Web Search.`);
       }
@@ -39,6 +46,31 @@ export function createBraveProvider(apiKey: string): SearchProvider {
       return mapBraveApiResults(data);
     },
   };
+}
+
+/**
+ * Check a candidate Brave API key with a minimal (count:1) query. A key is
+ * optional for Brave (keyless scrape works), so this only runs when the user
+ * actually enters one. Distinguishes a rejected key (401/403 -> invalid) from a
+ * transient failure (offline, rate limit, 5xx -> unknown).
+ */
+export async function validateBraveKey(apiKey: string, signal?: AbortSignal): Promise<KeyValidationResult> {
+  // Empty is fine for Brave - it just runs keyless - so treat it as valid.
+  if (!apiKey.trim()) {
+    return { status: 'valid' };
+  }
+  try {
+    const response = await braveApiRequest(apiKey, { q: 'ping', count: 1 }, signal);
+    if (response.status === 401 || response.status === 403) {
+      return { status: 'invalid', message: `Brave rejected this key (${response.status}).` };
+    }
+    if (!response.ok) {
+      return { status: 'unknown', message: `Couldn't verify the key (Brave returned ${response.status}).` };
+    }
+    return { status: 'valid' };
+  } catch {
+    return { status: 'unknown', message: "Couldn't reach Brave to verify the key." };
+  }
 }
 
 function mapBraveApiResults(data: BraveApiResponse): SearchResult[] {
