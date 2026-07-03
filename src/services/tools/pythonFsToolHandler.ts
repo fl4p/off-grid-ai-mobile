@@ -4,11 +4,11 @@
  * These operate on the SAME in-memory Pyodide filesystem (MEMFS) that run_python
  * code sees, by running small Python snippets through pythonRuntimeService.execute.
  * A file written by run_python is therefore readable by read_file and vice versa,
- * and both share the interpreter's working directory (Pyodide's cwd, /home/pyodide).
+ * and both share the interpreter's working directory (the /workspace cwd).
  *
- * The MEMFS is RAM-only and resets when the interpreter reloads (hung-script
- * recovery, disabling Python, app restart) - it is a per-session scratch workspace,
- * not durable storage.
+ * The workspace is scoped per project and persisted: pythonRuntimeService snapshots
+ * it to native storage and restores it on the next run, so files survive an
+ * interpreter reload and are shared across a project's conversations.
  *
  * Contract: each op runs `FS_HELPER_PY` (idempotent library) plus a call that prints
  * `<<FSJSON>>` followed by a single-line JSON envelope. Args are passed as a
@@ -180,7 +180,7 @@ function toBool(val: unknown): boolean {
 }
 
 /** Run one filesystem op in the interpreter and return its parsed JSON envelope. */
-async function runFsOp(op: string, args: Record<string, unknown>): Promise<any> {
+async function runFsOp(op: string, args: Record<string, unknown>, projectId?: string): Promise<any> {
   const { pythonRuntimeService } = require('../python/pythonRuntimeService'); // NOSONAR
   // Double-encode: JSON.stringify(json) yields a valid Python string literal, so
   // any content round-trips through json.loads without escaping or injection risk.
@@ -194,7 +194,8 @@ try:
 except Exception as _fs_e:
     _fs_emit({"ok": False, "error": "Filesystem error: " + str(_fs_e)})
 `;
-  const res = await pythonRuntimeService.execute(code, {});
+  // Scope the op to the caller's project workspace (shared across its conversations).
+  const res = await pythonRuntimeService.execute(code, { projectId });
   const out = String(res?.stdout ?? '');
   const idx = out.indexOf(FS_SENTINEL);
   if (idx === -1) {
@@ -217,7 +218,7 @@ export async function handleReadFile(call: ToolCall): Promise<string> {
   if (offset < 0) offset = 0;
   let limit = toCount(call.arguments.limit);
   if (limit !== undefined && limit <= 0) limit = undefined; // 0/negative -> read all
-  const r = await runFsOp('read', { path, offset, limit });
+  const r = await runFsOp('read', { path, offset, limit }, call.context?.projectId);
   if (!r.ok) return `Error: ${r.error}`;
   const header = `${path} (${r.total} line${r.total === 1 ? '' : 's'})`;
   if (!r.lines.length) {
@@ -240,7 +241,7 @@ export async function handleWriteFile(call: ToolCall): Promise<string> {
   if (typeof call.arguments.content !== 'string') {
     return 'Error: write_file requires string "content" (pass an empty string to clear a file).';
   }
-  const r = await runFsOp('write', { path, content: call.arguments.content });
+  const r = await runFsOp('write', { path, content: call.arguments.content }, call.context?.projectId);
   if (!r.ok) return `Error: ${r.error}`;
   return `Wrote ${r.bytes} byte${r.bytes === 1 ? '' : 's'} to ${r.path} ${r.created ? '(new file)' : '(overwrote existing)'}`;
 }
@@ -258,7 +259,7 @@ export async function handleEditFile(call: ToolCall): Promise<string> {
   if (oldString === '') return 'Error: edit_file "old_string" must not be empty.';
   const r = await runFsOp('edit', {
     path, old_string: oldString, new_string: newString, replace_all: toBool(call.arguments.replace_all),
-  });
+  }, call.context?.projectId);
   if (!r.ok) return `Error: ${r.error}`;
   return `Made ${r.replacements} replacement${r.replacements === 1 ? '' : 's'} in ${r.path}`;
 }
@@ -267,7 +268,7 @@ export async function handleListFiles(call: ToolCall): Promise<string> {
   const notReady = await ensurePythonRuntimeReady();
   if (notReady) return notReady;
   const path = str(call.arguments.path) || '.';
-  const r = await runFsOp('ls', { path });
+  const r = await runFsOp('ls', { path }, call.context?.projectId);
   if (!r.ok) return `Error: ${r.error}`;
   if (!r.entries.length) return `${r.path}: (empty)`;
   const lines = r.entries.map((e: { name: string; is_dir: boolean; size: number }) =>
@@ -282,7 +283,7 @@ export async function handleGrep(call: ToolCall): Promise<string> {
   if (!pattern) return 'Error: grep requires a "pattern".';
   const r = await runFsOp('grep', {
     pattern, path: str(call.arguments.path) || '.', include: str(call.arguments.include),
-  });
+  }, call.context?.projectId);
   if (!r.ok) return `Error: ${r.error}`;
   if (!r.matches.length) return `No matches for /${pattern}/`;
   const lines = r.matches.map((m: { path: string; line_no: number; line: string }) =>

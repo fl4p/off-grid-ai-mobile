@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Switch, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, Switch, TouchableOpacity, ScrollView, Share, ActivityIndicator } from 'react-native';
+import RNFS from 'react-native-fs';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -46,6 +47,7 @@ export const ToolsScreen: React.FC = () => {
   const pythonStatus = usePythonRuntimeStore(st => st.status);
   const pythonProgress = usePythonRuntimeStore(st => st.downloadProgress);
   const [alertState, setAlertState] = useState<AlertState>(initialAlertState);
+  const [exportingWorkspace, setExportingWorkspace] = useState(false);
 
   useEffect(() => {
     pythonRuntimeService.refreshStatus().catch(() => { });
@@ -65,6 +67,24 @@ export const ToolsScreen: React.FC = () => {
         'Download Failed',
         error instanceof Error ? error.message : 'Could not download the Python runtime.',
       ));
+    }
+  };
+
+  const exportWorkspace = async () => {
+    if (exportingWorkspace) return;
+    setExportingWorkspace(true);
+    try {
+      const base64 = await pythonRuntimeService.exportProjectZip();
+      const path = `${RNFS.DocumentDirectoryPath}/python-workspace.zip`;
+      await RNFS.writeFile(path, base64, 'base64');
+      await Share.share({ url: `file://${path}`, title: 'Python workspace' });
+    } catch (error) {
+      setAlertState(showAlert(
+        'Export Failed',
+        error instanceof Error ? error.message : 'Could not export the Python workspace.',
+      ));
+    } finally {
+      setExportingWorkspace(false);
     }
   };
 
@@ -200,6 +220,27 @@ export const ToolsScreen: React.FC = () => {
         <Text style={styles.hint}>
           Enabling more tools can confuse the model and increases latency on first response.
         </Text>
+
+        {pythonStatus === 'installed' && (
+          <TouchableOpacity
+            style={styles.proToolsButton}
+            onPress={exportWorkspace}
+            activeOpacity={0.75}
+            disabled={exportingWorkspace}
+            testID="tools-export-workspace"
+          >
+            <View style={styles.proToolsIcon}>
+              <Icon name="download" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.toolInfo}>
+              <Text style={styles.toolName}>Export Python workspace</Text>
+              <Text style={styles.toolDescription}>Save the current workspace files as a .zip</Text>
+            </View>
+            {exportingWorkspace
+              ? <ActivityIndicator size="small" color={colors.textMuted} />
+              : <Icon name="share" size={18} color={colors.textMuted} />}
+          </TouchableOpacity>
+        )}
       </ScrollView>
       <CustomAlert
         {...alertState}
