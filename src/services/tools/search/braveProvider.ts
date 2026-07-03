@@ -18,6 +18,16 @@ export const braveProvider: SearchProvider = {
         'Accept': 'text/html',
       },
     });
+    // fetch does not reject on HTTP error codes, and Brave serves a 429 CAPTCHA
+    // page to keyless scraping. Without this guard the scraper parses that block
+    // page, finds nothing, and returns [] — surfacing as a misleading "No results
+    // found" instead of the real cause. Throw so the failure reaches the user.
+    if (response.status === 429) {
+      throw new Error('Brave search is rate-limiting this device. Add a Serper API key in Settings > Web Search for dependable web results.');
+    }
+    if (!response.ok) {
+      throw new Error(`Brave search request failed (${response.status}).`);
+    }
     const html = await response.text();
     return parseBraveResults(html);
   },

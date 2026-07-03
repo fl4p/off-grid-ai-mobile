@@ -163,3 +163,45 @@ describe('Serper provider', () => {
     await expect(createSerperProvider('bad').search('q', signal)).rejects.toThrow(new RegExp(String(status)));
   });
 });
+
+describe('Brave provider', () => {
+  const originalFetch = (globalThis as any).fetch;
+  const signal = new AbortController().signal;
+
+  afterEach(() => {
+    if (originalFetch === undefined) delete (globalThis as any).fetch;
+    else (globalThis as any).fetch = originalFetch;
+  });
+
+  it('throws a rate-limit error on a 429 block page instead of returning no results', async () => {
+    // Brave serves a 429 CAPTCHA page to keyless scraping; the body still parses to
+    // zero result blocks, so without a status guard this looked like "no results".
+    (globalThis as any).fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: jest.fn().mockResolvedValue('<html><body>CAPTCHA — please verify you are human</body></html>'),
+    });
+    await expect(braveProvider.search('portugal crypto tax', signal)).rejects.toThrow(/rate-limiting/i);
+  });
+
+  it('throws a status message on other non-2xx responses', async () => {
+    (globalThis as any).fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: jest.fn().mockResolvedValue('<html>error</html>'),
+    });
+    await expect(braveProvider.search('q', signal)).rejects.toThrow(/failed \(503\)/);
+  });
+
+  it('parses results normally on a 200 response', async () => {
+    (globalThis as any).fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: jest.fn().mockResolvedValue(
+        'x<a href="https://example.com/a">Example Portugal crypto tax guide</a>y',
+      ),
+    });
+    const results = await braveProvider.search('q', signal);
+    expect(results.length).toBeGreaterThan(0);
+  });
+});
