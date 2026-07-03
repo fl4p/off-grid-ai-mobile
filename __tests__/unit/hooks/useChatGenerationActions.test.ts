@@ -791,6 +791,37 @@ describe('dispatchGenerationFn (single routing layer)', () => {
     expect(startText).not.toHaveBeenCalled();
   });
 
+  it('handles direct standing memory directives locally without calling the model', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'always use linewidth=2 for plots',
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
   it('handles remember commands with document attachments locally instead of sending them to remote generation', async () => {
     mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
     const startText = jest.fn(() => Promise.resolve());
@@ -830,6 +861,52 @@ describe('dispatchGenerationFn (single routing layer)', () => {
       message: expect.objectContaining({
         id: 'msg-command-1',
         content: expect.stringContaining('Always use linewidth=2'),
+      }),
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
+  it('does not append document text to inline memory directives', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const attachment = {
+      id: 'doc-1',
+      type: 'document' as const,
+      uri: 'file:///tmp/private.md',
+      fileName: 'private.md',
+      textContent: 'Private document text.',
+    };
+    const userMessage = {
+      id: 'msg-command-inline',
+      role: 'user' as const,
+      content: 'remember: never use semicolons',
+      attachments: [attachment],
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, {
+      text: userMessage.content,
+      attachments: [attachment],
+      conversationId: 'conv-1',
+    }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: expect.objectContaining({
+        id: 'msg-command-inline',
+        content: 'remember: never use semicolons',
       }),
       projectId: undefined,
       sourceType: 'chat_command',

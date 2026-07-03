@@ -11,7 +11,12 @@ function isMemoryEnabledForContext(conversation: any, project: any): boolean {
   return conversation?.memoryEnabled !== false && project?.memoryEnabled !== false;
 }
 
+function shouldAppendDocumentText(text: string): boolean {
+  return /^(?:please\s+)?remember(?::|\s+that)\s*$/i.test(text.replace(/\s+/g, ' ').trim());
+}
+
 function buildMemoryCommandContent(text: string, attachments?: MediaAttachment[]): string {
+  if (!shouldAppendDocumentText(text)) return text;
   const documentText = (attachments ?? [])
     .filter(attachment => attachment.type === 'document' && attachment.textContent)
     .map(attachment => [
