@@ -165,8 +165,8 @@ describe('MemoryScreen', () => {
     const { getByTestId, getByText } = render(<MemoryScreen />);
     await flushPromises();
 
-    expect(getByText('Suggest memories from chats')).toBeTruthy();
-    expect(getByText('Local chats draft suggestions. Nothing is used until you save it.')).toBeTruthy();
+    expect(getByText('Auto-memory suggestions')).toBeTruthy();
+    expect(getByText('Drafts local chat memories for review. Nothing is used until you save it.')).toBeTruthy();
 
     fireEvent(getByTestId('memory-auto-capture-toggle'), 'valueChange', true);
 
