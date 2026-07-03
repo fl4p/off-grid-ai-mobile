@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -44,31 +44,49 @@ export const WebSearchSettingsScreen: React.FC = () => {
   // The key lives in the keychain, not settings — mirror it into local state.
   const [apiKey, setApiKey] = useState('');
   const [validation, setValidation] = useState<ValidationState>({ status: 'idle' });
+
+  // Pending debounce timer + abort controller for the in-flight validation, so a
+  // new keystroke (or unmount / provider switch) cancels the previous check.
+  const pendingValidation = useRef<{ timer: ReturnType<typeof setTimeout>; controller: AbortController } | null>(null);
+  const cancelPendingValidation = () => {
+    if (pendingValidation.current) {
+      clearTimeout(pendingValidation.current.timer);
+      pendingValidation.current.controller.abort();
+      pendingValidation.current = null;
+    }
+  };
+
   useEffect(() => {
     let active = true;
+    // Loading the stored key (or switching provider) must NOT trigger validation
+    // — only an explicit edit does. Reset to idle so the mount shows the neutral
+    // "stored" hint, not a verified/rejected badge from a background probe.
+    cancelPendingValidation();
+    setValidation({ status: 'idle' });
     if (!acceptsKey) { setApiKey(''); return; }
     getSearchApiKey(searchProvider).then(key => { if (active) setApiKey(key); });
     return () => { active = false; };
   }, [searchProvider, acceptsKey]);
 
-  // Debounced validation: check the key against the provider once typing settles.
-  useEffect(() => {
-    if (!acceptsKey) { setValidation({ status: 'idle' }); return; }
-    const key = apiKey.trim();
-    if (!key) { setValidation({ status: 'idle' }); return; }
+  // Cancel any pending validation when the screen unmounts.
+  useEffect(() => cancelPendingValidation, []);
+
+  const onChangeKey = (text: string) => {
+    setApiKey(text);
+    storeSearchApiKey(searchProvider, text).catch(() => {});
+
+    // Validate only on an actual edit — debounced, cancelling the prior request.
+    cancelPendingValidation();
+    const key = text.trim();
+    if (!acceptsKey || !key) { setValidation({ status: 'idle' }); return; }
     setValidation({ status: 'validating' });
     const controller = new AbortController();
     const timer = setTimeout(() => {
       validateSearchProviderKey(searchProvider, key, controller.signal)
         .then(result => setValidation(result))
-        .catch(() => { /* aborted by cleanup */ });
+        .catch(() => { /* aborted by cancelPendingValidation */ });
     }, VALIDATE_DEBOUNCE_MS);
-    return () => { clearTimeout(timer); controller.abort(); };
-  }, [apiKey, searchProvider, acceptsKey]);
-
-  const onChangeKey = (text: string) => {
-    setApiKey(text);
-    storeSearchApiKey(searchProvider, text).catch(() => {});
+    pendingValidation.current = { timer, controller };
   };
 
   return (
@@ -122,6 +140,11 @@ export const WebSearchSettingsScreen: React.FC = () => {
             />
             {apiKey.trim() ? (
               <>
+                {validation.status === 'idle' && (
+                  <Text style={styles.settingHint}>
+                    Stored on device in the keychain, used only when this provider runs a search.
+                  </Text>
+                )}
                 {validation.status === 'validating' && (
                   <View style={styles.warningRow} testID="search-key-validating">
                     <ActivityIndicator size="small" color={colors.textMuted} />
