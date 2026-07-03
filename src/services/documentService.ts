@@ -16,6 +16,12 @@ const TEXT_EXTENSIONS = ['.txt', '.md', '.csv', '.json', '.xml', '.html', '.log'
 // PDF extension handled separately via native module
 const PDF_EXTENSION = '.pdf';
 
+// Image extensions read via on-device OCR (Vision on iOS, ML Kit on Android)
+const IMAGE_OCR_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.heic'];
+
+// How a file's content gets read
+type ContentKind = 'text' | 'pdf' | 'image';
+
 // Max file size we'll read (5MB)
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
@@ -38,6 +44,9 @@ class DocumentService {
   isSupported(fileName: string): boolean {
     const extension = `.${  fileName.split('.').pop()?.toLowerCase()}`;
     if (extension === PDF_EXTENSION && pdfExtractor.isAvailable()) {
+      return true;
+    }
+    if (IMAGE_OCR_EXTENSIONS.includes(extension) && pdfExtractor.supportsImageOcr()) {
       return true;
     }
     return TEXT_EXTENSIONS.includes(extension);
@@ -106,21 +115,35 @@ class DocumentService {
     return uri;
   }
 
-  private validateFileType(extension: string, isPdf: boolean): void {
-    if (!isPdf && !TEXT_EXTENSIONS.includes(extension)) {
-      throw new Error(`Unsupported file type: ${extension}. Supported: txt, md, csv, json, pdf, code files`);
+  private detectContentKind(extension: string): ContentKind {
+    if (extension === PDF_EXTENSION) return 'pdf';
+    if (IMAGE_OCR_EXTENSIONS.includes(extension)) return 'image';
+    return 'text';
+  }
+
+  private validateFileType(extension: string, kind: ContentKind): void {
+    if (kind === 'text' && !TEXT_EXTENSIONS.includes(extension)) {
+      throw new Error(`Unsupported file type: ${extension}. Supported: txt, md, csv, json, pdf, images, code files`);
     }
-    if (isPdf && !pdfExtractor.isAvailable()) {
+    if (kind === 'pdf' && !pdfExtractor.isAvailable()) {
       throw new Error('PDF extraction is not available on this device');
+    }
+    if (kind === 'image' && !pdfExtractor.supportsImageOcr()) {
+      throw new Error('Image OCR is not available on this device');
     }
   }
 
-  private async readContent(resolvedPath: string, isPdf: boolean, maxChars: number): Promise<string> {
-    console.log(`[DocumentService] readContent called - path: ${resolvedPath}, isPdf: ${isPdf}, maxChars: ${maxChars}`);
+  private async readContent(resolvedPath: string, kind: ContentKind, maxChars: number): Promise<string> {
+    console.log(`[DocumentService] readContent called - path: ${resolvedPath}, kind: ${kind}, maxChars: ${maxChars}`);
     try {
-      const raw = isPdf
-        ? await pdfExtractor.extractText(resolvedPath, maxChars)
-        : await RNFS.readFile(resolvedPath, 'utf8');
+      let raw: string;
+      if (kind === 'pdf') {
+        raw = await pdfExtractor.extractText(resolvedPath, maxChars);
+      } else if (kind === 'image') {
+        raw = await pdfExtractor.recognizeImage(resolvedPath);
+      } else {
+        raw = await RNFS.readFile(resolvedPath, 'utf8');
+      }
       console.log(`[DocumentService] Successfully read ${raw.length} characters`);
       if (raw.length > maxChars) {
         return `${raw.substring(0, maxChars)}\n\n... [Content truncated due to length]`;
@@ -155,9 +178,9 @@ class DocumentService {
       console.log(`[DocumentService] Processing document - filePath: ${filePath}, fileName: ${fileName}`);
       const name = fileName || filePath.split('/').pop() || 'document';
       const extension = `.${name.split('.').pop()?.toLowerCase()}`;
-      const isPdf = extension === PDF_EXTENSION;
-      console.log(`[DocumentService] Detected extension: ${extension}, isPdf: ${isPdf}`);
-      this.validateFileType(extension, isPdf);
+      const kind = this.detectContentKind(extension);
+      console.log(`[DocumentService] Detected extension: ${extension}, kind: ${kind}`);
+      this.validateFileType(extension, kind);
 
       const resolvedPath = await this.resolveContentUri(filePath, name);
       console.log(`[DocumentService] Resolved path: ${resolvedPath}`);
@@ -184,7 +207,7 @@ class DocumentService {
       }
 
       const maxChars = maxCharsOverride ?? Math.floor((useAppStore.getState().settings.contextLength || APP_CONFIG.maxContextLength) * 4 * 0.5);
-      const textContent = await this.readContent(resolvedPath, isPdf, maxChars);
+      const textContent = await this.readContent(resolvedPath, kind, maxChars);
       const { id, uri } = await this.savePersistentCopy(resolvedPath, filePath, name);
 
       return { id, type: 'document', uri, fileName: name, textContent, fileSize: stat.size };
@@ -259,6 +282,9 @@ class DocumentService {
     const exts = [...TEXT_EXTENSIONS];
     if (pdfExtractor.isAvailable()) {
       exts.push(PDF_EXTENSION);
+    }
+    if (pdfExtractor.supportsImageOcr()) {
+      exts.push(...IMAGE_OCR_EXTENSIONS);
     }
     return exts;
   }

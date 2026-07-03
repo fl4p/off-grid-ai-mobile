@@ -13,6 +13,8 @@ jest.mock('../../../src/services/pdfExtractor', () => ({
   pdfExtractor: {
     isAvailable: jest.fn(() => false),
     extractText: jest.fn(),
+    supportsImageOcr: jest.fn(() => false),
+    recognizeImage: jest.fn(),
   },
 }));
 
@@ -28,6 +30,8 @@ describe('DocumentService', () => {
     // Reset pdfExtractor mock to default (unavailable)
     mockedPdfExtractor.isAvailable.mockReturnValue(false);
     mockedPdfExtractor.extractText.mockReset();
+    mockedPdfExtractor.supportsImageOcr.mockReturnValue(false);
+    mockedPdfExtractor.recognizeImage.mockReset();
   });
 
   // ========================================================================
@@ -63,8 +67,15 @@ describe('DocumentService', () => {
       expect(documentService.isSupported('document.docx')).toBe(false);
     });
 
-    it('returns false for .png files', () => {
+    it('returns false for .png files when image OCR unavailable', () => {
       expect(documentService.isSupported('image.png')).toBe(false);
+    });
+
+    it('returns true for image files when image OCR is available', () => {
+      mockedPdfExtractor.supportsImageOcr.mockReturnValue(true);
+      expect(documentService.isSupported('scan.png')).toBe(true);
+      expect(documentService.isSupported('photo.JPG')).toBe(true);
+      expect(documentService.isSupported('receipt.jpeg')).toBe(true);
     });
 
     it('returns false for files with no extension', () => {
@@ -612,6 +623,73 @@ describe('DocumentService', () => {
       const result = await documentService.processDocumentFromPath('/empty.pdf');
 
       expect(result!.textContent).toBe('');
+    });
+  });
+
+  // ========================================================================
+  // Image OCR processing (when native OCR IS available)
+  // ========================================================================
+  describe('image OCR processing', () => {
+    beforeEach(() => {
+      mockedPdfExtractor.supportsImageOcr.mockReturnValue(true);
+      mockedPdfExtractor.recognizeImage.mockReset();
+    });
+
+    it('processes an image using on-device OCR', async () => {
+      mockedRNFS.exists.mockResolvedValue(true);
+      mockedRNFS.stat.mockResolvedValue({ size: 1500, isFile: () => true } as any);
+      mockedPdfExtractor.recognizeImage.mockResolvedValue('Invoice total: 42.00');
+
+      const result = await documentService.processDocumentFromPath('/path/to/scan.png');
+
+      expect(mockedPdfExtractor.recognizeImage).toHaveBeenCalledWith('/path/to/scan.png');
+      expect(result!.type).toBe('document');
+      expect(result!.textContent).toBe('Invoice total: 42.00');
+    });
+
+    it('throws for images when OCR is unavailable', async () => {
+      mockedPdfExtractor.supportsImageOcr.mockReturnValue(false);
+
+      await expect(
+        documentService.processDocumentFromPath('/path/to/scan.png')
+      ).rejects.toThrow('Image OCR is not available');
+    });
+
+    it('truncates long OCR output', async () => {
+      mockedRNFS.exists.mockResolvedValue(true);
+      mockedRNFS.stat.mockResolvedValue({ size: 1500, isFile: () => true } as any);
+      mockedPdfExtractor.recognizeImage.mockResolvedValue('x'.repeat(60000));
+
+      const result = await documentService.processDocumentFromPath('/path/to/dense-scan.jpg');
+
+      expect(result!.textContent!.length).toBeLessThan(60000);
+      expect(result!.textContent).toContain('truncated');
+    });
+
+    it('handles OCR errors', async () => {
+      mockedRNFS.exists.mockResolvedValue(true);
+      mockedRNFS.stat.mockResolvedValue({ size: 1500, isFile: () => true } as any);
+      mockedPdfExtractor.recognizeImage.mockRejectedValue(new Error('Could not load image'));
+
+      await expect(
+        documentService.processDocumentFromPath('/path/to/broken.webp')
+      ).rejects.toThrow('Could not load image');
+    });
+
+    it('includes image extensions in supported list when OCR available', () => {
+      const extensions = documentService.getSupportedExtensions();
+      expect(extensions).toContain('.png');
+      expect(extensions).toContain('.jpg');
+      expect(extensions).toContain('.jpeg');
+      expect(extensions).toContain('.webp');
+      expect(extensions).toContain('.heic');
+    });
+
+    it('excludes image extensions when OCR unavailable', () => {
+      mockedPdfExtractor.supportsImageOcr.mockReturnValue(false);
+      const extensions = documentService.getSupportedExtensions();
+      expect(extensions).not.toContain('.png');
+      expect(extensions).not.toContain('.jpg');
     });
   });
 

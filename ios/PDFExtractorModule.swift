@@ -1,12 +1,65 @@
 import Foundation
 import PDFKit
+import UIKit
+import Vision
 
 @objc(PDFExtractorModule)
 class PDFExtractorModule: NSObject {
 
+  // Pages whose text layer yields fewer characters than this are treated as
+  // scanned/image pages and run through OCR instead.
+  private static let minTextLayerChars = 20
+  // OCR is ~0.3-1s per page on-device; cap how many pages we OCR per document.
+  private static let maxOcrPages = 50
+  // Render scale for OCR input (1.0 = 72 dpi; 2.0 = 144 dpi).
+  private static let ocrRenderScale: CGFloat = 2.0
+
   @objc
   static func requiresMainQueueSetup() -> Bool {
     return false
+  }
+
+  /// Run Vision text recognition on an image. Returns recognized lines joined
+  /// by newlines, or an empty string when nothing is recognized or OCR fails.
+  private func recognizeText(in cgImage: CGImage) -> String {
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    request.usesLanguageCorrection = true
+    let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+    do {
+      try handler.perform([request])
+    } catch {
+      print("[PDFExtractor] OCR failed: \(error.localizedDescription)")
+      return ""
+    }
+    let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+    return lines.joined(separator: "\n")
+  }
+
+  private func renderPageImage(_ page: PDFPage) -> CGImage? {
+    let bounds = page.bounds(for: .mediaBox)
+    guard bounds.width > 0, bounds.height > 0 else { return nil }
+    let size = CGSize(
+      width: bounds.width * Self.ocrRenderScale,
+      height: bounds.height * Self.ocrRenderScale
+    )
+    return page.thumbnail(of: size, for: .mediaBox).cgImage
+  }
+
+  /// Extract a page's text layer; when it is near-empty (scanned page), render
+  /// the page and fall back to on-device OCR.
+  private func extractPageText(_ page: PDFPage, ocrPagesUsed: inout Int) -> String {
+    let textLayer = page.string ?? ""
+    let trimmed = textLayer.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.count >= Self.minTextLayerChars {
+      return textLayer
+    }
+    guard ocrPagesUsed < Self.maxOcrPages, let image = renderPageImage(page) else {
+      return textLayer
+    }
+    ocrPagesUsed += 1
+    let ocrText = recognizeText(in: image)
+    return ocrText.count > textLayer.count ? ocrText : textLayer
   }
 
   @objc
@@ -100,9 +153,10 @@ class PDFExtractorModule: NSObject {
 
       let limit = Int(maxChars)
       var fullText = ""
+      var ocrPagesUsed = 0
       for pageIndex in 0..<document.pageCount {
-        if let page = document.page(at: pageIndex), let pageText = page.string {
-          fullText += pageText
+        if let page = document.page(at: pageIndex) {
+          fullText += self.extractPageText(page, ocrPagesUsed: &ocrPagesUsed)
           if pageIndex < document.pageCount - 1 {
             fullText += "\n\n"
           }
@@ -115,8 +169,30 @@ class PDFExtractorModule: NSObject {
         }
       }
 
+      if ocrPagesUsed > 0 {
+        print("[PDFExtractor] OCR fallback used on \(ocrPagesUsed) pages")
+      }
       print("[PDFExtractor] Extracted \(fullText.count) characters")
       resolve(fullText)
+    }
+  }
+
+  @objc
+  func recognizeImage(_ filePath: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      let path: String
+      if filePath.hasPrefix("file://"), let url = URL(string: filePath) {
+        path = url.path
+      } else {
+        path = filePath
+      }
+
+      guard let image = UIImage(contentsOfFile: path), let cgImage = image.cgImage else {
+        reject("OCR_ERROR", "Could not load image at path: \(path)", nil as NSError?)
+        return
+      }
+
+      resolve(self.recognizeText(in: cgImage))
     }
   }
 }
