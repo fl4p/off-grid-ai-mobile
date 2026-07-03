@@ -18,7 +18,7 @@
 import React from 'react';
 import { Text, Keyboard, Modal, TouchableWithoutFeedback, View } from 'react-native';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
-import { AppSheet } from '../../../src/components/AppSheet';
+import { AppSheet, KEYBOARD_HIDE_COALESCE_MS } from '../../../src/components/AppSheet';
 
 describe('AppSheet', () => {
   const defaultProps = {
@@ -459,6 +459,72 @@ describe('AppSheet', () => {
       expect(mockRemove).toHaveBeenCalled();
 
       jest.useRealTimers();
+    });
+  });
+
+  // ============================================================================
+  // Keyboard height coalescing (fixes the edit-message text-selection bug)
+  // ============================================================================
+  describe('keyboard height coalescing', () => {
+    let listeners: Record<string, (e?: any) => void>;
+
+    // Flatten the sheet surface's style array to read its marginBottom, which the
+    // component sets to the tracked keyboard height (0 = collapsed to the bottom).
+    const marginBottomOf = (node: any): number | undefined => {
+      const style = node.props.style;
+      const flat = Array.isArray(style)
+        ? Object.assign({}, ...style.flat(Infinity).filter(Boolean))
+        : style;
+      return flat.marginBottom;
+    };
+
+    const mountVisibleSheet = () =>
+      render(
+        <AppSheet visible={true} onClose={jest.fn()} enableDynamicSizing title="Edit">
+          <Text>Content</Text>
+        </AppSheet>,
+      );
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      listeners = {};
+      jest.spyOn(Keyboard, 'addListener').mockImplementation((event: any, cb: any) => {
+        listeners[event] = cb;
+        return { remove: jest.fn() } as any;
+      });
+      jest.spyOn(Keyboard, 'isVisible' as any).mockReturnValue(false);
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    });
+
+    it('keeps the sheet lifted through a transient hide -> show (tap to select text)', () => {
+      const { getByTestId } = mountVisibleSheet();
+
+      act(() => listeners.keyboardWillShow({ endCoordinates: { height: 300 } }));
+      expect(marginBottomOf(getByTestId('app-sheet-surface'))).toBe(300);
+
+      // Tapping to move the cursor / raise the selection menu emits hide then show.
+      act(() => listeners.keyboardWillHide());
+      act(() => listeners.keyboardWillShow({ endCoordinates: { height: 300 } }));
+      act(() => jest.advanceTimersByTime(KEYBOARD_HIDE_COALESCE_MS + 50));
+
+      // The deferred collapse was cancelled by the follow-up show: never dropped.
+      expect(marginBottomOf(getByTestId('app-sheet-surface'))).toBe(300);
+    });
+
+    it('still collapses when the keyboard genuinely hides', () => {
+      const { getByTestId } = mountVisibleSheet();
+      act(() => listeners.keyboardWillShow({ endCoordinates: { height: 300 } }));
+
+      act(() => listeners.keyboardWillHide());
+      // Before the coalesce window elapses, the sheet stays lifted...
+      expect(marginBottomOf(getByTestId('app-sheet-surface'))).toBe(300);
+      // ...and once it elapses with no follow-up show, the sheet drops.
+      act(() => jest.advanceTimersByTime(KEYBOARD_HIDE_COALESCE_MS + 50));
+      expect(marginBottomOf(getByTestId('app-sheet-surface'))).toBe(0);
     });
   });
 

@@ -18,6 +18,12 @@ import { createStyles } from './AppSheet.styles';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Delay before collapsing the sheet back down after the keyboard hides. Tapping
+// to reposition the cursor or raise the selection menu in a multiline field
+// emits a transient hide->show pair on iOS; waiting a beat lets the follow-up
+// show cancel the collapse so the sheet doesn't relayout mid-gesture.
+export const KEYBOARD_HIDE_COALESCE_MS = 120;
+
 export interface AppSheetProps {
   visible: boolean;
   onClose: () => void;
@@ -229,13 +235,35 @@ export const AppSheet: React.FC<AppSheetProps> = ({
     }
   }, [visible]);
 
-  // Track keyboard height so the sheet lifts above the keyboard
+  // Track keyboard height so the sheet lifts above the keyboard.
+  //
+  // The collapse on hide is deferred (and cancelled by any immediately-following
+  // show) so the transient hide->show iOS emits when you tap to move the cursor
+  // or select text in a multiline field doesn't relayout the sheet mid-gesture.
+  // Without this, that relayout cancels the selection and dismisses the keyboard
+  // — the bug users hit when editing a chat message.
+  const keyboardHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (e) => setKeyboardHeight(e.endCoordinates.height));
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => { showSub.remove(); hideSub.remove(); };
+    const clearHideTimer = () => {
+      if (keyboardHideTimer.current) {
+        clearTimeout(keyboardHideTimer.current);
+        keyboardHideTimer.current = null;
+      }
+    };
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      clearHideTimer();
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      clearHideTimer();
+      keyboardHideTimer.current = setTimeout(() => {
+        keyboardHideTimer.current = null;
+        setKeyboardHeight(0);
+      }, KEYBOARD_HIDE_COALESCE_MS);
+    });
+    return () => { showSub.remove(); hideSub.remove(); clearHideTimer(); };
   }, []);
 
   // Called by Modal when the Dialog is fully rendered and ready for touch
@@ -293,6 +321,7 @@ export const AppSheet: React.FC<AppSheetProps> = ({
 
         {/* Sheet */}
         <Animated.View
+          testID="app-sheet-surface"
           style={[
             styles.sheet,
             {
