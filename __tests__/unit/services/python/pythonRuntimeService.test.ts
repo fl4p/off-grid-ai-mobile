@@ -56,6 +56,7 @@ jest.mock('@dr.pogodin/react-native-static-server', () => ({
 }));
 
 import { pythonRuntimeService } from '../../../../src/services/python/pythonRuntimeService';
+import StaticServerCtor from '@dr.pogodin/react-native-static-server';
 import { usePythonRuntimeStore } from '../../../../src/stores/pythonRuntimeStore';
 
 const RUNTIME_DIR = '/docs/pyodide-runtime';
@@ -269,6 +270,14 @@ describe('pythonRuntimeService', () => {
       expect(injected).toHaveLength(1);
       expect(parseInjectedRequest(injected[0]).code).toBe('print("hello")\n42');
       expect(result).toEqual({ ok: true, stdout: 'hello', stderr: '', result: '42', error: undefined });
+    });
+
+    it('serves wasm with the application/wasm MIME type so the interpreter can boot', async () => {
+      const { promise } = await startExecution('print(1)', {}, respondWith({ ok: true, stdout: '1', stderr: '' }));
+      await promise;
+
+      const ctorArgs = (StaticServerCtor as unknown as jest.Mock).mock.calls.at(-1)?.[0];
+      expect(ctorArgs.extraConfig).toContain('".wasm" => "application/wasm"');
     });
 
     it('threads requested packages into the injected request and returns captured images', async () => {
