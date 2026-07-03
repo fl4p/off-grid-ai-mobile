@@ -10,6 +10,7 @@
  */
 
 import React from 'react';
+import { ActivityIndicator } from 'react-native';
 import { render } from '@testing-library/react-native';
 import { MarkdownText, preprocessMarkdown } from '../../../src/components/MarkdownText';
 
@@ -135,5 +136,15 @@ describe('preprocessMarkdown', () => {
     expect(preprocessMarkdown('The result of 3*4 is *twelve*')).toBe(
       String.raw`The result of 3\*4 is *twelve*`
     );
+  });
+
+  it('drops inline markdown images so no loading spinner shows in the answer', () => {
+    const { queryByText, UNSAFE_queryAllByType } = render(
+      <MarkdownText>{'Here is the plot:\n\n![sine curve](sandbox:/plot.png)\n\nThe plot shows a sine wave.'}</MarkdownText>
+    );
+    // Surrounding answer text still renders...
+    expect(queryByText(/The plot shows a sine wave/)).toBeTruthy();
+    // ...but the image (and its react-native-fit-image loading spinner) is gone.
+    expect(UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
   });
 });

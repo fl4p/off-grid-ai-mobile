@@ -56,6 +56,11 @@ const selectableRules = {
       {trimTrailingNewline(node.content)}
     </Text>
   ),
+  // LLM answers occasionally embed a markdown image - a hallucinated path, or a
+  // link to the plot that is already shown as a tool attachment. The library's
+  // default renderer (react-native-fit-image) shows a perpetual loading spinner
+  // when the source never resolves, so drop inline images entirely.
+  image: () => null,
 };
 
 interface MarkdownTextProps {
