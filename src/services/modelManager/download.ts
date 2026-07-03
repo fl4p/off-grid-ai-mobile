@@ -59,18 +59,62 @@ export async function performBackgroundDownload(opts: PerformBackgroundDownloadO
   });
 }
 
+const GGUF_MAGIC = 'GGUF';
+
+async function hasGgufMagic(path: string): Promise<boolean | null> {
+  // Returns true if GGUF magic confirmed, false if confirmed invalid, null if
+  // the read is inconclusive. iOS RNFS.read has a known NSInteger bridging bug
+  // that can either throw or return a short/empty string; both are treated as
+  // inconclusive rather than invalid so we never destroy a valid file on a misread.
+  try {
+    const header = await RNFS.read(path, 4, 0, 'ascii');
+    if (header.length < GGUF_MAGIC.length) return null; // short/empty read — inconclusive
+    return header.startsWith(GGUF_MAGIC);
+  } catch {
+    return null;
+  }
+}
+
+// Read-only validity check: present, large enough, and not confirmed-corrupt.
+// A null (inconclusive) magic read counts as valid — llama.rn validates on load.
+// Never mutates the file, so it is safe to run against a possibly-shared target.
+async function mmProjFileValid(path: string, expectedSize?: number): Promise<boolean> {
+  try {
+    if (!(await RNFS.exists(path))) return false;
+    if (expectedSize) {
+      const stat = await RNFS.stat(path);
+      const actualSize = typeof stat.size === 'string' ? Number.parseInt(stat.size, 10) : stat.size;
+      if (actualSize < expectedSize) return false;
+    }
+    return (await hasGgufMagic(path)) !== false;
+  } catch {
+    return false;
+  }
+}
+
+// Pre-download gate: a present-but-invalid file is deleted so it re-downloads clean.
+// (This path owns the file exclusively — unlike the move-failure recovery path,
+// which uses the read-only mmProjFileValid and never deletes.)
 async function checkMmProjExists(path: string | null, expectedSize?: number): Promise<boolean> {
   if (!path) return true;
   const exists = await RNFS.exists(path);
-  if (!exists || !expectedSize) return exists;
+  if (!exists) return false;
   try {
-    const stat = await RNFS.stat(path);
-    const actualSize = typeof stat.size === 'string' ? Number.parseInt(stat.size, 10) : stat.size;
-    if (actualSize < expectedSize) {
-      logger.warn(`[ModelManager] mmproj partial (${actualSize}/${expectedSize}), re-downloading`);
+    if (expectedSize) {
+      const stat = await RNFS.stat(path);
+      const actualSize = typeof stat.size === 'string' ? Number.parseInt(stat.size, 10) : stat.size;
+      if (actualSize < expectedSize) {
+        logger.warn(`[ModelManager] mmproj partial (${actualSize}/${expectedSize}), re-downloading`);
+        await RNFS.unlink(path).catch(() => {});
+        return false;
+      }
+    }
+    if ((await hasGgufMagic(path)) === false) {
+      logger.warn(`[ModelManager] mmproj failed GGUF magic check, re-downloading: ${path}`);
       await RNFS.unlink(path).catch(() => {});
       return false;
     }
+    // magic ok or inconclusive: accept — llama.rn validates on load.
     return true;
   } catch {
     await RNFS.unlink(path).catch(() => {});
@@ -533,9 +577,19 @@ export function watchBackgroundDownload(opts: WatchDownloadOpts): void {
       try {
         await backgroundDownloadService.moveCompletedDownload(event.downloadId, ctx.mmProjLocalPath!);
       } catch (moveErr) {
-        const targetExists = ctx.mmProjLocalPath ? await RNFS.exists(ctx.mmProjLocalPath) : false;
-        if (!targetExists) {
-          logger.warn('[ModelManager] mmproj move failed and target not found, continuing without vision:', moveErr);
+        // Move can fail legitimately when a valid mmproj already sits at this path
+        // (a re-download, or another model sharing the path). Validate the existing
+        // file READ-ONLY: reuse it if valid, downgrade to text-only if not — but
+        // never delete it, so a misread or a file another model references can't be
+        // destroyed here (llama.rn re-validates on load).
+        const expectedSize = ctx.file.mmProjFile?.size;
+        const valid = ctx.mmProjLocalPath
+          ? await mmProjFileValid(ctx.mmProjLocalPath, expectedSize)
+          : false;
+        if (valid) {
+          logger.log('[ModelManager] mmproj move failed but existing target is valid, reusing:', moveErr);
+        } else {
+          logger.warn('[ModelManager] mmproj move failed and target invalid, continuing without vision:', moveErr);
           ctx.mmProjLocalPath = null;
         }
       }
