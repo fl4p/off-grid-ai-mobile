@@ -1821,4 +1821,221 @@ describe('generationService', () => {
       expect(generationService.getState().queuedMessages).toHaveLength(1);
     });
   });
+
+  // ============================================================================
+  // Stall watchdog
+  // ============================================================================
+  describe('stall watchdog', () => {
+    it('aborts and rejects with a stall error when no output arrives within the timeout', async () => {
+      jest.useFakeTimers();
+      const convId = setupWithConversation();
+      setupWithActiveModel();
+      // Generation that never streams a token and never completes.
+      mockedLlmService.generateResponse.mockImplementation((async () => {
+        await new Promise(() => {});
+      }) as any);
+
+      const promise = generationService.generateResponse(convId, [
+        createMessage({ role: 'user', content: 'Hi' }),
+      ]);
+      // Pre-attach a handler so advancing timers can't surface an unhandled rejection.
+      promise.catch(() => {});
+
+      // Trip the no-progress watchdog.
+      jest.advanceTimersByTime(60_000);
+      await expect(promise).rejects.toThrow(/stopped producing output/i);
+
+      expect(generationService.getState().isGenerating).toBe(false);
+      expect(mockedLlmService.stopGeneration).toHaveBeenCalled();
+      jest.useRealTimers();
+    });
+
+    it('does not fire when the generation completes before the timeout', async () => {
+      jest.useFakeTimers();
+      const convId = setupWithConversation();
+      setupWithActiveModel();
+      mockedLlmService.generateResponse.mockImplementation((async (
+        _m: any, onStream: any, onComplete: any,
+      ) => {
+        onStream?.('done');
+        onComplete?.('done');
+      }) as any);
+
+      await generationService.generateResponse(convId, [
+        createMessage({ role: 'user', content: 'Hi' }),
+      ]);
+
+      // Timer must have been cleared on completion; advancing past the timeout is inert.
+      expect((generationService as any).stallTimer).toBeNull();
+      jest.advanceTimersByTime(120_000);
+      expect(generationService.getState().isGenerating).toBe(false);
+      jest.useRealTimers();
+    });
+
+    it('a reentrant no-op call does not disarm the active generation watchdog', async () => {
+      jest.useFakeTimers();
+      const convId = setupWithConversation();
+      setupWithActiveModel();
+      mockedLlmService.generateResponse.mockImplementation((async () => {
+        await new Promise(() => {});
+      }) as any);
+
+      const promiseA = generationService.generateResponse(convId, [
+        createMessage({ role: 'user', content: 'A' }),
+      ]);
+      promiseA.catch(() => {});
+      expect((generationService as any).stallTimer).not.toBeNull();
+
+      // Reentrant call (e.g. Retry on an older message) — no-ops in prepareGeneration
+      // and must NOT clobber A's live watchdog.
+      await generationService.generateResponse(convId, [
+        createMessage({ role: 'user', content: 'B' }),
+      ]);
+      expect((generationService as any).stallTimer).not.toBeNull();
+
+      // A's watchdog still fires.
+      jest.advanceTimersByTime(60_000);
+      await expect(promiseA).rejects.toThrow(/stopped producing output/i);
+      jest.useRealTimers();
+    });
+
+    it('pauses during tool execution so a slow tool is not misread as a stall', async () => {
+      jest.useFakeTimers();
+      const convId = setupWithConversation();
+      setupWithActiveModel();
+      mockedRunToolLoop.mockImplementation((async ({ callbacks }: any) => {
+        callbacks.onToolCallStart?.('web_search', {}); // pause the watchdog
+        jest.advanceTimersByTime(120_000); // a tool that legitimately runs > timeout
+        callbacks.onToolCallComplete?.('web_search', { content: 'ok' }); // resume
+      }) as any);
+
+      await generationService.generateWithTools(convId, [
+        createMessage({ role: 'user', content: 'go' }),
+      ], { enabledToolIds: ['web_search'] });
+
+      // Never aborted: generation finalized normally despite the long tool call.
+      expect(generationService.getState().isGenerating).toBe(false);
+      jest.useRealTimers();
+    });
+  });
+
+  // ============================================================================
+  // Mid-turn steering — drainSteeringMessages
+  // ============================================================================
+  describe('drainSteeringMessages', () => {
+    it('returns only messages for the active conversation and leaves other chats queued', () => {
+      (generationService as any).state = {
+        ...(generationService as any).state,
+        conversationId: 'conv-A',
+        queuedMessages: [
+          { id: 'a1', conversationId: 'conv-A', text: 'steer A', messageText: 'steer A' },
+          { id: 'b1', conversationId: 'conv-B', text: 'other chat', messageText: 'other chat' },
+          { id: 'a2', conversationId: 'conv-A', text: 'more A', messageText: 'more A' },
+        ],
+      };
+
+      const drained = generationService.drainSteeringMessages();
+
+      expect(drained).toHaveLength(2);
+      expect(drained[0].display).toMatchObject({ role: 'user', content: 'steer A' });
+      expect(drained[1].display).toMatchObject({ role: 'user', content: 'more A' });
+      const remaining = generationService.getState().queuedMessages;
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].id).toBe('b1');
+    });
+
+    it('keeps the display text (bubble) separate from the model context (with doc dump)', () => {
+      (generationService as any).state = {
+        ...(generationService as any).state,
+        conversationId: 'conv-A',
+        queuedMessages: [
+          { id: 'a1', conversationId: 'conv-A', text: 'check this', messageText: 'check this\n\n---\n📄 Attached Document\n```\nLONG OCR TEXT\n```\n---' },
+        ],
+      };
+
+      const [drained] = generationService.drainSteeringMessages();
+
+      // Bubble shows the short user-typed text; the model sees the full context.
+      expect(drained.display.content).toBe('check this');
+      expect(drained.forModel.content).toContain('LONG OCR TEXT');
+    });
+
+    it('returns [] when no conversation is generating', () => {
+      (generationService as any).state.conversationId = null;
+      (generationService as any).state.queuedMessages = [
+        { id: 'x', conversationId: 'c', text: 't', messageText: 't' },
+      ];
+      expect(generationService.drainSteeringMessages()).toEqual([]);
+    });
+
+    it('returns [] when the queue holds nothing for the active conversation', () => {
+      (generationService as any).state = {
+        ...(generationService as any).state,
+        conversationId: 'conv-A',
+        queuedMessages: [{ id: 'b1', conversationId: 'conv-B', text: 'x', messageText: 'x' }],
+      };
+      expect(generationService.drainSteeringMessages()).toEqual([]);
+      // The unrelated message stays queued.
+      expect(generationService.getState().queuedMessages).toHaveLength(1);
+    });
+  });
+
+  // ============================================================================
+  // Queue drain — per-conversation + stranded-message recovery
+  // ============================================================================
+  describe('queue drain robustness', () => {
+    it('drains one conversation per pass and leaves other chats queued', async () => {
+      const processor = jest.fn().mockResolvedValue(undefined);
+      (generationService as any).queueProcessor = processor;
+      (generationService as any).state.queuedMessages = [
+        { id: 'a1', conversationId: 'c1', text: 'A1', messageText: 'A1' },
+        { id: 'b1', conversationId: 'c2', text: 'B1', messageText: 'B1' },
+        { id: 'a2', conversationId: 'c1', text: 'A2', messageText: 'A2' },
+      ];
+
+      (generationService as any).processNextInQueue();
+      await Promise.resolve();
+
+      expect(processor).toHaveBeenCalledTimes(1);
+      const combined = processor.mock.calls[0][0];
+      expect(combined.conversationId).toBe('c1');
+      expect(combined.text).toBe('A1\n\nA2');
+      // The other conversation's message is not merged in — it stays queued.
+      expect(generationService.getState().queuedMessages).toEqual([
+        expect.objectContaining({ id: 'b1', conversationId: 'c2' }),
+      ]);
+    });
+
+    it('re-drains stranded messages when a processor is (re)registered while idle', () => {
+      jest.useFakeTimers();
+      (generationService as any).state = {
+        ...(generationService as any).state,
+        isGenerating: false,
+        queuedMessages: [{ id: 'q1', conversationId: 'c1', text: 'hi', messageText: 'hi' }],
+      };
+      const processor = jest.fn().mockResolvedValue(undefined);
+
+      generationService.setQueueProcessor(processor);
+      jest.advanceTimersByTime(0);
+
+      expect(processor).toHaveBeenCalledWith(expect.objectContaining({ id: 'q1' }));
+      jest.useRealTimers();
+    });
+
+    it('does not re-drain on processor registration while a generation is running', () => {
+      jest.useFakeTimers();
+      (generationService as any).state = {
+        ...(generationService as any).state,
+        isGenerating: true,
+        queuedMessages: [{ id: 'q1', conversationId: 'c1', text: 'hi', messageText: 'hi' }],
+      };
+      const processor = jest.fn().mockResolvedValue(undefined);
+
+      generationService.setQueueProcessor(processor);
+      jest.advanceTimersByTime(0);
+
+      expect(processor).not.toHaveBeenCalled();
+      jest.useRealTimers();
+    });
+  });
 });

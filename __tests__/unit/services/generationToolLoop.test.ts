@@ -1018,6 +1018,53 @@ describe('runToolLoop', () => {
   });
 
   // ==========================================================================
+  // Mid-turn steering
+  // ==========================================================================
+  describe('mid-turn steering', () => {
+    it('folds a queued message into the running turn and continues generating', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      // Round 1 requests a tool; after the tool runs the user steers; round 2 answers.
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall({ id: 'tc-1' })] })
+        .mockResolvedValueOnce({ fullResponse: 'final answer including the steer', toolCalls: [] });
+
+      const steerMsg = makeMessage({ role: 'user', content: 'also compare prices' });
+      const drainSteeringMessages = jest.fn()
+        .mockReturnValueOnce([{ display: steerMsg, forModel: steerMsg }])
+        .mockReturnValue([]);
+      const onSteering = jest.fn();
+
+      const ctx = createContext({ drainSteeringMessages, onSteering });
+      await runToolLoop(ctx);
+
+      expect(drainSteeringMessages).toHaveBeenCalled();
+      expect(onSteering).toHaveBeenCalledWith(1);
+      // The steering message is persisted as a real user message in the chat.
+      expect(mockAddMessage).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ role: 'user', content: 'also compare prices' }),
+      );
+      // The loop continued to a second model call and produced the final answer.
+      expect(mockedGenerateResponseWithTools).toHaveBeenCalledTimes(2);
+      expect(ctx.onFinalResponse).toHaveBeenCalledWith('final answer including the steer');
+    });
+
+    it('is inert when there is nothing queued to steer', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall({ id: 'tc-1' })] })
+        .mockResolvedValueOnce({ fullResponse: 'done', toolCalls: [] });
+
+      const drainSteeringMessages = jest.fn().mockReturnValue([]);
+      const ctx = createContext({ drainSteeringMessages });
+      await runToolLoop(ctx);
+
+      expect(drainSteeringMessages).toHaveBeenCalled();
+      expect(ctx.onFinalResponse).toHaveBeenCalledWith('done');
+    });
+  });
+
+  // ==========================================================================
   // Remote provider path (forceRemote)
   // ==========================================================================
   describe('remote provider path via forceRemote', () => {
