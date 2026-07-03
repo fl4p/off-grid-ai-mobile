@@ -99,7 +99,7 @@ export interface ToolGenerationDeps {
 export async function generateWithToolsImpl(
   deps: ToolGenerationDeps,
   messages: Message[],
-  options: { tools: any[]; onStream?: ToolStreamCallback; onComplete?: ToolCompleteCallback },
+  options: { tools: any[]; toolChoice?: 'auto' | 'none'; onStream?: ToolStreamCallback; onComplete?: ToolCompleteCallback },
 ): Promise<{ fullResponse: string; toolCalls: ToolCall[] }> {
   if (!deps.context) throw new Error('No model loaded');
   if (deps.isGenerating) throw new Error('Generation already in progress');
@@ -127,7 +127,7 @@ export async function generateWithToolsImpl(
       messages: oaiMessages,
       ...buildCompletionParams(settings, { disableCtxShift: deps.disableCtxShift }),
       tools: options.tools,
-      tool_choice: 'auto',
+      tool_choice: options.toolChoice ?? 'auto',
       ...buildThinkingCompletionParams(deps.isThinkingEnabled, deps.isGemma4Model),
     };
     logger.log('[LLM-Tools] === INPUT ===');

@@ -214,6 +214,36 @@ describe('runToolLoop', () => {
     });
   });
 
+  // ==========================================================================
+  // Forced final response keeps tools declared with tool_choice:'none'.
+  // Sending an empty tools array here would turn off the server-side tool-call
+  // parser, letting a DeepSeek-family model leak raw tool-call tokens as text.
+  // ==========================================================================
+  describe('forced final response (tool/iteration cap)', () => {
+    it('sends the tools with toolChoice "none" on the forced final call, not an empty array', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      // Model keeps requesting tools every turn, so the loop hits MAX_TOOL_ITERATIONS
+      // and forces a final text answer on the last iteration.
+      mockedGenerateResponseWithTools.mockResolvedValue({
+        fullResponse: 'Let me search again.',
+        toolCalls: [makeToolCall()],
+      });
+
+      const ctx = createContext();
+      await runToolLoop(ctx);
+
+      const calls = mockedGenerateResponseWithTools.mock.calls;
+      // generateResponseWithTools(messages, { tools, toolChoice, onStream }) — options is arg[1].
+      const forcedOpts = calls[calls.length - 1][1];
+      // The forced call declares tools (parser stays on) and forbids calling them.
+      expect(forcedOpts.toolChoice).toBe('none');
+      expect(Array.isArray(forcedOpts.tools)).toBe(true);
+      expect(forcedOpts.tools.length).toBeGreaterThan(0);
+      // Earlier (non-final) iterations must NOT force 'none' — they let the model call tools.
+      expect(calls[0][1].toolChoice).toBeUndefined();
+    });
+  });
+
   describe('LiteRT image forwarding', () => {
     it('forwards all image attachments from the last user message to LiteRT', async () => {
       mockAppState = {

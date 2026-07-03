@@ -321,7 +321,7 @@ function isNonRetryableError(msg: string): boolean {
 /** Call remote LLM provider with tools */
 async function callRemoteLLMWithTools(
   messages: Message[], tools: any[],
-  opts?: { onStream?: (data: StreamToken) => void; disableThinking?: boolean },
+  opts?: { onStream?: (data: StreamToken) => void; disableThinking?: boolean; toolChoice?: 'auto' | 'none' },
 ): Promise<{ fullResponse: string; toolCalls: ToolCall[] }> {
   const activeServerId = useRemoteServerStore.getState().activeServerId;
   if (!activeServerId) throw new Error('No remote provider active');
@@ -329,7 +329,7 @@ async function callRemoteLLMWithTools(
   if (!provider) throw new Error('Remote provider not found');
   const settings = useAppStore.getState().settings;
   const thinkingEnabled = !opts?.disableThinking && settings.thinkingEnabled && provider.capabilities.supportsThinking;
-  const options: GenerationOptions = { temperature: settings.temperature, maxTokens: settings.maxTokens, topP: settings.topP, tools, enableThinking: thinkingEnabled };
+  const options: GenerationOptions = { temperature: settings.temperature, maxTokens: settings.maxTokens, topP: settings.topP, tools, toolChoice: opts?.toolChoice, enableThinking: thinkingEnabled };
   let _fullContent = '', toolCalls: ToolCall[] = [];
   const onStream = opts?.onStream;
   return new Promise((resolve, reject) => {
@@ -364,12 +364,12 @@ async function callRemoteLLMWithTools(
 async function callLocalWithRetry(
   messages: Message[],
   tools: any[],
-  onStream?: (data: StreamToken) => void,
+  opts?: { onStream?: (data: StreamToken) => void; toolChoice?: 'auto' | 'none' },
 ): Promise<{ fullResponse: string; toolCalls: ToolCall[] }> {
   let lastError: any;
   for (let attempt = 0; attempt < MAX_LLM_RETRIES; attempt++) {
     try {
-      return await llmService.generateResponseWithTools(messages, { tools, onStream });
+      return await llmService.generateResponseWithTools(messages, { tools, toolChoice: opts?.toolChoice, onStream: opts?.onStream });
     } catch (e: any) {
       lastError = e;
       const msg = e?.message || String(e) || '';
@@ -568,13 +568,13 @@ function augmentSystemPromptForTools(
   return [...messages.slice(0, sysIdx), updated, ...messages.slice(sysIdx + 1)];
 }
 
-interface CallLLMOptions { onStream?: (data: StreamToken) => void; forceRemote?: boolean; disableThinking?: boolean; conversationId?: string; ctx?: ToolLoopContext; }
+interface CallLLMOptions { onStream?: (data: StreamToken) => void; forceRemote?: boolean; disableThinking?: boolean; conversationId?: string; ctx?: ToolLoopContext; toolChoice?: 'auto' | 'none'; }
 
 /** Call LLM with retry+backoff for transient native context errors. */
 async function callLLMWithRetry(
   messages: Message[],
   tools: any[],
-  { onStream, forceRemote, disableThinking, conversationId, ctx }: CallLLMOptions = {},
+  { onStream, forceRemote, disableThinking, conversationId, ctx, toolChoice }: CallLLMOptions = {},
 ): Promise<{ fullResponse: string; toolCalls: ToolCall[] }> {
   // Append tool-use behavioral guidance to the system prompt when tools are present.
   // Only covers the "when and how" — schemas are injected separately by each engine.
@@ -595,10 +595,10 @@ async function callLLMWithRetry(
     return callLiteRTForLoop(conversationId, augmentedMessages, { tools, onStream, ctx });
   }
   if (useRemote) {
-    try { return await callRemoteLLMWithTools(augmentedMessages, tools, { onStream, disableThinking }); }
+    try { return await callRemoteLLMWithTools(augmentedMessages, tools, { onStream, disableThinking, toolChoice }); }
     catch (e: any) { throw new Error(e?.message || String(e) || 'Remote LLM error'); }
   }
-  return callLocalWithRetry(augmentedMessages, tools, onStream);
+  return callLocalWithRetry(augmentedMessages, tools, { onStream, toolChoice });
 }
 
 /** Detect if text contains any tool call pattern (various model formats). */
@@ -680,12 +680,20 @@ function emitFinalResponse(ctx: ToolLoopContext, state: ToolLoopState, displayRe
 }
 
 /** Force a final text-only generation (no tools) when iteration/call caps are hit. */
-async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, loopMessages: Message[]): Promise<void> {
+/**
+ * Force a final text-only generation when the iteration/call cap is hit. We keep
+ * declaring the tools but send tool_choice:'none' rather than an empty tools array:
+ * dropping the tools turns off the server-side tool-call parser, so a DeepSeek-family
+ * model that still wants to call a tool emits its raw tool-call tokens (e.g.
+ * `<｜｜DSML｜｜invoke …>`) as plain content, which streams to the user verbatim.
+ * tool_choice:'none' keeps the parser configured and forces a text answer instead.
+ */
+async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, req: { loopMessages: Message[]; tools: any[] }): Promise<void> {
   state.streamedContent = '';
   state.reasoningContent = '';
   state.firstTokenFired = false;
   const forcedOnStream = buildStreamHandler(ctx, state);
-  const { fullResponse: forcedResponse } = await callLLMWithRetry(loopMessages, [], { onStream: forcedOnStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx });
+  const { fullResponse: forcedResponse } = await callLLMWithRetry(req.loopMessages, req.tools, { onStream: forcedOnStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx, toolChoice: 'none' });
   emitFinalResponse(ctx, state, forcedResponse);
 }
 
@@ -764,9 +772,11 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
       break;
     }
 
-    // Hit iteration or total-call cap — force one final text-only generation (no tools)
+    // Hit iteration or total-call cap — force one final text answer. Tools stay
+    // declared with tool_choice:'none' (see forceFinalTextResponse) so the model
+    // produces prose instead of leaking raw tool-call tokens as text.
     if (iteration === MAX_TOOL_ITERATIONS - 1 || totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
-      await forceFinalTextResponse(ctx, state, loopMessages);
+      await forceFinalTextResponse(ctx, state, { loopMessages, tools: effectiveSchemas });
       return;
     }
 
