@@ -50,7 +50,8 @@ export const RemoteToolsToggle: React.FC<RemoteToolsToggleProps> = ({ model }) =
       testID={`tools-toggle-${model.id}`}
     >
       <Icon name="tool" size={10} color={color} />
-      <Text style={[styles.badgeText, { color }]}>{enabled ? 'Tools' : 'No tools'}</Text>
+      <Text style={[styles.badgeText, { color }]}>{enabled ? 'Tools' : 'Tools off'}</Text>
+      <Icon name={enabled ? 'toggle-right' : 'toggle-left'} size={14} color={color} />
     </TouchableOpacity>
   );
 };

@@ -72,6 +72,8 @@ export function detectToolCallingCapability(modelId: string): boolean {
   const patterns = [
     'gpt-4', 'gpt-3.5-turbo', 'claude', 'gemini', 'mistral',
     'qwen', 'llama-3', 'command-r', 'dbrx', 'firefunction',
+    'glm',           // Zhipu GLM family (tool-capable)
+    'big-pickle',    // opencode.ai/zen codename for a GLM model
   ];
   const lower = modelId.toLowerCase();
   if (patterns.some(p => lower.includes(p))) return true;

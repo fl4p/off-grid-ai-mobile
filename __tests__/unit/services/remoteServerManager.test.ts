@@ -395,6 +395,11 @@ describe('remoteServerManager', () => {
       expect(detectToolCallingCapability('dbrx-instruct')).toBe(true);
       expect(detectToolCallingCapability('command-r')).toBe(true);
     });
+
+    it('should detect GLM models and opencode.ai/zen codenames', () => {
+      expect(detectToolCallingCapability('glm-4.6')).toBe(true);
+      expect(detectToolCallingCapability('big-pickle')).toBe(true);
+    });
   });
 
   describe('detectVisionCapability comprehensive patterns', () => {

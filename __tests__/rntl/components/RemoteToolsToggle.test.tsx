@@ -48,9 +48,9 @@ describe('RemoteToolsToggle', () => {
     });
   });
 
-  it('shows "No tools" when the model does not support tool calling', () => {
+  it('shows "Tools off" when the model does not support tool calling', () => {
     const { getByText } = render(<RemoteToolsToggle model={makeModel()} />);
-    expect(getByText('No tools')).toBeTruthy();
+    expect(getByText('Tools off')).toBeTruthy();
   });
 
   it('shows "Tools" when the model supports tool calling', () => {
