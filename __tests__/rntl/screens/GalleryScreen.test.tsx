@@ -710,6 +710,41 @@ describe('GalleryScreen', () => {
     });
   });
 
+  it('shows a chat attachment image (e.g. run_python plot) even when it is not in the generated-image store', () => {
+    const { useChatStore } = jest.requireMock('../../../src/stores');
+    useChatStore.mockImplementation((selector?: any) => {
+      const state = {
+        conversations: [
+          {
+            id: 'conv-plot',
+            messages: [
+              {
+                id: 'msg-plot',
+                timestamp: 1_700_000_000_000,
+                attachments: [
+                  { id: 'plot-1', type: 'image', uri: 'file:///docs/python-plots/plot-1.png', mimeType: 'image/png' },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      return selector ? selector(state) : state;
+    });
+
+    mockRouteParams = { conversationId: 'conv-plot' };
+    // Store is empty: the plot lives only as a message attachment.
+    const result = render(<GalleryScreen />);
+    // Not the empty state, and exactly one grid item (the plot).
+    expect(result.queryByText('No images in this chat')).toBeNull();
+    expect(getGridItems(result)).toHaveLength(1);
+
+    useChatStore.mockImplementation((selector?: any) => {
+      const state = { conversations: [] };
+      return selector ? selector(state) : state;
+    });
+  });
+
   it('formatDate handles timestamp strings', () => {
     mockGeneratedImages.push({
       ...sampleImages[0],

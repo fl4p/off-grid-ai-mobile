@@ -73,12 +73,46 @@ export const useGalleryActions = (conversationId: string | undefined) => {
     return ids;
   }, [conversationId, conversations]);
 
+  // Images that live only as chat message attachments (e.g. run_python matplotlib
+  // plots), not in the generated-image store. These are what countConversationImages
+  // counts, so without surfacing them the chat gallery shows "Gallery (1)" but an
+  // empty grid. Mapped into the GeneratedImage shape the grid/viewer expect;
+  // imagePath is stored without the file:// prefix because GridItem re-adds it.
+  const chatAttachmentImages = useMemo<GeneratedImage[]>(() => {
+    if (!conversationId) return [];
+    const convo = conversations.find(c => c.id === conversationId);
+    if (!convo) return [];
+    const imgs: GeneratedImage[] = [];
+    for (const msg of convo.messages) {
+      for (const att of msg.attachments || []) {
+        if (att.type === 'image' && att.uri) {
+          imgs.push({
+            id: att.id,
+            prompt: att.fileName || 'Image',
+            imagePath: att.uri.replace(/^file:\/\//, ''),
+            width: 0, height: 0, steps: 0, seed: 0, modelId: '',
+            createdAt: new Date(msg.timestamp).toISOString(),
+            conversationId,
+          });
+        }
+      }
+    }
+    return imgs;
+  }, [conversationId, conversations]);
+
   const displayImages = useMemo(() => {
     if (!conversationId) return generatedImages;
-    return generatedImages.filter(
+    const fromStore = generatedImages.filter(
       img => img.conversationId === conversationId || (chatImageIds && chatImageIds.has(img.id))
     );
-  }, [generatedImages, conversationId, chatImageIds]);
+    // Merge store-backed images with attachment-only images (plots), deduped by id.
+    const seen = new Set(fromStore.map(i => i.id));
+    const merged = [...fromStore];
+    for (const img of chatAttachmentImages) {
+      if (!seen.has(img.id)) { seen.add(img.id); merged.push(img); }
+    }
+    return merged;
+  }, [generatedImages, conversationId, chatImageIds, chatAttachmentImages]);
 
   const handleDelete = useCallback((image: GeneratedImage) => {
     const doDelete = async () => {
