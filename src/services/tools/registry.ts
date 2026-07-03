@@ -230,8 +230,15 @@ export function buildNoToolsNote(): string {
  * for text-hint models, or a short "no tools" note when none are available (stops
  * a tool-less model hallucinating that it ran code). With native/remote tool
  * calling the schema carries the tools, so nothing is appended.
+ *
+ * `hasOtherTools` covers MCP/extension tools, which are counted out-of-band from
+ * activeToolIds — without it the note would wrongly fire (and contradict the
+ * tool-loop augmentation) for a user with MCP tools but no built-in tools.
  */
-export function buildPromptWithToolNote(basePrompt: string, activeToolIds: string[], useTextHint: boolean): string {
-  if (useTextHint) return `${basePrompt}${buildToolSystemPromptHint(activeToolIds)}`;
-  return activeToolIds.length === 0 ? `${basePrompt}${buildNoToolsNote()}` : basePrompt;
+export function buildPromptWithToolNote(
+  basePrompt: string,
+  opts: { activeToolIds: string[]; useTextHint: boolean; hasOtherTools?: boolean },
+): string {
+  if (opts.useTextHint) return `${basePrompt}${buildToolSystemPromptHint(opts.activeToolIds)}`;
+  return (opts.activeToolIds.length === 0 && !opts.hasOtherTools) ? `${basePrompt}${buildNoToolsNote()}` : basePrompt;
 }

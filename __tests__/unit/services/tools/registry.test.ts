@@ -10,6 +10,7 @@ import {
   getToolsAsOpenAISchema,
   buildToolSystemPromptHint,
   buildNoToolsNote,
+  buildPromptWithToolNote,
 } from '../../../../src/services/tools/registry';
 
 describe('Tool Registry', () => {
@@ -181,6 +182,39 @@ describe('Tool Registry', () => {
       expect(note.trim().length).toBeLessThan(400);
       // Only the leading blank-line separator, no other newlines.
       expect(note.trimStart().includes('\n')).toBe(false);
+    });
+  });
+
+  // ========================================================================
+  // buildPromptWithToolNote
+  // ========================================================================
+  describe('buildPromptWithToolNote', () => {
+    const BASE = 'You are a helpful assistant.';
+
+    it('adds the calling-convention hint for text-hint models', () => {
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: ['calculator'], useTextHint: true });
+      expect(out).toContain(BASE);
+      expect(out).toContain('Tools available');
+      expect(out).toContain('calculator');
+    });
+
+    it('adds the no-tools note when nothing is available', () => {
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: [], useTextHint: false });
+      expect(out).toContain(BASE);
+      expect(out).toMatch(/no tools/i);
+    });
+
+    it('does NOT add the no-tools note when MCP/extension tools are present', () => {
+      // A user with 0 built-in tools but active MCP tools still has tools — the
+      // note would otherwise contradict the tool schema injected downstream.
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: [], useTextHint: false, hasOtherTools: true });
+      expect(out).toBe(BASE);
+      expect(out).not.toMatch(/no tools/i);
+    });
+
+    it('appends nothing for native tool calling with built-in tools (schema carries them)', () => {
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: ['web_search'], useTextHint: false });
+      expect(out).toBe(BASE);
     });
   });
 });
