@@ -243,27 +243,44 @@ describe('runToolLoop', () => {
       expect(calls[0][1].toolChoice).toBeUndefined();
     });
 
-    it('strips leaked DSML tool-call markup from the forced final response (endpoint ignored tool_choice)', async () => {
+    it('when the forced pass leaks only DSML markup, retries with no tools + an explicit instruction and surfaces the synthesized prose', async () => {
       mockExecuteToolCall.mockResolvedValue(makeToolResult());
       const dsmlLeak =
         '<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name="web_search">' +
         '<｜｜DSML｜｜parameter name="query" string="true">portugal crypto PIV</｜｜DSML｜｜parameter>' +
         '</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>';
-      // Model keeps requesting tools until the cap, then — despite tool_choice:'none' —
-      // leaks the DSML envelope as text on the forced-final turn.
+      const synthesized = 'A PIV is a binding ruling from the Portuguese tax authority. Here is the summary.';
+      // Model keeps requesting tools until the cap; on the forced pass it ignores
+      // tool_choice:'none' and leaks ONLY the DSML envelope (no prose); then on the
+      // no-tools synthesis pass it finally answers in prose.
       mockedGenerateResponseWithTools
         .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall()] })
         .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall()] })
-        .mockResolvedValueOnce({ fullResponse: dsmlLeak, toolCalls: [] });
+        .mockResolvedValueOnce({ fullResponse: dsmlLeak, toolCalls: [] })
+        .mockResolvedValueOnce({ fullResponse: synthesized, toolCalls: [] });
 
       const onFinalResponse = jest.fn();
       const ctx = createContext({ onFinalResponse });
       await runToolLoop(ctx);
 
       const finalText = String(onFinalResponse.mock.calls[onFinalResponse.mock.calls.length - 1]?.[0] ?? '');
+      // The leaked markup never surfaces...
       expect(finalText).not.toContain('DSML');
       expect(finalText).not.toContain('invoke name');
       expect(finalText).not.toContain('｜');
+      // ...and the synthesized prose does.
+      expect(finalText).toBe(synthesized);
+
+      // The synthesis pass drops the tools entirely and appends an explicit
+      // "stop and answer" user instruction so the model writes prose instead of
+      // re-emitting tool-call markup.
+      const calls = mockedGenerateResponseWithTools.mock.calls;
+      const synthCall = calls[calls.length - 1];
+      expect(synthCall[1].tools).toEqual([]);
+      const synthMessages = synthCall[0];
+      const lastMsg = synthMessages[synthMessages.length - 1];
+      expect(lastMsg.role).toBe('user');
+      expect(lastMsg.content).toMatch(/stop searching/i);
     });
   });
 

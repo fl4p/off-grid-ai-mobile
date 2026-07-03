@@ -215,6 +215,7 @@ describe('Tool Handlers', () => {
       ]);
 
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
 
@@ -229,6 +230,7 @@ describe('Tool Handlers', () => {
 
     it('returns "No results" when HTML has no results', async () => {
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue('<html><body>No matching documents</body></html>'),
       });
 
@@ -244,6 +246,7 @@ describe('Tool Handlers', () => {
         <a href="https://example.com/page2">Another sufficiently long title</a>
       </body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
 
@@ -258,6 +261,7 @@ describe('Tool Handlers', () => {
         <a href="https://example.com/other">Another valid long link title here</a>
       </body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
 
@@ -273,6 +277,7 @@ describe('Tool Handlers', () => {
         snippet: 'Snippet &lt;b&gt; text &gt;',
       }]);
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
 
@@ -554,6 +559,7 @@ describe('Tool Handlers', () => {
         </div>
       </body></html>`;
       (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200,
         text: jest.fn().mockResolvedValue(html),
       });
 
