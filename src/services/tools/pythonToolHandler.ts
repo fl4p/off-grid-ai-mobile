@@ -63,7 +63,8 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
   if (notReady) return notReady;
 
   const packages = parsePackages(call.arguments.packages);
-  const res = await pythonRuntimeService.execute(code, packages.length ? { packages } : {});
+  const projectId = call.context?.projectId;
+  const res = await pythonRuntimeService.execute(code, { ...(packages.length ? { packages } : {}), projectId });
 
   const attachments = await savePlotImages(res.images);
 

@@ -68,12 +68,15 @@ jest.mock('../../../src/components/CustomAlert', () => {
 
 const mockPythonInstall = jest.fn(async (..._args: any[]) => { });
 const mockPythonRefreshStatus = jest.fn(async (..._args: any[]) => { });
+const mockExportZip = jest.fn(async (..._args: any[]) => 'UEsDBBQ=');
 jest.mock('../../../src/services/python/pythonRuntimeService', () => ({
   pythonRuntimeService: {
     install: (...args: any[]) => mockPythonInstall(...args),
     refreshStatus: (...args: any[]) => mockPythonRefreshStatus(...args),
+    exportProjectZip: (...args: any[]) => mockExportZip(...args),
   },
 }));
+jest.mock('react-native-fs', () => ({ DocumentDirectoryPath: '/docs', writeFile: jest.fn(async () => { }) }));
 
 jest.mock('react-native-vector-icons/Feather', () => {
   const { Text } = require('react-native');
@@ -224,6 +227,29 @@ describe('ToolsScreen', () => {
       usePythonRuntimeStore.setState({ status: 'downloading', downloadProgress: 0.42 });
       const utils = render(<ToolsScreen />);
       expect(utils.getByText('Downloading Python runtime... 42%')).toBeTruthy();
+    });
+
+    it('shows the export-workspace button only once Python is installed', () => {
+      const notInstalled = render(<ToolsScreen />);
+      expect(notInstalled.queryByTestId('tools-export-workspace')).toBeNull();
+      notInstalled.unmount();
+
+      usePythonRuntimeStore.setState({ status: 'installed' });
+      const installed = render(<ToolsScreen />);
+      expect(installed.getByTestId('tools-export-workspace')).toBeTruthy();
+    });
+
+    it('exports the workspace as a zip and opens the share sheet when tapped', async () => {
+      const { Share } = require('react-native');
+      const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
+      usePythonRuntimeStore.setState({ status: 'installed' });
+      const utils = render(<ToolsScreen />);
+      fireEvent.press(utils.getByTestId('tools-export-workspace'));
+      await waitFor(() => expect(mockExportZip).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(shareSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'file:///docs/python-workspace.zip' }),
+      ));
+      shareSpy.mockRestore();
     });
 
     it('shows the short one-line description in the row, not the full model instructions', () => {

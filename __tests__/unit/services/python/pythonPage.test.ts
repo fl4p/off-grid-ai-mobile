@@ -43,6 +43,17 @@ describe('buildPythonPageHtml', () => {
     expect(html).toContain("type: 'booting', phase: 'loading-pyodide'");
   });
 
+  it('sets up and enters the persistent /workspace, and exposes the fs control ops', () => {
+    expect(html).toContain('WORKSPACE_INIT_SRC');
+    expect(html).toContain('_os.chdir');
+    expect(html).toContain('/workspace');
+    expect(html).toContain('window.__fsSnapshot');
+    expect(html).toContain('window.__fsRestore');
+    expect(html).toContain('window.__fsZip');
+    // Restore clears the workspace first so switching projects can't bleed files.
+    expect(html).toContain('_sh.rmtree');
+  });
+
   it('caps stream output at the source and sanitizes surrogates before the bridge', () => {
     expect(html).toContain(`var MAX_STREAM_CHARS = ${PAGE_MAX_STREAM_CHARS}`);
     expect(html).toContain('[output truncated]');
