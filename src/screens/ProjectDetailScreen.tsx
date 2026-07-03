@@ -19,6 +19,7 @@ import { useNewChatModel } from '../hooks/useActiveTextModel';
 import { Conversation } from '../types';
 import { RootStackParamList } from '../navigation/types';
 import { KnowledgeBaseSection } from './ProjectDetailKnowledgeBaseSection';
+import { ProjectDetailMemorySection } from './ProjectDetailMemorySection';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RouteProps = RouteProp<RootStackParamList, 'ProjectDetail'>;
@@ -201,24 +202,13 @@ export const ProjectDetailScreen: React.FC = () => {
 
         {/* Memory Section */}
         <View style={styles.memorySection}>
-          <TouchableOpacity
-            style={styles.sectionHeader}
-            onPress={() => navigation.navigate('Memory', { projectId })}
-            activeOpacity={0.7}
-          >
-            <View style={styles.sectionTitleRow}>
-              <Text style={styles.sectionTitle}>Memory</Text>
-            </View>
-            <View style={styles.sectionActions}>
-              <Icon name="bookmark" size={16} color={colors.textSecondary} />
-              <Icon
-                name="chevron-right"
-                size={16}
-                color={colors.textMuted}
-                style={styles.navIcon}
-              />
-            </View>
-          </TouchableOpacity>
+          <ProjectDetailMemorySection
+            projectId={projectId}
+            colors={colors}
+            styles={styles}
+            setAlertState={setAlertState}
+            onNavigateToMemory={() => navigation.navigate('Memory', { projectId })}
+          />
         </View>
 
         {/* Chats Section */}
