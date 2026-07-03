@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { AppSheet } from '../AppSheet';
@@ -66,12 +66,28 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
     updateSettings(DEFAULT_SETTINGS);
   };
 
+  // Conversation actions (open project/gallery, delete) each present another
+  // sheet or a confirm alert. On iOS a modal can't be presented while this one
+  // is still dismissing, so we close FIRST and run the action from AppSheet's
+  // onClosed (fired after the close animation completes) instead of on a timeout.
+  const pendingAfterCloseRef = useRef<(() => void) | null>(null);
+  const runAfterClose = (action: () => void) => {
+    pendingAfterCloseRef.current = action;
+    onClose();
+  };
+  const handleClosed = () => {
+    const action = pendingAfterCloseRef.current;
+    pendingAfterCloseRef.current = null;
+    action?.();
+  };
+
   const hasConversationActions = !!(onOpenProject || onOpenGallery || onDeleteConversation);
 
   return (
     <AppSheet
       visible={visible}
       onClose={onClose}
+      onClosed={handleClosed}
       snapPoints={['50%', '90%']}
       title="Chat Settings"
     >
@@ -98,10 +114,9 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
         showsVerticalScrollIndicator={false}
       >
         <ConversationActionsSection
-          onClose={onClose}
-          onOpenProject={onOpenProject}
-          onOpenGallery={onOpenGallery}
-          onDeleteConversation={onDeleteConversation}
+          onOpenProject={onOpenProject ? () => runAfterClose(onOpenProject) : undefined}
+          onOpenGallery={onOpenGallery ? () => runAfterClose(onOpenGallery) : undefined}
+          onDeleteConversation={onDeleteConversation ? () => runAfterClose(onDeleteConversation) : undefined}
           conversationImageCount={conversationImageCount}
           activeProjectName={activeProjectName}
         />
