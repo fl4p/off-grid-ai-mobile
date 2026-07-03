@@ -293,6 +293,7 @@ export const ChatScreen: React.FC = () => {
           handleUnloadModel={chat.handleUnloadModel}
           handleDeleteConversation={chat.handleDeleteConversation}
           handleSetConversationMemoryEnabled={chat.handleSetConversationMemoryEnabled}
+          handleCopyTranscript={chat.handleCopyTranscript}
           isModelLoading={chat.isModelLoading}
           imageCount={imageCount}
           activeConversationId={chat.activeConversationId}

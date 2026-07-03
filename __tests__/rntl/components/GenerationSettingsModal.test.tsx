@@ -296,6 +296,43 @@ describe('GenerationSettingsModal', () => {
     expect(onDeleteConversation).toHaveBeenCalled();
   });
 
+  it('shows Copy Transcript action when onCopyTranscript is provided', () => {
+    const onCopyTranscript = jest.fn();
+
+    const { getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onCopyTranscript={onCopyTranscript}
+      />,
+    );
+
+    expect(getByText('Copy Transcript')).toBeTruthy();
+  });
+
+  it('closes first and runs onCopyTranscript only after the sheet has closed', () => {
+    const onClose = jest.fn();
+    const onCopyTranscript = jest.fn();
+
+    const { getByText, getByTestId } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onClose={onClose}
+        onCopyTranscript={onCopyTranscript}
+      />,
+    );
+
+    fireEvent.press(getByText('Copy Transcript'));
+
+    // Sheet is asked to close, but the copy (which presents a confirm alert)
+    // must NOT run while it is still on screen.
+    expect(onClose).toHaveBeenCalled();
+    expect(onCopyTranscript).not.toHaveBeenCalled();
+
+    // Once the sheet reports it has fully closed, the action runs.
+    fireEvent.press(getByTestId('app-sheet-closed'));
+    expect(onCopyTranscript).toHaveBeenCalled();
+  });
+
   it('shows active project name in Project action', () => {
     const onOpenProject = jest.fn();
 

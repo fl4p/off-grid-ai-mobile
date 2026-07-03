@@ -27,6 +27,7 @@ interface GenerationSettingsModalProps {
   onOpenProject?: () => void;
   onOpenGallery?: () => void;
   onDeleteConversation?: () => void;
+  onCopyTranscript?: () => void;
   onOpenTTSSettings?: () => void;
   conversationImageCount?: number;
   activeProjectName?: string | null;
@@ -42,6 +43,7 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
   onOpenProject,
   onOpenGallery,
   onDeleteConversation,
+  onCopyTranscript,
   onOpenTTSSettings,
   conversationImageCount = 0,
   activeProjectName,
@@ -72,10 +74,10 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
     updateSettings(DEFAULT_SETTINGS);
   };
 
-  // Conversation actions (open project/gallery, delete) each present another
-  // sheet or a confirm alert. On iOS a modal can't be presented while this one
-  // is still dismissing, so we close FIRST and run the action from AppSheet's
-  // onClosed (fired after the close animation completes) instead of on a timeout.
+  // Conversation actions (open project/gallery, delete, copy transcript) each
+  // present another sheet or a confirm alert. On iOS a modal can't be presented
+  // while this one is still dismissing, so we close FIRST and run the action from
+  // AppSheet's onClosed (fired after the close animation completes) not a timeout.
   const pendingAfterCloseRef = useRef<(() => void) | null>(null);
   const runAfterClose = (action: () => void) => {
     pendingAfterCloseRef.current = action;
@@ -87,7 +89,7 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
     action?.();
   };
 
-  const hasConversationActions = !!(onOpenProject || onOpenGallery || onDeleteConversation);
+  const hasConversationActions = !!(onOpenProject || onOpenGallery || onDeleteConversation || onCopyTranscript);
 
   return (
     <AppSheet
@@ -123,6 +125,7 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
           onOpenProject={onOpenProject ? () => runAfterClose(onOpenProject) : undefined}
           onOpenGallery={onOpenGallery ? () => runAfterClose(onOpenGallery) : undefined}
           onDeleteConversation={onDeleteConversation ? () => runAfterClose(onDeleteConversation) : undefined}
+          onCopyTranscript={onCopyTranscript ? () => runAfterClose(onCopyTranscript) : undefined}
           conversationImageCount={conversationImageCount}
           activeProjectName={activeProjectName}
         />

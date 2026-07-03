@@ -17,7 +17,7 @@ import { Message, MediaAttachment, Project, DownloadedModel, DebugInfo, RemoteMo
 import { RootStackParamList } from '../../navigation/types';
 import { ensureModelLoadedFn, ensureTextModelForChatFn, handleModelSelectFn, handleUnloadModelFn, initiateModelLoad, restoreConversationModelFn, useChatImageModelEffects, useChatModelStateSync } from './useChatModelActions';
 import { startGenerationFn, handleSendFn, handleStopFn, handleSelectProjectFn, dispatchGenerationFn } from './useChatGenerationActions';
-import { handleRetryMessageFn, handleEditMessageFn, handleDeleteConversationFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
+import { handleRetryMessageFn, handleEditMessageFn, handleDeleteConversationFn, handleCopyTranscriptFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
 import { getDisplayMessages, getPlaceholderText, ChatMessageItem, StreamingState } from './types';
 import { saveImageToGallery } from './useSaveImage';
 import {
@@ -374,6 +374,7 @@ export const useChatScreen = () => {
     handleUnloadModel: () => handleUnloadModelFn(modelDeps),
     handleDeleteConversation: () =>
       handleDeleteConversationFn(genDeps, { activeConversationId, activeConversation, setAlertState }),
+    handleCopyTranscript: () => handleCopyTranscriptFn({ activeConversation, setAlertState }),
     handleCopyMessage: (_content: string) => { },
     handleRetryMessage: (message: Message) =>
       handleRetryMessageFn(message, genDeps, { activeConversationId, hasActiveModel, activeConversation, deleteMessagesAfter, setDebugInfo }),
