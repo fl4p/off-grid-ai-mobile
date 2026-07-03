@@ -6,6 +6,7 @@ import { useTheme, useThemedStyles } from '../../theme';
 import { BackgroundDownloadReasonCode } from '../../types';
 import { needsVisionRepair as checkNeedsVisionRepair } from '../../utils/visionRepair';
 import { getDownloadStatusLabel, isRetryable } from '../../utils/downloadErrors';
+import { formatSpeed } from '../../utils/formatSpeed';
 import { createStyles } from './styles';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ export type DownloadItem = {
   fileSize: number;
   bytesDownloaded: number;
   progress: number;
+  downloadSpeed?: number;
   status: string;
   downloadedAt?: string;
   filePath?: string;
@@ -116,9 +118,14 @@ export const ActiveDownloadCard: React.FC<ActiveDownloadCardProps> = ({ item, on
         <View style={styles.progressBarBackground}>
           <View style={[styles.progressBarFill, { width: `${Math.round(item.progress * 100)}%` as const, backgroundColor: progressColor }]} />
         </View>
-        <Text style={styles.progressText}>
-          {formatBytes(item.bytesDownloaded)} / {formatBytes(item.fileSize)}
-        </Text>
+        <View style={styles.progressTextRow}>
+          <Text style={styles.progressText}>
+            {formatBytes(item.bytesDownloaded)} / {formatBytes(item.fileSize)}
+          </Text>
+          {item.downloadSpeed && item.downloadSpeed > 0 && item.status === 'running' && (
+            <Text style={styles.progressSpeedText}>{formatSpeed(item.downloadSpeed)}</Text>
+          )}
+        </View>
       </View>
       <View style={styles.downloadMeta}>
         {!!item.quantization && (

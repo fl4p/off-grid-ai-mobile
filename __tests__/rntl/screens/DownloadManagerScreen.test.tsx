@@ -378,6 +378,7 @@ describe('DownloadManagerScreen', () => {
         totalBytes: 4 * 1024 * 1024 * 1024,
         combinedTotalBytes: 4 * 1024 * 1024 * 1024,
         progress: 0.5,
+        downloadSpeed: 3 * 1024 * 1024,
         createdAt: Date.now(),
         lastProgressAt: Date.now(),
       },
@@ -386,6 +387,7 @@ describe('DownloadManagerScreen', () => {
     const { getByText, queryByText } = render(<DownloadManagerScreen />);
     expect(getByText('model-file.gguf')).toBeTruthy();
     expect(queryByText('No active downloads')).toBeNull();
+    expect(getByText('3.0 MB/s')).toBeTruthy();
   });
 
   it('shows storage total when models exist', () => {

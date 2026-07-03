@@ -121,6 +121,16 @@ export const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     ...TYPOGRAPHY.meta,
     color: colors.textMuted,
   },
+  progressTextRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: SPACING.sm,
+  },
+  progressSpeedText: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textSecondary,
+  },
   downloadMeta: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
