@@ -490,6 +490,17 @@ jest.mock('lottie-react-native', () => 'LottieView');
 // react-native-linear-gradient mock
 jest.mock('react-native-linear-gradient', () => 'LinearGradient');
 
+// react-native-mathjax-svg bundles the full MathJax es5 build and ships ESM that
+// jest won't transform; mock it with a Text node echoing the TeX so math tokens
+// render deterministically in tests without loading MathJax.
+jest.mock('react-native-mathjax-svg', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  const MathJax = ({ children, color }: { children?: string; color?: string }) =>
+    React.createElement(Text, { testID: 'mathjax', style: { color } }, children);
+  return { __esModule: true, default: MathJax, texToSvg: (tex: string) => tex };
+});
+
 // moti mock (kept for any transitive imports)
 jest.mock('moti', () => ({
   MotiView: 'MotiView',
