@@ -26,15 +26,18 @@ export const WebSearchSettingsScreen: React.FC = () => {
 
   const selectedOption = SEARCH_PROVIDER_OPTIONS.find(o => o.id === searchProvider);
   const needsKey = selectedOption?.requiresApiKey ?? false;
+  // Brave requires no key but accepts one to upgrade to its official API, so the
+  // key field shows for both "requires" and "optional" providers.
+  const acceptsKey = needsKey || (selectedOption?.optionalApiKey ?? false);
 
   // The key lives in the keychain, not settings — mirror it into local state.
   const [apiKey, setApiKey] = useState('');
   useEffect(() => {
     let active = true;
-    if (!needsKey) { setApiKey(''); return; }
+    if (!acceptsKey) { setApiKey(''); return; }
     getSearchApiKey(searchProvider).then(key => { if (active) setApiKey(key); });
     return () => { active = false; };
-  }, [searchProvider, needsKey]);
+  }, [searchProvider, acceptsKey]);
 
   const onChangeKey = (text: string) => {
     setApiKey(text);
@@ -64,11 +67,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
               >
                 <View style={styles.settingInfo}>
                   <Text style={styles.settingLabel}>{option.label}</Text>
-                  <Text style={styles.settingHint}>
-                    {option.requiresApiKey
-                      ? 'Sends your query to serper.dev with your API key. Requires a key.'
-                      : 'Runs on your device against Brave. No API key, no third-party proxy.'}
-                  </Text>
+                  <Text style={styles.settingHint}>{option.hint}</Text>
                 </View>
                 <Icon
                   name={selected ? 'check-circle' : 'circle'}
@@ -80,7 +79,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
           })}
         </Card>
 
-        {needsKey && (
+        {acceptsKey && (
           <Card style={styles.section}>
             <Text style={styles.sectionTitle}>{selectedOption?.label} API Key</Text>
             <ApiKeyInput
@@ -96,13 +95,15 @@ export const WebSearchSettingsScreen: React.FC = () => {
             />
             {apiKey.trim() ? (
               <Text style={styles.settingHint}>
-                Stored on device in the keychain. Sent only to serper.dev when searching.
+                Stored on device in the keychain. Used only when this provider runs a search.
               </Text>
             ) : (
               <View style={styles.warningRow}>
                 <Icon name="alert-circle" size={14} color={colors.textMuted} />
                 <Text style={styles.warningText}>
-                  No key set, so searches fall back to on-device Brave until you add one.
+                  {selectedOption?.optionalApiKey
+                    ? 'No key set, so Brave runs keyless on your device until you add one.'
+                    : 'No key set, so searches fall back to on-device Brave until you add one.'}
                 </Text>
               </View>
             )}
@@ -112,7 +113,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
         <Card style={styles.infoCard}>
           <Icon name="info" size={18} color={colors.textMuted} />
           <Text style={styles.infoText}>
-            Brave runs the search on your device, so no query leaves for a third-party service. Serper returns Google results, including answer boxes, but sends each query to serper.dev.
+            Brave keeps the query on your device by default and only ever sends it to Brave. Adding a free Brave key switches to Brave's search API for steadier results. Serper returns Google results, including answer boxes, but sends each query to serper.dev.
           </Text>
         </Card>
       </ScrollView>

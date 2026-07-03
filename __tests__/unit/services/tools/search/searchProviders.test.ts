@@ -10,7 +10,7 @@ import {
   getActiveSearchProvider,
   SEARCH_PROVIDER_OPTIONS,
 } from '../../../../../src/services/tools/search';
-import { braveProvider } from '../../../../../src/services/tools/search/braveProvider';
+import { braveProvider, createBraveProvider } from '../../../../../src/services/tools/search/braveProvider';
 import { createSerperProvider } from '../../../../../src/services/tools/search/serperProvider';
 
 describe('getActiveSearchProvider', () => {
@@ -33,10 +33,20 @@ describe('getActiveSearchProvider', () => {
     expect(getActiveSearchProvider({ searchProvider: 'serper' })).toBe(braveProvider);
   });
 
+  it('upgrades Brave to the official API provider when a key is set (not the keyless scrape)', () => {
+    const provider = getActiveSearchProvider({ searchProvider: 'brave', apiKey: 'brave-key' });
+    expect(provider.id).toBe('brave');
+    expect(provider).not.toBe(braveProvider); // the keyed official-API instance, not the scrape
+  });
+
   it('exposes both providers as UI options with correct key requirements', () => {
     const byId = Object.fromEntries(SEARCH_PROVIDER_OPTIONS.map(o => [o.id, o]));
     expect(byId.brave.requiresApiKey).toBe(false);
+    expect(byId.brave.optionalApiKey).toBe(true);
     expect(byId.serper.requiresApiKey).toBe(true);
+    // Every option carries a hint for the settings UI.
+    expect(byId.brave.hint).toBeTruthy();
+    expect(byId.serper.hint).toBeTruthy();
   });
 });
 
@@ -203,5 +213,55 @@ describe('Brave provider', () => {
     });
     const results = await braveProvider.search('q', signal);
     expect(results.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Brave official API provider (createBraveProvider)', () => {
+  const originalFetch = (globalThis as any).fetch;
+  const signal = new AbortController().signal;
+
+  afterEach(() => {
+    if (originalFetch === undefined) delete (globalThis as any).fetch;
+    else (globalThis as any).fetch = originalFetch;
+  });
+
+  it('throws before fetching when the key is blank', async () => {
+    const fetchSpy = jest.fn();
+    (globalThis as any).fetch = fetchSpy;
+    await expect(createBraveProvider('   ').search('q', signal)).rejects.toThrow(/key is missing/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('GETs the official API with the subscription token and maps web results', async () => {
+    const fetchSpy = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        web: {
+          results: [
+            { title: 'PIV crypto Portugal', url: 'https://a.pt', description: 'A <strong>binding</strong> ruling.' },
+            { title: 'Second', url: 'https://b.pt', description: 'More.' },
+          ],
+        },
+      }),
+    });
+    (globalThis as any).fetch = fetchSpy;
+
+    const results = await createBraveProvider('bk').search('portugal crypto', signal);
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toContain('api.search.brave.com/res/v1/web/search');
+    expect(init.headers['X-Subscription-Token']).toBe('bk');
+    expect(results[0]).toEqual({ title: 'PIV crypto Portugal', snippet: 'A binding ruling.', url: 'https://a.pt' });
+    expect(results.length).toBe(2);
+  });
+
+  it.each([401, 403])('throws a helpful key message on %s', async (status) => {
+    (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: false, status, json: jest.fn() });
+    await expect(createBraveProvider('bad').search('q', signal)).rejects.toThrow(new RegExp(String(status)));
+  });
+
+  it('throws a status message on other non-2xx responses', async () => {
+    (globalThis as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: jest.fn() });
+    await expect(createBraveProvider('bk').search('q', signal)).rejects.toThrow(/failed \(500\)/);
   });
 });

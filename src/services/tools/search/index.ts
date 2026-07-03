@@ -1,4 +1,4 @@
-import { braveProvider } from './braveProvider';
+import { braveProvider, createBraveProvider, BRAVE_LABEL } from './braveProvider';
 import { createSerperProvider, SERPER_LABEL } from './serperProvider';
 import type { SearchProvider, SearchProviderId, SearchResult } from './types';
 
@@ -14,10 +14,26 @@ export type SearchProviderConfig = {
 export const SEARCH_PROVIDER_OPTIONS: ReadonlyArray<{
   id: SearchProviderId;
   label: string;
+  /** The provider cannot run without a key (Serper). */
   requiresApiKey: boolean;
+  /** The provider runs keyless but a key unlocks a better backend (Brave). */
+  optionalApiKey?: boolean;
+  /** One-line description shown under the option in Settings. */
+  hint: string;
 }> = [
-  { id: 'brave', label: braveProvider.label, requiresApiKey: false },
-  { id: 'serper', label: SERPER_LABEL, requiresApiKey: true },
+  {
+    id: 'brave',
+    label: BRAVE_LABEL,
+    requiresApiKey: false,
+    optionalApiKey: true,
+    hint: 'Runs on your device against Brave, no key needed. Brave rate-limits keyless searches, so add a free Brave key to use its search API. Either way the query only goes to Brave.',
+  },
+  {
+    id: 'serper',
+    label: SERPER_LABEL,
+    requiresApiKey: true,
+    hint: 'Returns Google results via serper.dev. Sends each query to serper.dev with your API key.',
+  },
 ];
 
 /**
@@ -26,7 +42,8 @@ export const SEARCH_PROVIDER_OPTIONS: ReadonlyArray<{
  * here plus one in SEARCH_PROVIDER_OPTIONS - no caller changes.
  */
 const PROVIDER_FACTORIES: Record<SearchProviderId, (apiKey: string) => SearchProvider | null> = {
-  brave: () => braveProvider,
+  // Brave upgrades to the official API when a key is present, else the keyless scrape.
+  brave: (apiKey) => (apiKey.trim() ? createBraveProvider(apiKey) : braveProvider),
   serper: (apiKey) => (apiKey.trim() ? createSerperProvider(apiKey) : null),
 };
 

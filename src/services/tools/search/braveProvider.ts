@@ -1,13 +1,69 @@
 import type { SearchProvider, SearchResult } from './types';
 
+/** Label shared by both Brave backends (keyless scrape and official API). */
+export const BRAVE_LABEL = 'Brave';
+
+/** Shape of the official Brave Web Search API fields we consume. */
+type BraveApiResponse = {
+  web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+};
+
+/**
+ * Official Brave Web Search API (api.search.brave.com). Opt-in: the query still
+ * only ever reaches Brave, but a key buys a real JSON API instead of scraping the
+ * HTML page (which Brave rate-limits with a 429 CAPTCHA for keyless requests).
+ * Used automatically when the user has stored a Brave key; otherwise the keyless
+ * on-device scrape below remains the default.
+ */
+export function createBraveProvider(apiKey: string): SearchProvider {
+  return {
+    id: 'brave',
+    label: BRAVE_LABEL,
+    requiresApiKey: false,
+    async search(query: string, signal: AbortSignal): Promise<SearchResult[]> {
+      if (!apiKey.trim()) {
+        throw new Error('Brave API key is missing. Add it in Settings > Web Search.');
+      }
+      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`;
+      const response = await fetch(url, {
+        signal,
+        headers: { 'X-Subscription-Token': apiKey.trim(), Accept: 'application/json' },
+      });
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`Brave rejected the API key (${response.status}). Check it in Settings > Web Search.`);
+      }
+      if (!response.ok) {
+        throw new Error(`Brave request failed (${response.status}).`);
+      }
+      const data = (await response.json()) as BraveApiResponse;
+      return mapBraveApiResults(data);
+    },
+  };
+}
+
+function mapBraveApiResults(data: BraveApiResponse): SearchResult[] {
+  const results: SearchResult[] = [];
+  for (const r of data.web?.results ?? []) {
+    const title = r.title?.trim();
+    // Brave descriptions carry <strong> highlight tags — strip them to plain text.
+    const snippet = r.description ? stripHtmlTags(decodeHTMLEntities(r.description)).trim() : '';
+    if (!title && !snippet) continue;
+    results.push({ title: title || '(no title)', snippet: snippet || '(no snippet)', url: r.url });
+    if (results.length >= 5) break;
+  }
+  return results.slice(0, 5);
+}
+
 /**
  * On-device Brave provider: fetches Brave's public HTML search page and scrapes
  * results. No API key, no third-party proxy - the query only ever reaches
- * Brave. This is the privacy-preserving default.
+ * Brave. This is the privacy-preserving default, but Brave rate-limits keyless
+ * scraping (429), so results can be intermittent - add a Brave key to switch to
+ * the official API above.
  */
 export const braveProvider: SearchProvider = {
   id: 'brave',
-  label: 'Brave (on-device)',
+  label: BRAVE_LABEL,
   requiresApiKey: false,
   async search(query: string, signal: AbortSignal): Promise<SearchResult[]> {
     const url = `https://search.brave.com/search?q=${encodeURIComponent(query)}&source=web`;
