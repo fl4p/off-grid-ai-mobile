@@ -21,6 +21,8 @@ import {
   handleSelectProjectFn,
   dispatchGenerationFn,
 } from '../../../src/screens/ChatScreen/useChatGenerationActions';
+import { resolveBaseSystemPrompt } from '../../../src/screens/ChatScreen/baseSystemPrompt';
+import { APP_CONFIG } from '../../../src/constants';
 import { useRemoteServerStore } from '../../../src/stores/remoteServerStore';
 import { createDownloadedModel } from '../../utils/factories';
 
@@ -162,7 +164,10 @@ jest.mock('../../../src/components', () => ({
 }));
 
 jest.mock('../../../src/constants', () => ({
-  APP_CONFIG: { defaultSystemPrompt: 'You are a helpful assistant.' },
+  APP_CONFIG: {
+    defaultSystemPrompt: 'You are a helpful assistant.',
+    defaultSystemPromptRemote: 'You are a helpful assistant (remote endpoint).',
+  },
 }));
 
 // ─────────────────────────────────────────────
@@ -1859,5 +1864,26 @@ describe('applyCompactionPrefix — compaction state', () => {
     const deps = makeGenerationDeps();
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
     expect(mockGenerateResponse).toHaveBeenCalled();
+  });
+});
+
+describe('resolveBaseSystemPrompt', () => {
+  it('picks the local default for an on-device model', () => {
+    expect(resolveBaseSystemPrompt(undefined, false)).toBe(APP_CONFIG.defaultSystemPrompt);
+  });
+
+  it('picks the remote default for a remote endpoint', () => {
+    expect(resolveBaseSystemPrompt(undefined, true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
+  });
+
+  it('always honours a user/project custom prompt, local or remote', () => {
+    const custom = 'You are Bob. Talk like a pirate.';
+    expect(resolveBaseSystemPrompt(custom, false)).toBe(custom);
+    expect(resolveBaseSystemPrompt(custom, true)).toBe(custom);
+  });
+
+  it('treats an empty custom prompt as unset and falls back to the default', () => {
+    expect(resolveBaseSystemPrompt('', false)).toBe(APP_CONFIG.defaultSystemPrompt);
+    expect(resolveBaseSystemPrompt('', true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
   });
 });
