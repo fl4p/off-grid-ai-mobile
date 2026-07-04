@@ -850,7 +850,21 @@ async function selectEffectiveSchemas(ctx: ToolLoopContext, builtInSchemas: any[
 export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
   const chatStore = useChatStore.getState();
   const builtInSchemas = getToolsAsOpenAISchema(ctx.enabledToolIds);
-  const extSchemas = getToolExtensions().flatMap(e => e.getOpenAISchemas?.() ?? []);
+  // Gate extension (Pro/MCP) tools by the online-tools switch too: withhold any
+  // that declare requiresNetwork (and aren't offlineCapable) when it's off, so
+  // the switch's "nothing leaves your device" promise also covers them.
+  const onlineToolsEnabled = useAppStore.getState().settings.onlineToolsEnabled ?? false;
+  const blockedExtTools = onlineToolsEnabled
+    ? new Set<string>()
+    : new Set(
+        getToolExtensions()
+          .flatMap(e => e.getToolDefinitions?.() ?? [])
+          .filter(d => d.requiresNetwork && !d.offlineCapable)
+          .map(d => d.name),
+      );
+  const extSchemas = getToolExtensions()
+    .flatMap(e => e.getOpenAISchemas?.() ?? [])
+    .filter((s: any) => !blockedExtTools.has(s?.function?.name));
 
   const effectiveSchemas = await selectEffectiveSchemas(ctx, builtInSchemas, extSchemas);
   const allowedToolNames = buildAllowedToolNameSet(effectiveSchemas);
