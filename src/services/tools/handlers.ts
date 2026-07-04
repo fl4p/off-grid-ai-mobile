@@ -244,12 +244,17 @@ async function handleGetDeviceInfo(infoType = 'all'): Promise<string> {
   return parts.join('\n\n');
 }
 
-/** Block SSRF: reject private/loopback/link-local/cloud-metadata URLs. */
+/** Block SSRF: reject private/loopback/link-local/cloud-metadata URLs.
+ *  Parse with the URL API (not a regex on the raw string) so `user:pass@host`
+ *  userinfo can't smuggle a private host past the check. */
 function isPrivateUrl(url: string): boolean {
-  const m = url.match(/^https?:\/\/([^/:]+)/i);
-  if (!m) return false;
-  const h = m[1].toLowerCase();
-  return h === 'localhost' || h === '[::1]' || h === 'metadata.google.internal'
+  let h: string;
+  try {
+    h = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return h === 'localhost' || h === '[::1]' || h === '::1' || h === 'metadata.google.internal'
     || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|0\.|169\.254\.)/.test(h);
 }
 
