@@ -250,7 +250,7 @@ function isPrivateUrl(url: string): boolean {
   if (!m) return false;
   const h = m[1].toLowerCase();
   return h === 'localhost' || h === '[::1]' || h === 'metadata.google.internal'
-    || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|169\.254\.)/.test(h);
+    || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|0\.|169\.254\.)/.test(h);
 }
 
 function nodeToText(node: any): string {

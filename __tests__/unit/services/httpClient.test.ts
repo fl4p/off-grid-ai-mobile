@@ -267,6 +267,17 @@ describe('httpClient', () => {
       expect(isPrivateNetworkEndpoint('http://172.32.0.1:11434')).toBe(false);
     });
 
+    it('should detect 100.64-127.x.x (Tailscale CGNAT) as private', () => {
+      expect(isPrivateNetworkEndpoint('http://100.64.0.1:11434')).toBe(true);
+      expect(isPrivateNetworkEndpoint('http://100.100.20.30:8080')).toBe(true);
+      expect(isPrivateNetworkEndpoint('http://100.127.255.255:1234')).toBe(true);
+    });
+
+    it('should NOT detect 100.x outside the CGNAT range as private', () => {
+      expect(isPrivateNetworkEndpoint('http://100.63.0.1:11434')).toBe(false);
+      expect(isPrivateNetworkEndpoint('http://100.128.0.1:11434')).toBe(false);
+    });
+
     it('should detect link-local 169.254.x.x as private', () => {
       expect(isPrivateNetworkEndpoint('http://169.254.0.1:11434')).toBe(true);
     });

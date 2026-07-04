@@ -97,6 +97,16 @@ export function isPrivateNetworkEndpoint(endpoint: string): boolean {
       return true;
     }
 
+    // 100.64.0.0 - 100.127.255.255 (CGNAT, RFC 6598 — used by Tailscale/Headscale).
+    // Reachable like a LAN host even though it isn't RFC 1918, so treat it as private.
+    const cgnat = /^100\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(hostname);
+    if (cgnat) {
+      const second = Number.parseInt(cgnat[1], 10);
+      if (second >= 64 && second <= 127) {
+        return true;
+      }
+    }
+
     // 169.254.0.0 - 169.254.255.255 (link-local)
     if (hostname.startsWith('169.254.')) {
       return true;
