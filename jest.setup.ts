@@ -509,6 +509,20 @@ jest.mock('react-native-mathjax-svg', () => {
   return { __esModule: true, default: MathJax, texToSvg: (tex: string) => tex };
 });
 
+// @gorhom/portal mock: AppSheet renders its content through a Portal on iOS (to
+// dodge the RN Modal separate-UIWindow text-selection bug). In unit tests there
+// is no PortalProvider host, so render Portal/Host/Provider children inline —
+// the sheet content stays findable and interactive, which is all the tests need.
+jest.mock('@gorhom/portal', () => {
+  const passthrough = ({ children }: { children?: React.ReactNode }) => children ?? null;
+  return {
+    __esModule: true,
+    Portal: passthrough,
+    PortalHost: passthrough,
+    PortalProvider: passthrough,
+  };
+});
+
 // moti mock (kept for any transitive imports)
 jest.mock('moti', () => ({
   MotiView: 'MotiView',
