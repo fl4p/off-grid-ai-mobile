@@ -92,6 +92,16 @@ export const CREDIBILITY_LABELS = {
   },
 };
 
+// The system prompts the app SEEDS into settings and the built-in project. They
+// claim the model runs locally, which is only true on-device. They are exported
+// (and imported by the stores) so resolveBaseSystemPrompt can recognise them as
+// app defaults - not a prompt the user authored - and swap in an honest variant
+// on a remote endpoint. Editing a seed here without updating the store that uses
+// it would make the store's value no longer recognised as a default, so keep them
+// as the single source.
+export const DEFAULT_SETTINGS_SYSTEM_PROMPT = "You are a helpful AI assistant running locally on the user's device. Be concise and helpful.";
+export const DEFAULT_PROJECT_SYSTEM_PROMPT = "You are a helpful AI assistant running locally on the user's device. Be concise and helpful. Focus on providing accurate information and solving the user's problems efficiently.";
+
 // App configuration
 export const APP_CONFIG = {
   modelStorageDir: 'models',
