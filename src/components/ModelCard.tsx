@@ -85,7 +85,10 @@ const DownloadProgressSection: React.FC<{
   tight?: boolean;
 }> = ({ progress, bytes, speed, tight }) => {
   const styles = useThemedStyles(createStyles);
-  const speedText = speed ? formatSpeed(speed) : '';
+  // Only a positive speed is meaningful. The store zeroes downloadSpeed on any
+  // non-running transition (paused / waiting_for_network / failed), so this is
+  // the single display gate that keeps a stale rate from lingering on the card.
+  const speedText = speed && speed > 0 ? formatSpeed(speed) : '';
   return (
   <View style={styles.progressSection}>
     <View style={[styles.progressContainer, tight && styles.progressContainerTight]}>

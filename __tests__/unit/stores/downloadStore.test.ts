@@ -138,6 +138,38 @@ describe('updateProgress', () => {
     // 200 bytes in ~500ms = ~400 bytes/sec instant; EMA with prev=0 gives instant
     expect(entry2.downloadSpeed).toBeCloseTo(400, 1);
   });
+
+  it('does not inflate speed when events arrive in a coalesced burst', () => {
+    // Regression: Android WorkManager / RN bridge can flush several progress
+    // events within ~1ms of each other. Dividing a real byte-delta by that near
+    // -zero time gap used to report absurd speeds (e.g. 150 MB/s for a ~5 MB/s
+    // download). A sub-window burst must hold the last speed, not spike.
+    useDownloadStore.getState().add(makeEntry({ combinedTotalBytes: 100_000_000 }));
+    // Seed the anchor.
+    useDownloadStore.getState().updateProgress('dl-1', 1_000_000, 100_000_000);
+    // A flurry of events with real byte deltas but no rewind of the anchor time
+    // (they land within the same window). Speed must stay 0, never spike.
+    useDownloadStore.getState().updateProgress('dl-1', 2_000_000, 100_000_000);
+    useDownloadStore.getState().updateProgress('dl-1', 3_000_000, 100_000_000);
+    const burst = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(burst.downloadSpeed).toBe(0);
+    expect(burst.bytesDownloaded).toBe(3_000_000); // bytes still advance
+    // Once a real window elapses, it measures from the ORIGINAL anchor over true
+    // elapsed time: 4 MB over 1000ms = ~4 MB/s, not the burst-inflated value.
+    const e = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    useDownloadStore.setState({
+      downloads: {
+        ...useDownloadStore.getState().downloads,
+        'author/model/model.gguf': { ...e, lastSpeedUpdate: e.lastSpeedUpdate! - 1000 },
+      },
+    });
+    useDownloadStore.getState().updateProgress('dl-1', 5_000_000, 100_000_000);
+    const measured = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    // ~4 MB/s (a few ms of real Date.now jitter aside), nowhere near the
+    // burst-inflated value that dividing by a ~1ms gap would produce.
+    expect(measured.downloadSpeed).toBeGreaterThan(3_500_000);
+    expect(measured.downloadSpeed).toBeLessThan(4_500_000);
+  });
 });
 
 describe('updateMmProjProgress', () => {
@@ -235,6 +267,24 @@ describe('setStatus', () => {
     expect(entry.downloadSpeed).toBe(0);
     expect(entry.lastSpeedUpdate).toBeUndefined();
   });
+
+  // A WiFi blip is the most common real-world interruption on mobile. Native
+  // reports it as a waiting_for_network / retrying transition through setStatus,
+  // and both are ACTIVE_STATUSES, so the ModelCard-based screens keep rendering
+  // the entry as downloading. If the stale speed isn't cleared, they show a
+  // frozen "5.0 MB/s" next to a progress bar that never moves.
+  it.each(['waiting_for_network', 'retrying'] as const)(
+    'clears downloadSpeed and anchor when paused with %s status',
+    (status) => {
+      useDownloadStore.getState().add(makeEntry({ status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345, speedAnchorBytes: 1000 }));
+      useDownloadStore.getState().setStatus('dl-1', status);
+      const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+      expect(entry.status).toBe(status);
+      expect(entry.downloadSpeed).toBe(0);
+      expect(entry.lastSpeedUpdate).toBeUndefined();
+      expect(entry.speedAnchorBytes).toBeUndefined();
+    },
+  );
 });
 
 describe('setProcessing / setCompleted', () => {
