@@ -85,9 +85,11 @@ const DownloadProgressSection: React.FC<{
   tight?: boolean;
 }> = ({ progress, bytes, speed, tight }) => {
   const styles = useThemedStyles(createStyles);
-  // Only a positive speed is meaningful. The store zeroes downloadSpeed on any
-  // non-running transition (paused / waiting_for_network / failed), so this is
-  // the single display gate that keeps a stale rate from lingering on the card.
+  // Only a positive speed is meaningful. The store zeroes downloadSpeed on the
+  // main entry's non-running transitions, but a mmproj sidecar blip while the
+  // GGUF is still downloading intentionally does NOT clear the shared speed, so
+  // this `> 0` gate is load-bearing: it hides a briefly-stale rate rather than
+  // being merely redundant with the store. Do not remove it.
   const speedText = speed && speed > 0 ? formatSpeed(speed) : '';
   return (
   <View style={styles.progressSection}>

@@ -355,17 +355,17 @@ describe('setStatus', () => {
   );
 
   // Vision models download a GGUF plus an mmproj sidecar sharing one combined
-  // (bytes, time) speed anchor. When the GGUF has ALREADY FINISHED (bytes >=
-  // total) and only the sidecar is still transferring, entry.status stays
-  // 'running' and the sidecar's own status is the only stall signal. A sidecar
-  // pause/stop must clear the shared speed too, or the card freezes a stale rate
-  // on a download that is no longer moving bytes.
+  // (bytes, time) speed anchor. Once the GGUF's own completion event has fired
+  // (mainDownloadComplete) and only the sidecar is still transferring, entry.status
+  // stays 'running' and the sidecar's own status is the only stall signal. A
+  // sidecar pause/stop must clear the shared speed too, or the card freezes a
+  // stale rate on a download that is no longer moving bytes.
   it.each(['waiting_for_network', 'retrying', 'failed'] as const)(
-    'clears the shared downloadSpeed and anchor when the sidecar goes %s after the GGUF finished',
+    'clears the shared downloadSpeed and anchor when the sidecar goes %s after the GGUF completed',
     (status) => {
       useDownloadStore.getState().add(makeEntry({
         status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345, speedAnchorBytes: 1000,
-        bytesDownloaded: 1000, totalBytes: 1000, // main GGUF complete
+        mainDownloadComplete: true, // GGUF completion event has fired
         mmProjDownloadId: 'dl-mm',
       }));
       useDownloadStore.getState().setStatus('dl-mm', status);
@@ -378,16 +378,32 @@ describe('setStatus', () => {
     },
   );
 
+  // The GGUF-done signal must NOT be inferred from bytesDownloaded >= totalBytes:
+  // native completion can persist a totalBytes above the bytes actually written
+  // (CDN undershoot tolerance / skipSizeValidation for offgrid/* models). The
+  // explicit mainDownloadComplete flag still fires the clear in that case.
+  it('clears the shared speed after completion even when bytesDownloaded undershoots totalBytes', () => {
+    useDownloadStore.getState().add(makeEntry({
+      status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345, speedAnchorBytes: 1000,
+      mainDownloadComplete: true, bytesDownloaded: 999, totalBytes: 1000, // complete, but bytes undershoot
+      mmProjDownloadId: 'dl-mm',
+    }));
+    useDownloadStore.getState().setStatus('dl-mm', 'failed');
+    const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(entry.downloadSpeed).toBe(0);
+    expect(entry.speedAnchorBytes).toBeUndefined();
+  });
+
   // Regression guard: the GGUF and sidecar download in PARALLEL. A transient
-  // sidecar blip while the main GGUF is still flowing bytes must NOT blank the
-  // healthy main file's live speed — the shared anchor stays intact so the next
-  // main updateProgress keeps measuring a real rate.
+  // sidecar blip while the main GGUF is still flowing bytes (completion event not
+  // yet fired) must NOT blank the healthy main file's live speed — the shared
+  // anchor stays intact so the next main updateProgress keeps measuring a real rate.
   it.each(['waiting_for_network', 'retrying', 'failed'] as const)(
     'does NOT clear the shared speed when the sidecar goes %s while the GGUF is still downloading',
     (status) => {
       useDownloadStore.getState().add(makeEntry({
         status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345, speedAnchorBytes: 1000,
-        bytesDownloaded: 400, totalBytes: 1000, // main GGUF still in flight
+        mainDownloadComplete: false, bytesDownloaded: 400, totalBytes: 1000, // main GGUF still in flight
         mmProjDownloadId: 'dl-mm',
       }));
       useDownloadStore.getState().setStatus('dl-mm', status);
@@ -402,7 +418,7 @@ describe('setStatus', () => {
   it('keeps the shared downloadSpeed while the mmproj sidecar is still running', () => {
     useDownloadStore.getState().add(makeEntry({
       status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345, speedAnchorBytes: 1000,
-      bytesDownloaded: 1000, totalBytes: 1000,
+      mainDownloadComplete: true,
       mmProjDownloadId: 'dl-mm',
     }));
     useDownloadStore.getState().setStatus('dl-mm', 'running');
@@ -410,6 +426,20 @@ describe('setStatus', () => {
     expect(entry.mmProjStatus).toBe('running');
     expect(entry.downloadSpeed).toBe(5000);
     expect(entry.speedAnchorBytes).toBe(1000);
+  });
+
+  it('updateProgressBytesOnly sets mainDownloadComplete (authoritative GGUF-done signal)', () => {
+    useDownloadStore.getState().add(makeEntry({
+      status: 'running', bytesDownloaded: 400, totalBytes: 1000, mmProjDownloadId: 'dl-mm',
+    }));
+    useDownloadStore.getState().updateProgressBytesOnly('dl-1', 1000, 1000);
+    expect(useDownloadStore.getState().downloads['author/model/model.gguf'].mainDownloadComplete).toBe(true);
+  });
+
+  it('retryEntry resets mainDownloadComplete so a restart does not carry a stale flag', () => {
+    useDownloadStore.getState().add(makeEntry({ mainDownloadComplete: true, mmProjDownloadId: 'dl-mm' }));
+    useDownloadStore.getState().retryEntry('author/model/model.gguf', 'dl-1-retry');
+    expect(useDownloadStore.getState().downloads['author/model/model.gguf'].mainDownloadComplete).toBe(false);
   });
 });
 
