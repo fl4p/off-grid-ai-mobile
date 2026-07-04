@@ -4,13 +4,14 @@ import { resolveBaseSystemPrompt } from './baseSystemPrompt';
 import {
   llmService, intentClassifier, generationService, imageGenerationService,
   onnxImageGeneratorService, ImageGenerationState, buildPromptWithToolNote,
-  contextCompactionService,
+  contextCompactionService, ragService, memoryService,
 } from '../../services';
 import { liteRTService } from '../../services/litert';
 import { getToolExtensions } from '../../services/tools/extensions';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
 import { abortPreload } from '../../services/modelPreloader';
-import { useChatStore, useProjectStore } from '../../stores';
+import { useAppStore, useChatStore, useProjectStore } from '../../stores';
+import { buildGenerationRequestDebugInfo, buildGenerationErrorMessage } from './generationErrorDetails';
 import { callHook, HOOKS } from '../../bootstrap/hookRegistry';
 import { Message, MediaAttachment, Project, DownloadedModel, RemoteModel, CacheType } from '../../types';
 import logger from '../../utils/logger';
@@ -193,7 +194,18 @@ const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLit
   const llamaWantsThink = !isRemote && llmService.isGemma4Model() && llmService.isThinkingEnabled();
   return (liteRTWantsThink || llamaWantsThink) ? `<|think|>\n${prompt}` : prompt;
 };
-function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _messageText: string): { enabledTools: string[]; rawPrompt: string; isLiteRT: boolean; memoryEnabled: boolean } {
+/** Auto-add a project-scoped tool only when its backing store has >=1 item in scope, re-checked per turn
+ *  so mid-session changes take effect on the next message. On a count-query error we fall back to offering
+ *  the tool (previous always-on behaviour). */
+async function withCountGatedTool(enabledTools: string[], opts: { toolId: string; eligible: boolean; projectId?: string; count: (id: string) => Promise<number> }): Promise<string[]> {
+  const { toolId, eligible, projectId, count } = opts;
+  if (!eligible || !projectId || enabledTools.includes(toolId)) return enabledTools;
+  try {
+    if ((await count(projectId)) <= 0) return enabledTools;
+  } catch { /* fall through and offer the tool */ }
+  return [...enabledTools, toolId];
+}
+async function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _messageText: string): Promise<{ enabledTools: string[]; rawPrompt: string; isLiteRT: boolean; memoryEnabled: boolean }> {
   const project = conversation?.projectId ? useProjectStore.getState().getProject(conversation.projectId) : null;
   const isLiteRT = deps.activeModel?.engine === 'litert' && liteRTService.isModelLoaded();
   const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
@@ -209,17 +221,63 @@ function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _message
     enabledTools = filterMemoryToolNames(enabledTools);
   }
 
-  // Auto-add search_knowledge_base for project chats even if not in user's enabled list
-  if (conversation?.projectId && !enabledTools.includes('search_knowledge_base')) {
-    enabledTools = [...enabledTools, 'search_knowledge_base'];
-  }
-  if (canUseTools && !isRemote && memoryEnabled && conversation?.projectId && !enabledTools.includes('search_memory')) {
-    enabledTools = [...enabledTools, 'search_memory'];
-  }
+  // Auto-add each project-scoped search tool only when its store is non-empty (re-checked per turn).
+  // KB is offered for any project chat; memory search only for local (non-remote) project chats with memory on.
+  const projectId = conversation?.projectId;
+  enabledTools = await withCountGatedTool(enabledTools, { toolId: 'search_knowledge_base', eligible: true, projectId, count: id => ragService.getEnabledDocumentCount(id) });
+  enabledTools = await withCountGatedTool(enabledTools, { toolId: 'search_memory', eligible: canUseTools && !isRemote && memoryEnabled, projectId, count: id => memoryService.getActiveMemoryCount(id) });
 
   const rawPrompt = resolveBaseSystemPrompt(project?.systemPrompt || deps.settings.systemPrompt, isRemote);
   return { enabledTools, rawPrompt, isLiteRT, memoryEnabled };
 }
+/** Shared failure handling for the send and regenerate paths. A context-overflow
+ *  error keeps its actionable modal (Settings / New chat); any other failure is
+ *  surfaced inline in the chat (Issue #9) with the full request details collapsed
+ *  underneath (Issue #11), instead of a modal that hides the "…" indicator. */
+function handleGenerationFailure(
+  deps: GenerationDeps,
+  error: any,
+  ctx: { conversationId: string; prompt: string; tools: string[]; conversation: any },
+): void {
+  const msg = error?.message || error?.toString?.() || 'Failed to generate response';
+  logger.error('[ChatGen] Generation failed:', msg, error);
+  // Local llama.cpp overflow phrasings plus the remote/compaction patterns, so a
+  // context error that survives compaction still gets the actionable modal.
+  const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens')
+    || msg.includes('Input token ids') || contextCompactionService.isContextFullError(error);
+  if (isContextOverflow) {
+    const dismiss = () => deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
+    deps.setAlertState({
+      ...showAlert(
+        'Context window full',
+        'The conversation is too long for this model\'s context window.\n\nIncrease the context limit in Settings, reduce the number of enabled tools, or start a new chat.',
+        [
+          { text: 'Settings', onPress: () => { dismiss(); deps.setShowSettingsPanel?.(true); } },
+          {
+            text: 'New chat',
+            onPress: () => {
+              dismiss();
+              const modelId = deps.activeModelInfo?.modelId;
+              if (modelId) {
+                const serverId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
+                deps.setActiveConversation(deps.createConversation(modelId, undefined, undefined, serverId));
+              }
+            },
+          },
+        ],
+      ),
+      prominentMessage: true,
+    });
+    return;
+  }
+  const project = ctx.conversation?.projectId ? useProjectStore.getState().getProject(ctx.conversation.projectId) : null;
+  const requestDebugInfo = buildGenerationRequestDebugInfo(
+    { activeModelInfo: deps.activeModelInfo, activeModel: deps.activeModel ?? null, settings: useAppStore.getState().settings },
+    { conversationId: ctx.conversationId, prompt: ctx.prompt, tools: ctx.tools, projectId: ctx.conversation?.projectId, projectName: project?.name },
+  );
+  deps.addMessage(ctx.conversationId, buildGenerationErrorMessage(msg, requestDebugInfo));
+}
+
 export async function startGenerationFn(deps: GenerationDeps, call: StartGenerationCall): Promise<void> {
   const { setDebugInfo, targetConversationId, messageText } = call;
   if (!deps.hasActiveModel) return;
@@ -235,7 +293,7 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
     }
   }
   const conversation = useChatStore.getState().conversations.find(c => c.id === targetConversationId);
-  const { enabledTools, rawPrompt, isLiteRT, memoryEnabled } = resolveToolsAndPrompt(deps, conversation, messageText);
+  const { enabledTools, rawPrompt, isLiteRT, memoryEnabled } = await resolveToolsAndPrompt(deps, conversation, messageText);
   const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
   const chatContext = await buildChatContext({
     projectId: conversation?.projectId,
@@ -278,40 +336,7 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
       recalledMemories: chatContext.recalledMemories,
     });
   } catch (error: any) {
-    const msg = error?.message || error?.toString?.() || 'Failed to generate response';
-    logger.error('[ChatGen] Generation failed:', msg, error);
-    const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens') || msg.includes('Input token ids');
-    if (isContextOverflow) {
-      deps.setAlertState({
-        ...showAlert(
-          'Context window full',
-          'The conversation is too long for this model\'s context window.\n\nIncrease the context limit in Settings, reduce the number of enabled tools, or start a new chat.',
-          [
-            {
-              text: 'Settings',
-              onPress: () => { deps.setAlertState({ visible: false, title: '', message: '', buttons: [] }); deps.setShowSettingsPanel?.(true); },
-            },
-            {
-              text: 'New chat',
-              onPress: () => {
-                deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
-                const modelId = deps.activeModelInfo?.modelId;
-                if (modelId) {
-                  const serverId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
-                  const newId = deps.createConversation(modelId, undefined, undefined, serverId);
-                  deps.setActiveConversation(newId);
-                }
-              },
-            },
-          ],
-        ),
-        prominentMessage: true,
-      });
-    } else {
-      deps.setAlertState(showAlert('Generation Error', msg));
-    }
-    deps.generatingForConversationRef.current = null;
-    return;
+    handleGenerationFailure(deps, error, { conversationId: targetConversationId, prompt: messageText, tools: activeTools, conversation });
   }
   deps.generatingForConversationRef.current = null;
 }
@@ -399,41 +424,6 @@ export async function executeDeleteConversationFn(
   deps.navigation.goBack();
 }
 
-function handleRegenerationError(deps: GenerationDeps, error: any): void {
-  const msg = error?.message || 'Failed to generate response';
-  const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens') || msg.includes('Input token ids');
-  if (!isContextOverflow) {
-    deps.setAlertState(showAlert('Generation Error', msg));
-    return;
-  }
-
-  deps.setAlertState({
-    ...showAlert(
-      'Context window full',
-      'The conversation is too long for this model\'s context window.\n\nIncrease the context limit in Settings, reduce the number of enabled tools, or start a new chat.',
-      [
-        {
-          text: 'Settings',
-          onPress: () => { deps.setAlertState({ visible: false, title: '', message: '', buttons: [] }); deps.setShowSettingsPanel?.(true); },
-        },
-        {
-          text: 'New chat',
-          onPress: () => {
-            deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
-            const modelId = deps.activeModelInfo?.modelId;
-            if (modelId) {
-              const serverId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
-              const newId = deps.createConversation(modelId, undefined, undefined, serverId);
-              deps.setActiveConversation(newId);
-            }
-          },
-        },
-      ],
-    ),
-    prominentMessage: true,
-  });
-}
-
 export type RegenerateCall = { setDebugInfo: SetState<any>; userMessage: Message };
 export async function regenerateResponseFn(deps: GenerationDeps, call: RegenerateCall): Promise<void> {
   const { userMessage } = call;
@@ -458,7 +448,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   const messages = (conversation?.messages || []).filter((m: Message) => !m.isSystemInfo);
   const messagesUpToUser = messages.slice(0, messages.findIndex((m: Message) => m.id === userMessage.id) + 1)
     .map(m => m.id === userMessage.id ? { ...m, content: messageText } : m);
-  const { enabledTools, rawPrompt, isLiteRT: isLiteRTRegen, memoryEnabled } = resolveToolsAndPrompt(deps, conversation, messageText);
+  const { enabledTools, rawPrompt, isLiteRT: isLiteRTRegen, memoryEnabled } = await resolveToolsAndPrompt(deps, conversation, messageText);
   const isRemote = isRemoteGeneration({ activeModelInfo: deps.activeModelInfo });
   const activeTools = enabledTools;
   const chatContext = await buildChatContext({
@@ -492,7 +482,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
       recalledMemories: chatContext.recalledMemories,
     });
   } catch (error: any) {
-    handleRegenerationError(deps, error);
+    handleGenerationFailure(deps, error, { conversationId: targetConversationId, prompt: messageText, tools: activeTools, conversation });
   }
   deps.generatingForConversationRef.current = null;
 }

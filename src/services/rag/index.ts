@@ -120,6 +120,12 @@ class RagService {
     return ragDatabase.getDocumentsByProject(projectId);
   }
 
+  /** Number of enabled (searchable) documents in a project. 0 means the knowledge base has nothing to search. */
+  async getEnabledDocumentCount(projectId: string): Promise<number> {
+    await this.ensureReady();
+    return ragDatabase.getEnabledDocumentCountByProject(projectId);
+  }
+
   async toggleDocument(docId: number, enabled: boolean): Promise<void> {
     await this.ensureReady();
     ragDatabase.toggleEnabled(docId, enabled);

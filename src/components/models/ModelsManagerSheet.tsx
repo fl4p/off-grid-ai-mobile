@@ -82,7 +82,7 @@ export const ModelsManagerSheet: React.FC<Props> = ({
           );
         })}
 
-        {hasActiveModel && (
+        {!!hasActiveModel && (
           <AnimatedPressable
             style={styles.ejectButton}
             hapticType="impactMedium"

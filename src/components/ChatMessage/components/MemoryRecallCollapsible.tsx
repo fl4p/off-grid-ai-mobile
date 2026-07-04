@@ -42,7 +42,7 @@ export const MemoryRecallCollapsible: React.FC<MemoryRecallCollapsibleProps> = (
         </Text>
         <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={12} color={colors.textMuted} />
       </TouchableOpacity>
-      {expanded && (
+      {!!expanded && (
         <View style={styles.toolDetailContainer}>
           {memories.map(memory => (
             <View key={memory.id} testID={`memory-recall-${memory.id}`} style={styles.memoryRecallItem}>

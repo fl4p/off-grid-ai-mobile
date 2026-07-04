@@ -52,7 +52,7 @@ export const NoModelScreen: React.FC<{
           ? 'Select a text or image model to get started.'
           : 'Download a text or image model from the Models tab to get started.'}
       </Text>
-      {hasAvailableModels && (
+      {!!hasAvailableModels && (
         <TouchableOpacity style={styles.selectModelButton} onPress={() => setShowModelSelector(true)}>
           <Text style={styles.selectModelButtonText}>Select Model</Text>
         </TouchableOpacity>
@@ -66,6 +66,7 @@ export const NoModelScreen: React.FC<{
       isLoading={isModelLoading}
       currentModelPath={llmService.getLoadedModelPath()}
       onSelectionComplete={() => setShowModelSelector(false)}
+      onAddServer={() => navigation.navigate('RemoteServers')}
     />
   </SafeAreaView>
 );
@@ -93,9 +94,7 @@ export const ChatHeader: React.FC<{
         </Text>
         <View style={styles.headerSubtitleRow}>
           <TouchableOpacity style={styles.modelSelector} onPress={onOpenModels} testID="model-selector">
-            {isRemote && (
-              <Icon name="cloud" size={12} color={colors.primary} style={styles.remoteIcon} />
-            )}
+            {!!isRemote && <Icon name="cloud" size={12} color={colors.primary} style={styles.remoteIcon} />}
             <Icon name="layers" size={12} color={colors.textSecondary} style={styles.remoteIcon} />
             <Text style={styles.headerSubtitle} numberOfLines={1} testID="model-loaded-indicator">
               {activeModelName && activeModelName !== 'Unknown' ? activeModelName : 'Models'}
@@ -183,9 +182,7 @@ export const ImageProgressIndicator: React.FC<{
   <View style={styles.imageProgressContainer}>
     <View style={styles.imageProgressCard}>
       <View style={styles.imageProgressRow}>
-        {imagePreviewPath && (
-          <Image source={{ uri: imagePreviewPath }} style={styles.imagePreview} resizeMode="cover" />
-        )}
+        {!!imagePreviewPath && <Image source={{ uri: imagePreviewPath }} style={styles.imagePreview} resizeMode="cover" />}
         <View style={styles.imageProgressContent}>
           <View style={styles.imageProgressHeader}>
             <View style={styles.imageProgressIconContainer}>
@@ -195,11 +192,9 @@ export const ImageProgressIndicator: React.FC<{
               <Text style={styles.imageProgressTitle}>
                 {imagePreviewPath ? 'Refining Image' : 'Generating Image'}
               </Text>
-              {imageGenerationStatus && (
-                <Text style={styles.imageProgressStatus}>{imageGenerationStatus}</Text>
-              )}
+              {!!imageGenerationStatus && <Text style={styles.imageProgressStatus}>{imageGenerationStatus}</Text>}
             </View>
-            {imageGenerationProgress && (
+            {!!imageGenerationProgress && (
               <Text style={styles.imageProgressSteps}>
                 {imageGenerationProgress.step}/{imageGenerationProgress.totalSteps}
               </Text>
@@ -208,7 +203,7 @@ export const ImageProgressIndicator: React.FC<{
               <Icon name="x" size={16} color={colors.error} />
             </TouchableOpacity>
           </View>
-          {imageGenerationProgress && (
+          {!!imageGenerationProgress && (
             <View style={styles.imageProgressBarContainer}>
               <View style={styles.imageProgressBar}>
                 <View
@@ -236,7 +231,7 @@ export const ImageViewerModal: React.FC<{
   <Modal visible={!!viewerImageUri} transparent animationType="fade" onRequestClose={onClose}>
     <View style={styles.imageViewerContainer}>
       <TouchableOpacity style={styles.imageViewerBackdrop} activeOpacity={1} onPress={onClose} />
-      {viewerImageUri && (
+      {!!viewerImageUri && (
         <View style={styles.imageViewerContent}>
           <Image source={{ uri: viewerImageUri }} style={styles.fullscreenImage} resizeMode="contain" />
           <View style={styles.imageViewerActions}>

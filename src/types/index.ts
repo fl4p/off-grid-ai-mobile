@@ -220,6 +220,10 @@ export interface Message {
   isThinking?: boolean;
   /** Indicates this is a system info message (model loaded/unloaded, etc.) */
   isSystemInfo?: boolean;
+  /** Indicates this message reports a generation failure (rendered as an error, excluded from LLM context via isSystemInfo). */
+  isError?: boolean;
+  /** Request details for an error message (prompt, model, provider, tools, arguments), shown collapsed under the error. */
+  errorDetails?: string;
   attachments?: MediaAttachment[];
   /** Generation duration in milliseconds */
   generationTimeMs?: number;

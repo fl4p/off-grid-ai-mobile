@@ -75,7 +75,7 @@ export const ModelSettingsScreen: React.FC = () => {
             />
           </TouchableOpacity>
         </AttachStep>
-        {promptOpen && <SystemPromptSection />}
+        {!!promptOpen && <SystemPromptSection />}
 
         <TouchableOpacity
           style={styles.accordionHeader}
@@ -90,7 +90,7 @@ export const ModelSettingsScreen: React.FC = () => {
             color={colors.textMuted}
           />
         </TouchableOpacity>
-        {imageOpen && <ImageGenerationSection />}
+        {!!imageOpen && <ImageGenerationSection />}
 
         <TouchableOpacity
           style={styles.accordionHeader}
@@ -105,7 +105,7 @@ export const ModelSettingsScreen: React.FC = () => {
             color={colors.textMuted}
           />
         </TouchableOpacity>
-        {textOpen && <TextGenerationSection />}
+        {!!textOpen && <TextGenerationSection />}
 
         <Button
           title="Reset All to Defaults"

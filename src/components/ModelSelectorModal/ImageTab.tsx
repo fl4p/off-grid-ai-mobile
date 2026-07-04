@@ -40,7 +40,7 @@ export const ImageTab: React.FC<ImageTabProps> = ({
 
   return (
     <>
-      {hasLoaded && (
+      {!!hasLoaded && (
         <View style={[styles.loadedSection, styles.loadedSectionImage]}>
           <View style={styles.loadedHeader}>
             <Icon name="check-circle" size={14} color={colors.success} />
@@ -79,7 +79,7 @@ export const ImageTab: React.FC<ImageTabProps> = ({
           <Icon name="image" size={40} color={colors.textMuted} />
           <Text style={styles.emptyTitle}>No Image Models</Text>
           <Text style={styles.emptyText}>Download image models from the Models tab</Text>
-          {onBrowseModels && (
+          {!!onBrowseModels && (
             <TouchableOpacity style={[localStyles.actionButton, { borderColor: colors.primary }]} onPress={onBrowseModels}>
               <Icon name="download" size={14} color={colors.primary} />
               <Text style={[localStyles.actionButtonText, { color: colors.primary }]}>Browse Models</Text>
@@ -114,7 +114,7 @@ export const ImageTab: React.FC<ImageTabProps> = ({
                     )}
                   </View>
                 </View>
-                {isCurrent && (
+                {!!isCurrent && (
                   <View style={[styles.checkmark, styles.checkmarkImage]}>
                     <Icon name="check" size={16} color={colors.background} />
                   </View>
@@ -151,7 +151,7 @@ export const ImageTab: React.FC<ImageTabProps> = ({
                     </View>
                   </View>
                 </View>
-                {isCurrent && (
+                {!!isCurrent && (
                   <View style={[styles.checkmark, styles.checkmarkImage]}>
                     <Icon name="check" size={16} color={colors.background} />
                   </View>

@@ -187,14 +187,14 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
           removeClippedSubviews={Platform.OS !== 'android'}
         />
       )}
-      {chat.showScrollToBottom && chat.displayMessages.length > 0 && (
+      {!!chat.showScrollToBottom && chat.displayMessages.length > 0 && (
         <Animated.View entering={FadeIn.duration(150)} style={scrollToBottomStyle}>
           <AnimatedPressable hapticType="impactLight" style={styles.scrollToBottomButton} onPress={() => flatListRef.current?.scrollToEnd({ animated: true })}>
             <Icon name="chevron-down" size={20} color={colors.textSecondary} />
           </AnimatedPressable>
         </Animated.View>
       )}
-      {chat.isGeneratingImage && (
+      {!!chat.isGeneratingImage && (
         <ImageProgressIndicator
           styles={styles} colors={colors}
           imagePreviewPath={chat.imagePreviewPath}
@@ -206,18 +206,18 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
       <ModelStatusBar
         // While generating for this chat the loading state is shown inside the
         // reply bubble ("Loading <model>…"), so don't also show it in this bar.
-        loading={chat.isModelLoading && !chat.isGeneratingForThisConversation}
+        loading={!!chat.isModelLoading && !chat.isGeneratingForThisConversation}
         classifying={chat.isClassifying}
         modelName={chat.loadingModel?.name}
         styles={styles}
         colors={colors}
       />
-      {chat.isCompacting && (
+      {!!chat.isCompacting && (
         <Animated.View entering={FadeIn.duration(200)} style={styles.classifyingBar}>
           <ThinkingIndicator text="Compacting your conversation..." />
         </Animated.View>
       )}
-      {chat.hasPendingSettings && !chat.isCompacting && !chat.activeModelInfo?.isRemote && (
+      {!!chat.hasPendingSettings && !chat.isCompacting && !chat.activeModelInfo?.isRemote && (
         <Animated.View entering={FadeIn.duration(200)}>
           <AnimatedPressable style={styles.pendingSettingsBar} onPress={chat.handleReloadTextModel}>
             <Icon name="alert-circle" size={16} color={colors.warning} />

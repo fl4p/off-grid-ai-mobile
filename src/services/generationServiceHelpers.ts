@@ -107,6 +107,19 @@ function buildBaseGenerationMeta(svc: any): GenerationMeta {
   };
 }
 
+/** Clear streaming buffers and reset generation state after a failure so the "thinking…"
+ *  indicator stops and the single global isGenerating flag is freed (else other chats stay blocked). */
+function resetAfterGenerationError(svc: any, opts?: { markServerOffline?: boolean }): void {
+  if (opts?.markServerOffline) {
+    const failedServerId = useRemoteServerStore.getState().activeServerId;
+    if (failedServerId) useRemoteServerStore.getState().updateServerHealth(failedServerId, false);
+  }
+  if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
+  svc.tokenBuffer = '';
+  useChatStore.getState().clearStreamingMessage();
+  svc.resetState();
+}
+
 function handleStreamChunk(svc: any, chunk: { content?: string; reasoningContent?: string }): void {
   if (chunk.content) {
     if (!svc.state.streamingContent && svc.remoteTimeToFirstToken === undefined) {
@@ -300,20 +313,14 @@ async function runLiteRTResponseImpl(svc: any, req: GenerationRequest): Promise<
         onError: (err: Error) => {
           if (svc.abortRequested) return;
           logger.error('[LiteRT] sendMessage error:', err.message);
-          if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-          svc.tokenBuffer = '';
-          chatStore.clearStreamingMessage();
-          svc.resetState();
+          resetAfterGenerationError(svc);
         },
       },
       { imageUris, audioUris },
     );
   } catch (error: any) {
     if (svc.abortRequested) return;
-    if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-    svc.tokenBuffer = '';
-    chatStore.clearStreamingMessage();
-    svc.resetState();
+    resetAfterGenerationError(svc);
     throw error;
   }
 }
@@ -368,27 +375,11 @@ export async function generateResponseImpl(
   } catch (error) {
     if (svc.abortRequested) return;
     logger.error('[GenerationService] Generation error:', error);
-    if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-    svc.tokenBuffer = '';
-    chatStore.clearStreamingMessage();
-    svc.resetState();
+    resetAfterGenerationError(svc);
     throw error;
   }
 }
 
-/**
- * Shared teardown for a remote generation that fails mid-stream (e.g. a TLS/network
- * drop on flaky wifi). Without it isGenerating stays true, so the stop button sticks
- * and drainQueue() never releases queued messages. Also flags the server offline.
- */
-function tearDownFailedRemoteGeneration(svc: any): void {
-  const failedServerId = useRemoteServerStore.getState().activeServerId;
-  if (failedServerId) useRemoteServerStore.getState().updateServerHealth(failedServerId, false);
-  if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-  svc.tokenBuffer = '';
-  useChatStore.getState().clearStreamingMessage();
-  svc.resetState();
-}
 
 export async function generateRemoteResponseImpl(
   svc: any,
@@ -452,14 +443,14 @@ export async function generateRemoteResponseImpl(
       onError: (error: Error) => {
         if (generationSignal.aborted) return;
         logger.error('[GenerationService] Remote generation error:', error);
-        tearDownFailedRemoteGeneration(svc);
+        resetAfterGenerationError(svc);
         throw error;
       },
     });
   } catch (error) {
     if (generationSignal.aborted) return;
     logger.error('[GenerationService] Remote generation error:', error);
-    tearDownFailedRemoteGeneration(svc);
+    resetAfterGenerationError(svc, { markServerOffline: true });
     throw error;
   } finally {
     svc.currentRemoteAbortController = null;
@@ -476,18 +467,22 @@ export async function generateRemoteWithToolsImpl(
   if (!provider) { svc.resetState(); throw new Error('No remote provider available'); }
 
   const { enabledToolIds, projectId, ...callbacks } = options;
+
   try {
+    // Use the same tool loop but with remote provider
     await runToolLoop({
       conversationId, messages, enabledToolIds, projectId, callbacks,
       ...buildToolLoopHandlersImpl(svc),
       forceRemote: true,
     });
   } catch (error) {
-    // A mid-stream failure (e.g. a TLS/network drop on flaky wifi) must tear down
-    // service state, or isGenerating stays true forever and the queue never drains.
-    if (svc.abortRequested) return; // stopGeneration() already cleaned up
+    // Without this, isGenerating/isThinking stayed true — spinner spun forever and
+    // (single global flag) every other chat was blocked. Don't mark the server offline:
+    // a runToolLoop failure can be a tool/context error the caller recovers from via
+    // compaction, and nothing flips health back — a false offline would stick.
+    if (svc.abortRequested) return;
     logger.error('[GenerationService] Remote tool generation error:', error);
-    tearDownFailedRemoteGeneration(svc);
+    resetAfterGenerationError(svc);
     throw error;
   }
 

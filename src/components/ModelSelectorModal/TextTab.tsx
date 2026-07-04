@@ -40,7 +40,7 @@ export const TextTab: React.FC<TextTabProps> = ({
 
   return (
     <>
-      {hasLoaded && (
+      {!!hasLoaded && (
         <View style={styles.loadedSection}>
           <View style={styles.loadedHeader}>
             <Icon name="check-circle" size={14} color={colors.success} />
@@ -78,7 +78,7 @@ export const TextTab: React.FC<TextTabProps> = ({
               <Icon name="wifi" size={14} color={colors.textSecondary} />
               <Text style={[localStyles.actionButtonText, { color: colors.textSecondary }]}>Add Remote Server</Text>
             </TouchableOpacity>
-            {onBrowseModels && (
+            {!!onBrowseModels && (
               <TouchableOpacity style={[localStyles.actionButton, { borderColor: colors.primary }]} onPress={onBrowseModels}>
                 <Icon name="download" size={14} color={colors.primary} />
                 <Text style={[localStyles.actionButtonText, { color: colors.primary }]}>Browse Models</Text>
@@ -116,18 +116,16 @@ export const TextTab: React.FC<TextTabProps> = ({
                         <Text style={styles.modelQuant}>{model.quantization}</Text>
                       </>
                     )}
-                    {model.engine === 'llama' && model.isVisionModel && (
-                      <>
+                    {model.engine === 'llama' && !!model.isVisionModel && <>
                         <Text style={styles.metaSeparator}>•</Text>
                         <View style={styles.visionBadge}>
                           <Icon name="eye" size={10} color={colors.info} />
                           <Text style={styles.visionBadgeText}>Vision</Text>
                         </View>
-                      </>
-                    )}
+                      </>}
                   </View>
                 </View>
-                {isCurrent && (
+                {!!isCurrent && (
                   <View style={styles.checkmark}>
                     <Icon name="check" size={16} color={colors.background} />
                   </View>
@@ -160,29 +158,25 @@ export const TextTab: React.FC<TextTabProps> = ({
                   </Text>
                   <View style={styles.modelMeta}>
                     <Text style={styles.remoteBadge}>Remote</Text>
-                    {model.capabilities.supportsVision && (
-                      <>
+                    {!!model.capabilities.supportsVision && <>
                         <Text style={styles.metaSeparator}>•</Text>
                         <View style={styles.visionBadge}>
                           <Icon name="eye" size={10} color={colors.info} />
                           <Text style={styles.visionBadgeText}>Vision</Text>
                         </View>
-                      </>
-                    )}
+                      </>}
                     <Text style={styles.metaSeparator}>•</Text>
                     <RemoteToolsToggle model={model} />
-                    {model.capabilities.supportsThinking && (
-                      <>
+                    {!!model.capabilities.supportsThinking && <>
                         <Text style={styles.metaSeparator}>•</Text>
                         <View style={styles.thinkingBadge}>
                           <Icon name="zap" size={10} color="#8B5CF6" />
                           <Text style={styles.thinkingBadgeText}>Thinking</Text>
                         </View>
-                      </>
-                    )}
+                      </>}
                   </View>
                 </View>
-                {isCurrent && (
+                {!!isCurrent && (
                   <View style={styles.checkmarkRemote}>
                     <Icon name="check" size={16} color={colors.background} />
                   </View>

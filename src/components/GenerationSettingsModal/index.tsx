@@ -148,7 +148,7 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
           activeProjectName={activeProjectName}
         />
 
-        {onMemoryEnabledChange && (
+        {!!onMemoryEnabledChange && (
           <View testID="chat-memory-section">
             <View testID="chat-memory-control-row" style={styles.memoryControlRow}>
               <Icon name="bookmark" size={16} color={colors.textSecondary} />
@@ -170,7 +170,7 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
               />
             </View>
 
-            {showManageMemory && (
+            {!!showManageMemory && (
               <TouchableOpacity
                 testID="chat-manage-memory-row"
                 style={styles.actionRow}
@@ -200,7 +200,7 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
             color={colors.textMuted}
           />
         </TouchableOpacity>
-        {imageSettingsOpen && <ImageGenerationSection />}
+        {!!imageSettingsOpen && <ImageGenerationSection />}
 
         {/* TEXT GENERATION SETTINGS */}
         <TouchableOpacity
@@ -215,9 +215,8 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
             color={colors.textMuted}
           />
         </TouchableOpacity>
-        {textSettingsOpen && (
-          <>
-            {isRemote && (
+        {!!textSettingsOpen && <>
+            {!!isRemote && (
               <View style={styles.remoteNotice}>
                 <Icon name="info" size={13} color={colors.textMuted} />
                 <Text style={styles.remoteNoticeText}>
@@ -226,12 +225,10 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
               </View>
             )}
             <TextGenerationSection />
-          </>
-        )}
+          </>}
 
         {/* TTS SETTINGS (pro audio feature) */}
-        {TtsSection && (
-          <>
+        {!!TtsSection && <>
             <TouchableOpacity
               style={styles.accordionHeader}
               onPress={() => setTtsSettingsOpen(!ttsSettingsOpen)}
@@ -244,11 +241,8 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
                 color={colors.textMuted}
               />
             </TouchableOpacity>
-            {ttsSettingsOpen && (
-              <TtsSection onNavigateToTTSSettings={onOpenTTSSettings} />
-            )}
-          </>
-        )}
+            {!!ttsSettingsOpen && <TtsSection onNavigateToTTSSettings={onOpenTTSSettings} />}
+          </>}
 
         <TouchableOpacity style={styles.resetButton} onPress={handleResetDefaults}>
           <Text style={styles.resetButtonText}>Reset to Defaults</Text>

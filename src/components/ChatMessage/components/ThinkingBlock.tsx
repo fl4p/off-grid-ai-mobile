@@ -46,7 +46,7 @@ export function ThinkingBlock({
           {showThinking ? '▼' : '▶'}
         </Text>
       </TouchableOpacity>
-      {showThinking && parsedContent.thinking != null && (
+      {!!showThinking && parsedContent.thinking != null && (
         <View testID="thinking-block-content" style={styles.thinkingBlockContent}>
           <MarkdownText dimmed>{parsedContent.thinking}</MarkdownText>
         </View>

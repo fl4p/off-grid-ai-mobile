@@ -135,7 +135,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <Text style={styles.title}>Off Grid</Text>
-              {showIcon && <PulsatingIcon onPress={openSheet} />}
+              {!!showIcon && <PulsatingIcon onPress={openSheet} />}
             </View>
             <TouchableOpacity onPress={() => navigation.navigate('ProDetail')} hitSlop={8} style={styles.crownButton}>
               <IconMC name="crown" size={16} color={colors.primary} />

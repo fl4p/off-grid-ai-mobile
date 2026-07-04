@@ -33,6 +33,12 @@ module.exports = {
     'max-lines-per-function': ['error', 350],
     'max-lines': ['error', 500],
     'max-params': ['error', 3],
+    // React
+    // Guards against `cond && <JSX>` where cond is a number/string: a falsy 0 (or '')
+    // renders a bare text node outside <Text>, which crashes the real RN renderer (the
+    // download-speed `downloadSpeed && …` crash). Require an explicit `!!()` or ternary.
+    'react/jsx-no-leaked-render': ['error', { validStrategies: ['coerce', 'ternary'] }],
+
     // React hooks
     'react-hooks/rules-of-hooks': 'error',
     'react-hooks/exhaustive-deps': 'warn',

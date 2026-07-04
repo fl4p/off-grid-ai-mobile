@@ -64,7 +64,7 @@ const ImageModelCardItem: React.FC<ImageModelCardProps> = ({
   const variantSuffix = model.variant ? ` \u00B7 ${getVariantLabel(model.variant)}` : '';
   return (
     <View>
-      {recommended && (
+      {!!recommended && (
         <View style={styles.recommendedBadge}>
           <Text style={styles.recommendedBadgeText}>RECOMMENDED</Text>
         </View>
@@ -163,7 +163,7 @@ const ImageModelsScrollContent: React.FC<ScrollContentProps> = ({
   return (
     <ScrollView keyboardShouldPersistTaps="handled">
       <View style={styles.imageModelsList}>
-        {showRecHint && showRecommendedOnly && (
+        {!!showRecHint && !!showRecommendedOnly && (
           <TouchableOpacity style={styles.recHint} onPress={() => setShowRecHint(false)} activeOpacity={0.7}>
             <Icon name="info" size={11} color={colors.primary} />
             <Text style={styles.recHintText}>
@@ -174,12 +174,10 @@ const ImageModelsScrollContent: React.FC<ScrollContentProps> = ({
 
         <View style={styles.deviceBanner}>
           <Text style={styles.deviceBannerText}>{Math.round(ramGB)}GB RAM — {imageRecommendation}</Text>
-          {imageRec?.warning && (
-            <Text style={[styles.deviceBannerText, styles.deviceBannerWarning]}>{imageRec.warning}</Text>
-          )}
+          {!!imageRec?.warning && <Text style={[styles.deviceBannerText, styles.deviceBannerWarning]}>{imageRec.warning}</Text>}
         </View>
 
-        {imageFiltersVisible && (
+        {!!imageFiltersVisible && (
           <ImageFilterBar
             backendFilter={backendFilter}
             setBackendFilter={setBackendFilter}
@@ -195,14 +193,14 @@ const ImageModelsScrollContent: React.FC<ScrollContentProps> = ({
           />
         )}
 
-        {hfModelsLoading && (
+        {!!hfModelsLoading && (
           <View style={styles.hfLoadingContainer}>
             <ActivityIndicator size="small" color={colors.primary} />
             <Text style={styles.loadingText}>Loading models...</Text>
           </View>
         )}
 
-        {hfModelsError && !hfModelsLoading && (
+        {!!hfModelsError && !hfModelsLoading && (
           <View style={styles.hfErrorContainer}>
             <Text style={styles.hfErrorText}>{hfModelsError}</Text>
             <TouchableOpacity style={styles.retryButton} onPress={() => loadHFModels(true)}>
@@ -289,7 +287,7 @@ export const ImageModelsTab: React.FC<Props> = ({
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           >
             <Icon name="sliders" size={14} color={(imageFiltersVisible || hasActiveImageFilters) ? colors.primary : colors.textMuted} />
-            {hasActiveImageFilters && <View style={styles.filterDot} />}
+            {!!hasActiveImageFilters && <View style={styles.filterDot} />}
           </TouchableOpacity>
         </View>
       </View>

@@ -17,6 +17,7 @@ import { createStyles } from './ProjectDetailScreen.styles';
 import { useChatStore, useProjectStore, useAppStore } from '../stores';
 import { useNewChatModel } from '../hooks/useActiveTextModel';
 import { Conversation } from '../types';
+import { getLastVisibleMessage } from '../utils/messageContent';
 import { RootStackParamList } from '../navigation/types';
 import { KnowledgeBaseSection } from './ProjectDetailKnowledgeBaseSection';
 import { ProjectDetailMemorySection } from './ProjectDetailMemorySection';
@@ -120,7 +121,7 @@ export const ProjectDetailScreen: React.FC = () => {
   );
 
   const renderChat = ({ item }: { item: Conversation }) => {
-    const lastMessage = item.messages[item.messages.length - 1];
+    const lastMessage = getLastVisibleMessage(item.messages);
 
     return (
       <Swipeable
@@ -142,7 +143,7 @@ export const ProjectDetailScreen: React.FC = () => {
               </Text>
               <Text style={styles.chatDate}>{formatDate(item.updatedAt)}</Text>
             </View>
-            {lastMessage && (
+            {!!lastMessage && (
               <Text style={styles.chatPreview} numberOfLines={1}>
                 {lastMessage.role === 'user' ? 'You: ' : ''}{lastMessage.content}
               </Text>
@@ -247,7 +248,7 @@ export const ProjectDetailScreen: React.FC = () => {
               <View style={styles.emptyState}>
                 <Icon name="message-circle" size={24} color={colors.textMuted} />
                 <Text style={styles.emptyStateText}>No chats yet</Text>
-                {hasModels && (
+                {!!hasModels && (
                   <Button
                     title="Start a Chat"
                     variant="primary"

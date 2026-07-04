@@ -8,6 +8,7 @@ import { createStyles } from '../styles';
 import { Conversation, DownloadedModel, RemoteModel } from '../../../types';
 import { resolveConversationModelName } from '../../conversationModelLabel';
 import { useProjectStore } from '../../../stores';
+import { getLastVisibleMessage } from '../../../utils/messageContent';
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
@@ -94,31 +95,26 @@ export const RecentConversations: React.FC<Props> = ({
                     {formatDate(conv.updatedAt)}
                   </Text>
                 </View>
-                {conv.messages.length > 0 && (() => {
-                  const lastMsg = conv.messages[conv.messages.length - 1];
+                {(() => {
+                  const lastMsg = getLastVisibleMessage(conv.messages);
+                  if (!lastMsg) return null;
                   return (
                     <Text style={styles.conversationPreview} numberOfLines={1}>
                       {lastMsg.role === 'user' ? 'You: ' : ''}{lastMsg.content}
                     </Text>
                   );
                 })()}
-                {(modelName || projectName) && (
+                {!!(modelName || projectName) && (
                   <View style={styles.conversationModelRow}>
-                    {modelName && (
-                      <>
+                    {!!modelName && <>
                         <Icon name="layers" size={10} color={colors.textMuted} style={styles.conversationModelIcon} />
                         <Text style={styles.conversationModelName} numberOfLines={1}>{modelName}</Text>
-                      </>
-                    )}
-                    {modelName && projectName && (
-                      <Text style={styles.conversationMetaSeparator}>·</Text>
-                    )}
-                    {projectName && (
-                      <>
+                      </>}
+                    {!!modelName && !!projectName && <Text style={styles.conversationMetaSeparator}>·</Text>}
+                    {!!projectName && <>
                         <Icon name="folder" size={10} color={colors.primary} style={styles.conversationProjectIcon} />
                         <Text style={styles.conversationProjectName} numberOfLines={1}>{projectName}</Text>
-                      </>
-                    )}
+                      </>}
                   </View>
                 )}
               </View>

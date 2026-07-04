@@ -61,7 +61,7 @@ export function ActionMenuSheet({
           <Text style={styles.actionSheetText}>Copy</Text>
         </AnimatedPressable>
 
-        {onSelectText && (
+        {!!onSelectText && (
           <AnimatedPressable
             testID="action-select-text"
             hapticType="selection"
@@ -73,7 +73,7 @@ export function ActionMenuSheet({
           </AnimatedPressable>
         )}
 
-        {onRemember && (
+        {!!onRemember && (
           <AnimatedPressable
             testID="action-remember"
             hapticType="selection"
@@ -85,7 +85,7 @@ export function ActionMenuSheet({
           </AnimatedPressable>
         )}
 
-        {isUser && canEdit && (
+        {!!isUser && !!canEdit && (
           <AnimatedPressable
             testID="action-edit"
             hapticType="selection"
@@ -97,7 +97,7 @@ export function ActionMenuSheet({
           </AnimatedPressable>
         )}
 
-        {canRetry && (
+        {!!canRetry && (
           <AnimatedPressable
             testID="action-retry"
             hapticType="selection"
@@ -111,7 +111,7 @@ export function ActionMenuSheet({
           </AnimatedPressable>
         )}
 
-        {canGenerateImage && (
+        {!!canGenerateImage && (
           <AnimatedPressable
             testID="action-generate-image"
             hapticType="selection"
@@ -123,7 +123,7 @@ export function ActionMenuSheet({
           </AnimatedPressable>
         )}
 
-        {!isUser && canSpeak && (
+        {!isUser && !!canSpeak && (
           <AnimatedPressable
             testID="action-speak"
             hapticType="selection"

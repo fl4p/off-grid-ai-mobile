@@ -353,6 +353,12 @@ class MemoryService {
     return changed;
   }
 
+  /** Number of active memories visible to a recall in this scope (project recalls include global). 0 means nothing to search. */
+  async getActiveMemoryCount(projectId?: string): Promise<number> {
+    await this.ensureReady();
+    return memoryDatabase.getActiveMemoryCount(projectId);
+  }
+
   async searchMemory(params: { projectId?: string; query: string; topK?: number }): Promise<MemorySearchResult[]> {
     await this.ensureReady();
     this.deleteDuplicateActiveMemories(params.projectId);

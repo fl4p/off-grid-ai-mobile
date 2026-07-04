@@ -103,7 +103,7 @@ export function MessageContent({
           return (
             <View testID="message-text">
               <MarkdownText>{parsedContent.response}</MarkdownText>
-              {isStreaming && <BlinkingCursor />}
+              {!!isStreaming && <BlinkingCursor />}
             </View>
           );
         }

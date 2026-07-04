@@ -91,7 +91,7 @@ export const SecuritySettingsScreen: React.FC = () => {
             />
           </View>
 
-          {authEnabled && (
+          {!!authEnabled && (
             <Button
               title="Change Passphrase"
               variant="primary"

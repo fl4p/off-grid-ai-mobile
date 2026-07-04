@@ -107,10 +107,10 @@ export const GalleryScreen: React.FC = () => {
         )}
       </View>
 
-      {imageGenState.isGenerating && (
+      {!!imageGenState.isGenerating && (
         <View style={styles.genBanner}>
           <View style={styles.genBannerRow}>
-            {imageGenState.previewPath && (
+            {!!imageGenState.previewPath && (
               <Image
                 source={{ uri: imageGenState.previewPath }}
                 style={styles.genPreview}
@@ -124,7 +124,7 @@ export const GalleryScreen: React.FC = () => {
               <Text style={styles.genBannerPrompt} numberOfLines={1}>
                 {imageGenState.prompt}
               </Text>
-              {imageGenState.progress && (
+              {!!imageGenState.progress && (
                 <View style={styles.genProgressBar}>
                   <View
                     style={[
@@ -135,7 +135,7 @@ export const GalleryScreen: React.FC = () => {
                 </View>
               )}
             </View>
-            {imageGenState.progress && (
+            {!!imageGenState.progress && (
               <Text style={styles.genSteps}>
                 {imageGenState.progress.step}/{imageGenState.progress.totalSteps}
               </Text>

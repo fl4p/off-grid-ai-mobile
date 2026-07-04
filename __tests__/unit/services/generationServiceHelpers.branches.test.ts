@@ -439,7 +439,10 @@ describe('generateRemoteWithToolsImpl', () => {
       }),
     ).rejects.toThrow('SSL handshake failed');
 
-    expect(updateServerHealth).toHaveBeenCalledWith('srv-7', false);
+    // A runToolLoop failure is not a reliable reachability signal (tool error, or a
+    // context error the caller recovers from via compaction) and nothing flips health
+    // back to healthy, so this path must NOT mark the server offline.
+    expect(updateServerHealth).not.toHaveBeenCalled();
     expect(svc.flushTimer).toBeNull();
     expect(svc.tokenBuffer).toBe('');
     expect(store.clearStreamingMessage).toHaveBeenCalled();

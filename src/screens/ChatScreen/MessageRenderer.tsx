@@ -88,7 +88,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
       onGenerateImage={onGenerateImage}
       onImagePress={onImagePress}
       onOpenHtml={onOpenHtml}
-      canGenerateImage={imageModelLoaded && !isStreaming && !isGeneratingImage}
+      canGenerateImage={!!imageModelLoaded && !isStreaming && !isGeneratingImage}
       showGenerationDetails={showGenerationDetails}
       animateEntry={animateEntry}
       metaExtra={ttsMeta}

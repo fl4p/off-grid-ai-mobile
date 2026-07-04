@@ -54,7 +54,7 @@ const ImageTabContent: React.FC<ImageTabProps> = ({ downloadedImageModels, activ
   }
   return (
     <>
-      {activeImageModelId && (
+      {!!activeImageModelId && (
         <TouchableOpacity style={[styles.unloadButton, localStyles.unloadButtonMargin]} onPress={onUnloadImageModel} disabled={loadingState.isLoading}>
           <Icon name="power" size={16} color={colors.error} />
           <Text style={styles.unloadButtonText}>Unload current model</Text>
@@ -217,11 +217,11 @@ export const ModelPickerSheet: React.FC<Props> = ({
                           <View style={styles.pickerItemInfo}>
                             <Text style={styles.pickerItemName}>
                               {model.name}{' '}
-                              {model.engine === 'llama' && model.isVisionModel && <Icon name="eye" size={14} color={colors.info} />}
+                              {model.engine === 'llama' && !!model.isVisionModel && <Icon name="eye" size={14} color={colors.info} />}
                             </Text>
                             <Text style={styles.pickerItemMeta}>
                               {model.quantization} · {hardwareService.formatModelSize(model)}
-                              {model.engine === 'llama' && model.isVisionModel && ' (Vision)'}
+                              {model.engine === 'llama' && model.isVisionModel ? ' (Vision)' : ''}
                             </Text>
                             <Text style={[styles.pickerItemMemory, !memoryFits && styles.pickerItemMemoryWarning]}>
                               ~{estimatedMemoryGB.toFixed(1)} GB RAM {!memoryFits && '(may not fit)'}
@@ -265,7 +265,7 @@ export const ModelPickerSheet: React.FC<Props> = ({
                             <Icon name="cloud" size={14} color={colors.primary} />
                           </Text>
                           <View style={localStyles.remoteMetaRow}>
-                            {(model.capabilities.supportsVision || model.capabilities.supportsThinking) && (
+                            {!!(model.capabilities.supportsVision || model.capabilities.supportsThinking) && (
                               <Text style={styles.pickerItemMeta}>
                                 {[model.capabilities.supportsVision && 'Vision', model.capabilities.supportsThinking && 'Thinking'].filter(Boolean).join(' · ')}
                               </Text>

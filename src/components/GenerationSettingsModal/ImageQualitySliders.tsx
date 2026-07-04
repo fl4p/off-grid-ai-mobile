@@ -92,7 +92,7 @@ export const ImageQualityAdvancedSliders: React.FC = () => {
           <Text style={styles.settingDescription}>
             Use GPU for faster image generation. First run may be slower while optimizing for your device.
           </Text>
-          {(settings.imageUseOpenCL ?? true) && <ClearGPUCacheButton />}
+          {!!(settings.imageUseOpenCL ?? true) && <ClearGPUCacheButton />}
         </View>
       )}
     </>

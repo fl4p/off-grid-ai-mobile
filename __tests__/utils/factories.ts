@@ -49,6 +49,8 @@ export interface MessageFactoryOptions {
   isStreaming?: boolean;
   isThinking?: boolean;
   isSystemInfo?: boolean;
+  isError?: boolean;
+  errorDetails?: string;
   attachments?: MediaAttachment[];
   generationTimeMs?: number;
   generationMeta?: GenerationMeta;
@@ -65,6 +67,8 @@ export const createMessage = (options: MessageFactoryOptions = {}): Message => (
   isStreaming: options.isStreaming,
   isThinking: options.isThinking,
   isSystemInfo: options.isSystemInfo,
+  isError: options.isError,
+  errorDetails: options.errorDetails,
   attachments: options.attachments,
   generationTimeMs: options.generationTimeMs,
   generationMeta: options.generationMeta,

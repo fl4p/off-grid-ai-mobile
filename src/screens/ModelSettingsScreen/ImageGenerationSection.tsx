@@ -69,7 +69,7 @@ const ImageGpuSection: React.FC = () => {
           thumbColor={isOpenCL ? colors.primary : colors.textMuted}
         />
       </View>
-      {isOpenCL && (
+      {!!isOpenCL && (
         <TouchableOpacity
           style={[styles.toggleRow, styles.clearCacheRow]}
           onPress={handleClearCache}
@@ -217,7 +217,7 @@ export const ImageGenerationSection: React.FC = () => {
 
       <AdvancedToggle isExpanded={showAdvanced} onPress={() => setShowAdvanced(!showAdvanced)} testID="image-advanced-toggle" />
 
-      {showAdvanced && <ImageAdvancedSection />}
+      {!!showAdvanced && <ImageAdvancedSection />}
     </Card>
   );
 };

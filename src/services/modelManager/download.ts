@@ -59,18 +59,89 @@ export async function performBackgroundDownload(opts: PerformBackgroundDownloadO
   });
 }
 
+const GGUF_MAGIC = 'GGUF';
+// Absolute floor, independent of any externally-supplied expectedSize (which can
+// be 0/undefined for downloads reconstructed on crash-restore). Mirrors the
+// MIN_GGUF_FILE_SIZE floor in llmSafetyChecks so a 0-byte/truncated stub can
+// never pass as a valid projector even when a short magic read is inconclusive.
+const MIN_MMPROJ_FILE_SIZE = 1024; // 1 KB
+
+async function hasGgufMagic(path: string): Promise<boolean | null> {
+  // Returns true if GGUF magic confirmed, false if confirmed invalid, null if
+  // the read is inconclusive. iOS RNFS.read has a known NSInteger bridging bug
+  // that can either throw or return a short/empty string; both are treated as
+  // inconclusive rather than invalid so we never destroy a valid file on a misread.
+  try {
+    const header = await RNFS.read(path, 4, 0, 'ascii');
+    if (header.length < GGUF_MAGIC.length) return null; // short/empty read — inconclusive
+    return header.startsWith(GGUF_MAGIC);
+  } catch {
+    return null;
+  }
+}
+
+// Read-only validity check: present, large enough, and not confirmed-corrupt.
+// A null (inconclusive) magic read counts as valid — llama.rn validates on load.
+// Never mutates the file, so it is safe to run against a possibly-shared target.
+async function mmProjFileValid(path: string, expectedSize?: number): Promise<boolean> {
+  try {
+    if (!(await RNFS.exists(path))) return false;
+    const stat = await RNFS.stat(path);
+    const actualSize = typeof stat.size === 'string' ? Number.parseInt(stat.size, 10) : stat.size;
+    // Absolute floor first, so a 0-byte/truncated stub is rejected even when
+    // expectedSize is unknown (0/undefined) and the magic read is inconclusive.
+    if (actualSize < MIN_MMPROJ_FILE_SIZE) return false;
+    if (expectedSize && actualSize < expectedSize) return false;
+    return (await hasGgufMagic(path)) !== false;
+  } catch {
+    return false;
+  }
+}
+
+// Shared recovery for a failed mmproj move (both the onComplete handler and the
+// catch-up guard hit this): a file may already sit at the target (a re-download,
+// or another model sharing the path). Validate it READ-ONLY — reuse if valid,
+// downgrade to text-only if not — and never delete, so a misread or a shared
+// file can't be destroyed here (llama.rn re-validates on load). Kept in one place
+// so the two call sites can't drift (the catch-up guard previously only checked
+// existence, silently keeping a corrupt sidecar).
+async function reconcileMmProjMoveFailure(
+  ctx: Extract<BackgroundDownloadContext, { mmProjCompleted: boolean }>,
+  moveErr: unknown,
+): Promise<void> {
+  const valid = ctx.mmProjLocalPath
+    ? await mmProjFileValid(ctx.mmProjLocalPath, ctx.file.mmProjFile?.size)
+    : false;
+  if (valid) {
+    logger.log('[ModelManager] mmproj move failed but existing target is valid, reusing:', moveErr);
+  } else {
+    logger.warn('[ModelManager] mmproj move failed and target invalid, continuing without vision:', moveErr);
+    ctx.mmProjLocalPath = null;
+  }
+}
+
+// Pre-download gate: a present-but-invalid file is deleted so it re-downloads clean.
+// (This path owns the file exclusively — unlike the move-failure recovery path,
+// which uses the read-only mmProjFileValid and never deletes.)
 async function checkMmProjExists(path: string | null, expectedSize?: number): Promise<boolean> {
   if (!path) return true;
   const exists = await RNFS.exists(path);
-  if (!exists || !expectedSize) return exists;
+  if (!exists) return false;
   try {
     const stat = await RNFS.stat(path);
     const actualSize = typeof stat.size === 'string' ? Number.parseInt(stat.size, 10) : stat.size;
-    if (actualSize < expectedSize) {
-      logger.warn(`[ModelManager] mmproj partial (${actualSize}/${expectedSize}), re-downloading`);
+    // Absolute floor first (expectedSize may be 0/undefined on crash-restore).
+    if (actualSize < MIN_MMPROJ_FILE_SIZE || (expectedSize && actualSize < expectedSize)) {
+      logger.warn(`[ModelManager] mmproj too small (${actualSize}/${expectedSize || MIN_MMPROJ_FILE_SIZE}), re-downloading`);
       await RNFS.unlink(path).catch(() => {});
       return false;
     }
+    if ((await hasGgufMagic(path)) === false) {
+      logger.warn(`[ModelManager] mmproj failed GGUF magic check, re-downloading: ${path}`);
+      await RNFS.unlink(path).catch(() => {});
+      return false;
+    }
+    // magic ok or inconclusive: accept — llama.rn validates on load.
     return true;
   } catch {
     await RNFS.unlink(path).catch(() => {});
@@ -533,11 +604,7 @@ export function watchBackgroundDownload(opts: WatchDownloadOpts): void {
       try {
         await backgroundDownloadService.moveCompletedDownload(event.downloadId, ctx.mmProjLocalPath!);
       } catch (moveErr) {
-        const targetExists = ctx.mmProjLocalPath ? await RNFS.exists(ctx.mmProjLocalPath) : false;
-        if (!targetExists) {
-          logger.warn('[ModelManager] mmproj move failed and target not found, continuing without vision:', moveErr);
-          ctx.mmProjLocalPath = null;
-        }
+        await reconcileMmProjMoveFailure(ctx, moveErr);
       }
       ctx.mmProjCompleted = true;
       await tryFinalize();
@@ -597,11 +664,7 @@ export function watchBackgroundDownload(opts: WatchDownloadOpts): void {
         try {
           await backgroundDownloadService.moveCompletedDownload(ctx.mmProjDownloadId!, ctx.mmProjLocalPath!);
         } catch (moveErr) {
-          const targetExists = ctx.mmProjLocalPath ? await RNFS.exists(ctx.mmProjLocalPath) : false;
-          if (!targetExists) {
-            logger.warn('[ModelManager] mmproj catch-up move failed, continuing without vision:', moveErr);
-            ctx.mmProjLocalPath = null;
-          }
+          await reconcileMmProjMoveFailure(ctx, moveErr);
         }
         ctx.mmProjCompleted = true;
         await tryFinalize();

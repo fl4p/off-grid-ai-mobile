@@ -13,6 +13,7 @@ import { MessageAttachments } from './components/MessageAttachments';
 import { MessageContent } from './components/MessageContent';
 import { GenerationMeta } from './components/GenerationMeta';
 import { MemoryRecallCollapsible } from './components/MemoryRecallCollapsible';
+import { ErrorMessage } from './components/ErrorMessage';
 import { ToolsSentCollapsible } from './components/ToolsSentCollapsible';
 import { ActionMenuSheet, EditSheet, SelectTextSheet } from './components/ActionMenuSheet';
 import { MarkdownText } from '../MarkdownText';
@@ -125,7 +126,7 @@ const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
         <Text style={styles.toolStatusText} numberOfLines={expanded ? undefined : 2} testID={`tool-result-label-${toolName || 'unknown'}`}>
           {toolLabel}{durationLabel}
         </Text>
-        {canExpand && (
+        {!!canExpand && (
           <Icon
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={12}
@@ -137,7 +138,7 @@ const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
       {!!attachments?.length && (
         <MessageAttachments attachments={attachments} isUser={false} onImagePress={onImagePress} styles={styles} colors={colors} />
       )}
-      {htmlPath && (
+      {!!htmlPath && (
         <TouchableOpacity
           style={styles.openHtmlButton}
           onPress={() => onOpenHtml?.(htmlPath)}
@@ -208,6 +209,7 @@ const ToolCallMessage: React.FC<{ message: Message; styles: any; colors: any }> 
   </View>
 );
 
+
 const SystemInfoMessage: React.FC<{
   content: string; styles: ReturnType<typeof createStyles>;
   alertState: AlertState; onCloseAlert: () => void;
@@ -240,7 +242,7 @@ const MessageMetaRow: React.FC<MetaRowProps> = ({ message, styles, isStreaming, 
       <Text style={styles.generationTime}>{formatDuration(message.generationTimeMs)}</Text>
     )}
     {metaExtra}
-    {showActions && !isStreaming && (
+    {!!showActions && !isStreaming && (
       <TouchableOpacity style={styles.actionHint} onPress={onMenuOpen}>
         <Text style={styles.actionHintText}>•••</Text>
       </TouchableOpacity>
@@ -260,7 +262,7 @@ const ToolCallWithThinking: React.FC<{
           <ThinkingBlock parsedContent={tc} showThinking={showThinking} onToggle={onToggle} styles={styles} />
         </View>
       )}
-      {hasText && (
+      {!!hasText && (
         <View testID="tool-call-pre-text" style={styles.toolCallPreText}>
           <MarkdownText>{tc!.response}</MarkdownText>
         </View>
@@ -388,6 +390,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     callHook(HOOKS.audioSpeak, displayContent, message.id);
   };
 
+  if (message.isError) {
+    return <ErrorMessage message={message} styles={styles} colors={colors} />;
+  }
   if (message.isSystemInfo) {
     return <SystemInfoMessage content={displayContent} styles={styles}
       alertState={alertState} onCloseAlert={() => setAlertState(hideAlert())} />;
@@ -409,7 +414,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       delayLongPress={300}
     >
       <View style={bubbleStyle}>
-        {hasAttachments && (
+        {!!hasAttachments && (
           <MessageAttachments
             attachments={message.attachments!}
             isUser={isUser}
@@ -443,9 +448,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         metaExtra={metaExtra}
       />
 
-      {showGenerationDetails && !isUser && message.generationMeta && (
-        <GenerationMeta generationMeta={message.generationMeta} styles={styles} />
-      )}
+      {!!showGenerationDetails && !isUser && !!message.generationMeta && <GenerationMeta generationMeta={message.generationMeta} styles={styles} />}
     </TouchableOpacity>
   );
 
@@ -459,7 +462,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         isUser={isUser}
         canEdit={!!onEdit}
         canRetry={!!onRetry}
-        canGenerateImage={canGenerateImage && !!onGenerateImage}
+        canGenerateImage={!!canGenerateImage && !!onGenerateImage}
         canSpeak={canSpeak}
         styles={styles}
         onCopy={handleCopy}

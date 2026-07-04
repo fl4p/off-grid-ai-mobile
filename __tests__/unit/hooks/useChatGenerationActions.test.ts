@@ -83,6 +83,7 @@ jest.mock('../../../src/services/rag', () => ({
   ragService: {
     searchProject: jest.fn(() => Promise.resolve({ chunks: [], truncated: false })),
     getDocumentsByProject: jest.fn(() => Promise.resolve([])),
+    getEnabledDocumentCount: jest.fn(() => Promise.resolve(1)),
   },
   retrievalService: { formatForPrompt: jest.fn(() => '<knowledge_base>mock RAG context</knowledge_base>') },
 }));
@@ -100,6 +101,7 @@ jest.mock('../../../src/services/memory', () => ({
     formatRecallSummaries: jest.fn(() => []),
     captureCandidateFromMessage: jest.fn(() => Promise.resolve(null)),
     captureMemoryFromMessage: jest.fn(() => Promise.resolve(null)),
+    getActiveMemoryCount: jest.fn(() => Promise.resolve(1)),
   },
 }));
 
@@ -490,14 +492,21 @@ describe('regenerateResponseFn', () => {
     expect(deps.generatingForConversationRef.current).toBeNull();
   });
 
-  it('shows alert when generateResponse throws', async () => {
+  it('adds an inline error message when regeneration throws (Issue #9/#11)', async () => {
     mockGenerateResponse.mockRejectedValueOnce(new Error('Server error'));
     const userMsg = { id: 'm1', role: 'user' as const, content: 'hi', timestamp: 0 };
     const deps = makeGenerationDeps({
       activeConversation: { id: 'conv-1', messages: [userMsg] },
     });
     await regenerateResponseFn(deps, { setDebugInfo: jest.fn(), userMessage: userMsg });
-    expect(deps.setAlertState).toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.setAlertState).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.addMessage).toHaveBeenCalledWith('conv-1', expect.objectContaining({
+      role: 'assistant',
+      isError: true,
+      isSystemInfo: true,
+      content: expect.stringContaining('Generation failed: Server error'),
+      errorDetails: expect.stringContaining('Request:'),
+    }));
   });
 });
 
@@ -1306,6 +1315,22 @@ describe('RAG context injection in startGenerationFn', () => {
     }));
   });
 
+  it('does NOT offer search_knowledge_base / search_memory when their stores are empty', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    (ragService.getEnabledDocumentCount as jest.Mock).mockResolvedValueOnce(0);
+    (memoryService.getActiveMemoryCount as jest.Mock).mockResolvedValueOnce(0);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    // Both project tools gated out (empty stores) -> no tools -> routes to plain generateResponse.
+    expect(mockGenerateWithTools).not.toHaveBeenCalled();
+    expect(mockGenerateResponse).toHaveBeenCalled();
+  });
+
   it('skips memory recall and tools when conversation memory is disabled', async () => {
     const conv = { id: 'conv-1', projectId: 'proj-1', memoryEnabled: false, messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
     mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
@@ -1705,12 +1730,34 @@ describe('generateWithCompactionRetry — context full error path', () => {
     mockCompact.mockResolvedValue([]);
   });
 
-  it('rethrows non-context-full errors', async () => {
+  it('adds an inline error message (with request details) for non-context-full errors', async () => {
+    // Issue #9/#11: a generic failure surfaces inline in the chat, not as a modal alert.
     mockGenerateResponse.mockRejectedValueOnce(new Error('GPU crashed'));
     mockIsContextFullError.mockReturnValue(false);
     const deps = makeGenerationDeps();
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
-    expect(deps.setAlertState).toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.setAlertState).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'Generation Error' }));
+    expect(deps.addMessage).toHaveBeenCalledWith('conv-1', expect.objectContaining({
+      role: 'assistant',
+      isError: true,
+      isSystemInfo: true,
+      content: expect.stringContaining('Generation failed: GPU crashed'),
+      errorDetails: expect.stringContaining('Request:'),
+    }));
+    expect(deps.generatingForConversationRef.current).toBeNull();
+  });
+
+  it('shows the actionable modal (not an inline error) when a context-full error survives compaction', async () => {
+    // Remote-style context error: matched by isContextFullError but none of the
+    // local llama.cpp substrings — must still get the Context-window-full modal.
+    mockGenerateResponse.mockRejectedValue(new Error('context length exceeded'));
+    mockIsContextFullError.mockReturnValue(true);
+    mockCompact.mockResolvedValue([{ id: 'system', role: 'system', content: 's', timestamp: 0 }]);
+    (llmService.stopGeneration as jest.Mock).mockResolvedValue(undefined);
+    const deps = makeGenerationDeps();
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
+    expect(deps.setAlertState).toHaveBeenCalledWith(expect.objectContaining({ title: 'Context window full', prominentMessage: true }));
+    expect(deps.addMessage).not.toHaveBeenCalledWith('conv-1', expect.objectContaining({ isError: true }));
   });
 
   it('retries with compacted messages on context full error', async () => {

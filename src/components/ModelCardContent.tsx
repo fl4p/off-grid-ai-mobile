@@ -93,7 +93,7 @@ export const CompactModelCardContent: React.FC<CompactModelCardContentProps> = (
           <View style={styles.authorTag}>
             <Text style={styles.authorTagText}>{model.author}</Text>
           </View>
-          {credibilityInfo && (
+          {!!credibilityInfo && (
             <View style={[styles.credibilityBadge, { backgroundColor: `${credibilityInfo.color}25` }]}>
               {credibility?.source === 'lmstudio' && (
                 <Text style={[styles.credibilityIcon, { color: credibilityInfo.color }]}>★</Text>
@@ -103,8 +103,8 @@ export const CompactModelCardContent: React.FC<CompactModelCardContentProps> = (
               </Text>
             </View>
           )}
-          {(isTrending || recommended) && <MaterialIcon name="whatshot" size={14} color={colors.trending} />}
-          {recommended && (
+          {!!(isTrending || recommended) && <MaterialIcon name="whatshot" size={14} color={colors.trending} />}
+          {!!recommended && (
             <View style={styles.recommendedPill}>
               <Text style={styles.recommendedPillText}>{recommended.pillLabel ?? 'Recommended'}</Text>
             </View>
@@ -116,7 +116,7 @@ export const CompactModelCardContent: React.FC<CompactModelCardContentProps> = (
           </View>
         )}
       </View>
-      {model.description && !recommended?.highlightText && (
+      {!!model.description && !recommended?.highlightText && (
         <Text style={styles.descriptionCompact} numberOfLines={1}>
           {model.description}
         </Text>
@@ -131,28 +131,26 @@ export const CompactModelCardContent: React.FC<CompactModelCardContentProps> = (
         </View>
       ) : (model.modelType || model.paramCount) && (
         <View style={[styles.infoRow, styles.infoRowCompact]}>
-          {model.modelType && (
+          {!!model.modelType && (
             <View style={[styles.infoBadge, modelTypeBadgeStyle(styles, model.modelType)]}>
               <Text style={[styles.infoText, modelTypeTextStyle(styles, model.modelType)]}>
                 {modelTypeLabel(model.modelType)}
               </Text>
             </View>
           )}
-          {model.paramCount && (
+          {!!model.paramCount && (
             <View style={styles.infoBadge}>
               <Text style={styles.infoText}>{model.paramCount}B params</Text>
             </View>
           )}
-          {model.minRamGB && (
+          {!!model.minRamGB && (
             <View style={styles.infoBadge}>
               <Text style={styles.infoText}>{model.minRamGB}GB+ RAM</Text>
             </View>
           )}
         </View>
       )}
-      {recommended?.highlightText && (
-        <Text style={styles.recommendedHighlightCompact}>{recommended.highlightText}</Text>
-      )}
+      {!!recommended?.highlightText && <Text style={styles.recommendedHighlightCompact}>{recommended.highlightText}</Text>}
     </>
   );
 };
@@ -188,7 +186,7 @@ export const StandardModelCardContent: React.FC<StandardModelCardContentProps> =
         <View style={styles.authorTag}>
           <Text style={styles.authorTagText}>{model.author}</Text>
         </View>
-        {credibilityInfo && (
+        {!!credibilityInfo && (
           <View style={[styles.credibilityBadge, { backgroundColor: `${credibilityInfo.color}25` }]}>
             {credibility?.source === 'lmstudio' && (
               <Text style={[styles.credibilityIcon, { color: credibilityInfo.color }]}>★</Text>
@@ -204,28 +202,24 @@ export const StandardModelCardContent: React.FC<StandardModelCardContentProps> =
             </Text>
           </View>
         )}
-        {isActive && (
+        {!!isActive && (
           <View style={styles.activeBadge}>
             <Text style={styles.activeBadgeText}>Active</Text>
           </View>
         )}
-        {recommended && (
-          <>
+        {!!recommended && <>
             <MaterialIcon name="whatshot" size={14} color={colors.trending} />
             <View style={styles.recommendedPill}>
               <Text style={styles.recommendedPillText}>{recommended.pillLabel ?? 'Recommended'}</Text>
             </View>
-          </>
-        )}
+          </>}
       </View>
-      {model.description && (
+      {!!model.description && (
         <Text style={styles.description} numberOfLines={2}>
           {model.description}
         </Text>
       )}
-      {recommended?.highlightText && (
-        <Text style={styles.recommendedHighlight}>{recommended.highlightText}</Text>
-      )}
+      {!!recommended?.highlightText && <Text style={styles.recommendedHighlight}>{recommended.highlightText}</Text>}
     </>
   );
 };
@@ -264,7 +258,7 @@ export const ModelInfoBadges: React.FC<ModelInfoBadgesProps> = ({
           <Text style={styles.infoText}>{huggingFaceService.formatFileSize(fileSize)}</Text>
         </View>
       )}
-      {sizeRange && (
+      {!!sizeRange && (
         <View style={[styles.infoBadge, styles.sizeBadge]}>
           <Text style={styles.infoText}>
             {sizeRange.min === sizeRange.max
@@ -273,7 +267,7 @@ export const ModelInfoBadges: React.FC<ModelInfoBadgesProps> = ({
           </Text>
         </View>
       )}
-      {sizeRange && (
+      {!!sizeRange && (
         <View style={styles.infoBadge}>
           <Text style={styles.infoText}>
             {sizeRange.count} {sizeRange.count === 1 ? 'file' : 'files'}
@@ -293,17 +287,17 @@ export const ModelInfoBadges: React.FC<ModelInfoBadgesProps> = ({
       )}
       {/* Quality chip stays gated on quantInfo so we don't render a phantom
           second chip for non-llama quant strings. */}
-      {quantInfo && (
+      {!!quantInfo && (
         <View style={styles.infoBadge}>
           <Text style={styles.infoText}>{quantInfo.quality}</Text>
         </View>
       )}
-      {isVisionModel && !needsRepair && (
+      {!!isVisionModel && !needsRepair && (
         <View style={styles.visionBadge}>
           <Text style={styles.visionText}>Vision</Text>
         </View>
       )}
-      {isVisionModel && needsRepair && (
+      {!!isVisionModel && !!needsRepair && (
         <View style={styles.warningBadge}>
           <Text style={styles.warningText}>{isRepairingVision ? 'Repairing...' : 'Needs repair'}</Text>
         </View>
@@ -368,8 +362,8 @@ function DownloadedActions({ isActive, testID, colors, styles, onSelect, onDelet
       ) : (
         onRepairVision && <ActionButton icon="eye" color={colors.warning} haptic="impactLight" onPress={onRepairVision} testID={tid('repair-vision')} styles={styles} />
       )}
-      {!isActive && onSelect && <ActionButton icon="check-circle" color={colors.primary} haptic="selection" onPress={onSelect} styles={styles} />}
-      {onDelete && <ActionButton icon="trash-2" color={colors.error} haptic="notificationWarning" onPress={onDelete} styles={styles} />}
+      {!isActive && !!onSelect && <ActionButton icon="check-circle" color={colors.primary} haptic="selection" onPress={onSelect} styles={styles} />}
+      {!!onDelete && <ActionButton icon="trash-2" color={colors.error} haptic="notificationWarning" onPress={onDelete} styles={styles} />}
     </>
   );
 }

@@ -60,10 +60,8 @@ export const ServerCard: React.FC<{
             {serverType} · {modelCount > 0 ? `${modelCount} model${modelCount !== 1 ? 's' : ''}` : 'Tap to connect'}
           </Text>
         </View>
-        {isConnecting && (
-          <ActivityIndicator size="small" color={colors.primary} />
-        )}
-        {!isConnecting && isConnected && (
+        {!!isConnecting && <ActivityIndicator size="small" color={colors.primary} />}
+        {!isConnecting && !!isConnected && (
           <View style={[styles.connectedBadge, { backgroundColor: `${colors.success}20`, borderColor: colors.success }]} testID={`discovered-server-${server.id}-connected`}>
             <Text style={[styles.connectButtonText, { color: colors.success }]}>Connected</Text>
           </View>
@@ -102,14 +100,14 @@ export const NetworkSection: React.FC<{
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Network Models</Text>
 
-      {isCheckingNetwork && !hasServers && (
+      {!!isCheckingNetwork && !hasServers && (
         <View style={styles.scanningRow}>
           <ActivityIndicator size="small" color={colors.textSecondary} />
           <Text style={styles.scanningText}>Scanning your network...</Text>
         </View>
       )}
 
-      {hasServers && servers.map((server) => (
+      {!!hasServers && servers.map((server) => (
         <ServerCard
           key={server.id}
           server={server}

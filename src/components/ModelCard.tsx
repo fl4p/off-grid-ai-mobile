@@ -94,7 +94,7 @@ const DownloadProgressSection: React.FC<{
       </View>
       <Text style={[styles.progressText, tight && styles.progressTextTight]}>{Math.round(progress * 100)}%</Text>
     </View>
-    {bytes && bytes.total > 0 && (
+    {!!bytes && bytes.total > 0 && (
       <Text style={styles.progressBytesText}>
         {formatBytes(bytes.downloaded)} / {formatBytes(bytes.total)}
         {speedText ? `  \u00B7  ${speedText}` : ''}
@@ -247,10 +247,8 @@ export const ModelCard: React.FC<ModelCardProps> = ({
             </View>
           )}
 
-          {isDownloading && (
-            <DownloadProgressSection progress={downloadProgress} bytes={downloadBytes} speed={downloadSpeed} tight={!!recommended} />
-          )}
-          {failedState && (
+          {!!isDownloading && <DownloadProgressSection progress={downloadProgress} bytes={downloadBytes} speed={downloadSpeed} tight={!!recommended} />}
+          {!!failedState && (
             <FailedSection
               errorMessage={failedState.errorMessage}
               bytesDownloaded={failedState.bytesDownloaded}

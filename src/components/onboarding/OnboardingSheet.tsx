@@ -88,9 +88,7 @@ const ChecklistRow: React.FC<ChecklistRowProps> = ({
           ]}
         >
           <Animated.View style={{ transform: [{ scale: checkScale }] }}>
-            {step.completed && (
-              <Icon name="check" size={10} color={theme.checkmarkColor} />
-            )}
+            {!!step.completed && <Icon name="check" size={10} color={theme.checkmarkColor} />}
           </Animated.View>
         </Animated.View>
 
@@ -108,7 +106,7 @@ const ChecklistRow: React.FC<ChecklistRowProps> = ({
           >
             {step.title}
           </Text>
-          {step.subtitle && (
+          {!!step.subtitle && (
             <Text style={[styles.subtitle, { color: colors.textMuted }]}>
               {step.subtitle}
             </Text>

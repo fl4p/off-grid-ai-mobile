@@ -87,7 +87,7 @@ const LiteRTTextSettings: React.FC = () => {
       <ShowGenerationDetailsToggle />
 
       <AdvancedToggle isExpanded={showAdvanced} onPress={() => setShowAdvanced(!showAdvanced)} testID="text-advanced-toggle" />
-      {showAdvanced && <LiteRTTextGenerationAdvanced />}
+      {!!showAdvanced && <LiteRTTextGenerationAdvanced />}
     </Card>
   );
 };
@@ -147,7 +147,7 @@ const LlamaTextSettings: React.FC = () => {
       <ShowGenerationDetailsToggle />
 
       <AdvancedToggle isExpanded={showAdvanced} onPress={() => setShowAdvanced(!showAdvanced)} testID="text-advanced-toggle" />
-      {showAdvanced && <TextGenerationAdvanced />}
+      {!!showAdvanced && <TextGenerationAdvanced />}
     </Card>
   );
 };

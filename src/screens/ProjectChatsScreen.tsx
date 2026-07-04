@@ -19,6 +19,7 @@ import { TYPOGRAPHY, SPACING } from '../constants';
 import { useChatStore, useProjectStore, useAppStore } from '../stores';
 import { useNewChatModel } from '../hooks/useActiveTextModel';
 import { Conversation } from '../types';
+import { getLastVisibleMessage } from '../utils/messageContent';
 import { RootStackParamList } from '../navigation/types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -221,7 +222,7 @@ export const ProjectChatsScreen: React.FC = () => {
   );
 
   const renderChat = ({ item }: { item: Conversation }) => {
-    const lastMessage = item.messages[item.messages.length - 1];
+    const lastMessage = getLastVisibleMessage(item.messages);
 
     return (
       <Swipeable
@@ -243,7 +244,7 @@ export const ProjectChatsScreen: React.FC = () => {
               </Text>
               <Text style={styles.chatDate}>{formatDate(item.updatedAt)}</Text>
             </View>
-            {lastMessage && (
+            {!!lastMessage && (
               <Text style={styles.chatPreview} numberOfLines={1}>
                 {lastMessage.role === 'user' ? 'You: ' : ''}{lastMessage.content}
               </Text>
@@ -282,7 +283,7 @@ export const ProjectChatsScreen: React.FC = () => {
               ? 'Start a new conversation for this project.'
               : 'Download a model to start chatting.'}
           </Text>
-          {hasModels && (
+          {!!hasModels && (
             <Button
               title="New Chat"
               variant="primary"

@@ -297,6 +297,23 @@ class MemoryDatabase {
     return rows.length > 0 ? toMemoryItem(rows[0]) : null;
   }
 
+  getActiveMemoryCount(projectId?: string): number {
+    const db = this.getDb();
+    // Mirror getActiveMemories' scope filter: a project recall unions global memories.
+    const result = projectId
+      ? db.executeSync(
+        `SELECT COUNT(*) as count FROM memory_items
+         WHERE status = 'active' AND (scope = 'global' OR (scope = 'project' AND project_id = ?))`,
+        [projectId]
+      )
+      : db.executeSync(
+        `SELECT COUNT(*) as count FROM memory_items
+         WHERE status = 'active' AND scope = 'global'`
+      );
+    const rows = (result.rows ?? []) as unknown as { count: number }[];
+    return rows.length > 0 ? rows[0].count : 0;
+  }
+
   getEmbeddingsForRecall(projectId?: string): StoredMemoryEmbedding[] {
     const db = this.getDb();
     const result = projectId

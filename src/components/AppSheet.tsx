@@ -310,7 +310,7 @@ export const AppSheet: React.FC<AppSheetProps> = ({
           ]}
         >
           {/* Handle — swipe target */}
-          {showHandle && (
+          {!!showHandle && (
             <View {...panResponder.panHandlers} style={styles.handleContainer}>
               <View
                 style={[
