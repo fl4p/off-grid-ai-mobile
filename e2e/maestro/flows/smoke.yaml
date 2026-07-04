@@ -1,0 +1,14 @@
+# Navigation smoke: the app launches, Home renders, and a chat opens.
+appId: ai.offgridmobile
+---
+- launchApp
+- assertVisible:
+    id: "home-screen"
+- assertVisible:
+    id: "new-chat-button"
+- tapOn:
+    id: "conversation-item-0"
+- assertVisible:
+    id: "chat-screen"
+- assertVisible:
+    id: "chat-input"
