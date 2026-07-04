@@ -5,13 +5,13 @@ import {
   TouchableOpacity,
   Modal,
   Image,
-  Switch,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AttachStep } from 'react-native-spotlight-tour';
 import { ModelSelectorModal } from '../../components';
 import { AnimatedEntry } from '../../components/AnimatedEntry';
+import { AnimatedToggle } from '../../components/AnimatedToggle';
 import { llmService } from '../../services';
 import { createStyles } from './styles';
 import { useTheme } from '../../theme';
@@ -148,7 +148,7 @@ export const EmptyChat: React.FC<{
       </View>
     </AnimatedEntry>
     <AnimatedEntry index={1} staggerMs={60}>
-      <Text style={styles.emptyChatTitle}>Start a Conversation</Text>
+      <Text style={styles.emptyChatTitle}>How can I help you?</Text>
     </AnimatedEntry>
     <AnimatedEntry index={2} staggerMs={60}>
       <Text style={styles.emptyChatText}>
@@ -182,17 +182,19 @@ export const EmptyChat: React.FC<{
           size={16}
           color={onlineToolsEnabled ? colors.primary : colors.textMuted}
         />
-        <Text style={styles.onlineToolsText}>
-          {onlineToolsEnabled
-            ? 'Online tools are on. The model can search the web and read links.'
-            : 'Online tools are off. Turn on to let the model search the web and read links.'}
-        </Text>
-        <Switch
+        <View style={styles.onlineToolsCopy}>
+          <Text style={styles.onlineToolsLabel}>Online tools</Text>
+          <Text style={styles.onlineToolsSubtext}>
+            {onlineToolsEnabled
+              ? 'The model can search the web and read links.'
+              : 'Off - turn on to let the model search the web and read links.'}
+          </Text>
+        </View>
+        <AnimatedToggle
           testID="empty-chat-online-tools-switch"
           value={!!onlineToolsEnabled}
-          onValueChange={v => updateSettings({ onlineToolsEnabled: v })}
-          trackColor={{ false: colors.border, true: `${colors.primary}80` }}
-          thumbColor={onlineToolsEnabled ? colors.primary : colors.textMuted}
+          onValueChange={(v: boolean) => updateSettings({ onlineToolsEnabled: v })}
+          accessibilityLabel={`Online tools ${onlineToolsEnabled ? 'on' : 'off'}`}
         />
       </View>
     </AnimatedEntry>

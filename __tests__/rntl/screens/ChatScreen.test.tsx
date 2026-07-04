@@ -803,10 +803,10 @@ describe('ChatScreen', () => {
   // Empty Chat State
   // ============================================================================
   describe('empty chat state', () => {
-    it('shows "Start a Conversation" for new chat', () => {
+    it('shows "How can I help you?" for new chat', () => {
       setupFullChat();
       const { getByText } = renderChatScreen();
-      expect(getByText('Start a Conversation')).toBeTruthy();
+      expect(getByText('How can I help you?')).toBeTruthy();
     });
 
     it('shows model name in empty chat message', () => {
@@ -937,7 +937,7 @@ describe('ChatScreen', () => {
       mockRoute.params = { conversationId };
 
       const { queryByText } = renderChatScreen();
-      expect(queryByText('Start a Conversation')).toBeNull();
+      expect(queryByText('How can I help you?')).toBeNull();
     });
   });
 
@@ -1126,7 +1126,7 @@ describe('ChatScreen', () => {
       // The ChatScreen will attempt to create a conversation in useEffect,
       // but if that fails, handleSend should show an alert
       const { getByText } = renderChatScreen();
-      expect(getByText('Start a Conversation')).toBeTruthy();
+      expect(getByText('How can I help you?')).toBeTruthy();
     });
 
     it('enqueues message when already generating', async () => {
@@ -2129,7 +2129,7 @@ describe('ChatScreen', () => {
       // The component attempts to load in useEffect, but since mock resolves immediately,
       // it quickly finishes. Instead, let's test the loading screen branch
       // by making loadModel hang.
-      expect(getByText('Start a Conversation')).toBeTruthy();
+      expect(getByText('How can I help you?')).toBeTruthy();
     });
   });
 

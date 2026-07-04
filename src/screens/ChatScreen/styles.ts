@@ -125,7 +125,9 @@ const createEmptyChatStyles = (colors: ThemeColors) => ({
     gap: SPACING.sm,
     maxWidth: 340,
   },
-  onlineToolsText: { ...TYPOGRAPHY.bodySmall, flex: 1, color: colors.textSecondary, lineHeight: 18 },
+  onlineToolsCopy: { flex: 1 },
+  onlineToolsLabel: { ...TYPOGRAPHY.body, color: colors.text },
+  onlineToolsSubtext: { ...TYPOGRAPHY.meta, color: colors.textMuted, lineHeight: 14, marginTop: 2 },
 });
 
 const createStateScreenStyles = (colors: ThemeColors) => ({
