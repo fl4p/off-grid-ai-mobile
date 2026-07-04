@@ -79,7 +79,7 @@ export async function handleRunPython(call: ToolCall, code: string): Promise<Pyt
 
   const sections: string[] = [];
   if (blockedInstall) {
-    sections.push(`[Online tools are off, so these PyPI packages were not installed: ${requestedPackages.join(', ')}. numpy, pandas and matplotlib work offline. Tell the user to enable online tools in Settings > Web Search to install packages.]`);
+    sections.push(`[Online tools are off, so these PyPI packages were not installed: ${requestedPackages.join(', ')}. numpy and pandas work offline. Tell the user to enable online tools in Settings > Web Search to install packages.]`);
   }
   if (res.stdout) sections.push(res.stdout);
   if (res.ok && res.result !== undefined && res.result !== '') sections.push(`[result] ${res.result}`);
