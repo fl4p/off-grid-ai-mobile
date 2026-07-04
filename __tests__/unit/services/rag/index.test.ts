@@ -5,6 +5,7 @@ jest.mock('../../../../src/services/rag/database', () => ({
     insertChunks: jest.fn(() => [1, 2]),
     deleteDocument: jest.fn(),
     getDocumentsByProject: jest.fn(() => []),
+    getEnabledDocumentCountByProject: jest.fn(() => 0),
     toggleEnabled: jest.fn(),
     getChunksByProject: jest.fn(() => []),
     getEmbeddingsByProject: jest.fn(() => []),
@@ -163,6 +164,20 @@ describe('RagService', () => {
 
       const docs = await ragService.getDocumentsByProject('proj1');
       expect(docs).toEqual(mockDocs);
+    });
+  });
+
+  describe('getEnabledDocumentCount', () => {
+    it('returns the enabled document count from the database', async () => {
+      mockDb.getEnabledDocumentCountByProject.mockReturnValue(2);
+      const count = await ragService.getEnabledDocumentCount('proj1');
+      expect(count).toBe(2);
+      expect(mockDb.getEnabledDocumentCountByProject).toHaveBeenCalledWith('proj1');
+    });
+
+    it('returns 0 when the knowledge base is empty', async () => {
+      mockDb.getEnabledDocumentCountByProject.mockReturnValue(0);
+      expect(await ragService.getEnabledDocumentCount('proj1')).toBe(0);
     });
   });
 

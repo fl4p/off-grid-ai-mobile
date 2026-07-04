@@ -243,6 +243,21 @@ describe('RAG Flow Integration', () => {
       expect(selectCalls[0][1]).toContain('proj-1');
     });
 
+    it('getEnabledDocumentCount reports the number of enabled docs (0 for an empty KB)', async () => {
+      mockExecuteSync.mockReturnValue({ rows: [{ count: 0 }] });
+      expect(await ragService.getEnabledDocumentCount('proj-1')).toBe(0);
+
+      mockExecuteSync.mockReturnValue({ rows: [{ count: 2 }] });
+      expect(await ragService.getEnabledDocumentCount('proj-1')).toBe(2);
+
+      // Query must be scoped to the project and only count enabled docs.
+      const countCall = mockExecuteSync.mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('COUNT(*)') && c[0].includes('enabled = 1')
+      );
+      expect(countCall).toBeDefined();
+      expect(countCall![1]).toEqual(['proj-1']);
+    });
+
     it('toggleDocument changes enabled state', async () => {
       await ragService.toggleDocument(1, false);
 

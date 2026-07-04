@@ -83,6 +83,7 @@ jest.mock('../../../src/services/rag', () => ({
   ragService: {
     searchProject: jest.fn(() => Promise.resolve({ chunks: [], truncated: false })),
     getDocumentsByProject: jest.fn(() => Promise.resolve([])),
+    getEnabledDocumentCount: jest.fn(() => Promise.resolve(1)),
   },
   retrievalService: { formatForPrompt: jest.fn(() => '<knowledge_base>mock RAG context</knowledge_base>') },
 }));
@@ -100,6 +101,7 @@ jest.mock('../../../src/services/memory', () => ({
     formatRecallSummaries: jest.fn(() => []),
     captureCandidateFromMessage: jest.fn(() => Promise.resolve(null)),
     captureMemoryFromMessage: jest.fn(() => Promise.resolve(null)),
+    getActiveMemoryCount: jest.fn(() => Promise.resolve(1)),
   },
 }));
 
@@ -1309,6 +1311,22 @@ describe('RAG context injection in startGenerationFn', () => {
     expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
       enabledToolIds: ['search_knowledge_base', 'search_memory'],
     }));
+  });
+
+  it('does NOT offer search_knowledge_base / search_memory when their stores are empty', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    (ragService.getEnabledDocumentCount as jest.Mock).mockResolvedValueOnce(0);
+    (memoryService.getActiveMemoryCount as jest.Mock).mockResolvedValueOnce(0);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    // Both project tools gated out (empty stores) -> no tools -> routes to plain generateResponse.
+    expect(mockGenerateWithTools).not.toHaveBeenCalled();
+    expect(mockGenerateResponse).toHaveBeenCalled();
   });
 
   it('skips memory recall and tools when conversation memory is disabled', async () => {
