@@ -1190,5 +1190,94 @@ describe('Parallel mmproj download', () => {
         mmProjFileName: 'mmproj.gguf',
       }));
     });
+
+    // Regression: the catch-up guard previously only checked existence, so a
+    // corrupt-but-present sidecar was silently kept as a vision projector. It
+    // now runs the same read-only validation as the onComplete handler.
+    it('catch-up: downgrades WITHOUT deleting when the already-present target is corrupt', async () => {
+      stubStartDownload(['42', '43']);
+      const completeCbs = captureCompleteCallbacks();
+      mockService.getActiveDownloads.mockResolvedValue([
+        { downloadId: '43', status: 'completed' } as any,
+      ]);
+      mockService.moveCompletedDownload.mockImplementation((id: string) =>
+        id === '43'
+          ? Promise.reject(new Error('catch-up move failed: target exists'))
+          : Promise.resolve(`${MODELS_DIR}/vision.gguf`),
+      );
+      const onComplete = jest.fn();
+
+      await performBackgroundDownload({
+        modelId: 'test/model',
+        file: visionFile(),
+        modelsDir: MODELS_DIR,
+        backgroundDownloadContext: bgContext,
+        backgroundDownloadMetadataCallback: metadataCallback,
+      });
+
+      // A corrupt file (bad GGUF magic, large enough to clear the size floor) already
+      // sits at the target when the catch-up move fails.
+      mockedRNFS.exists.mockResolvedValue(true);
+      mockedRNFS.stat.mockResolvedValue({ size: 500_000_000 } as any);
+      (mockedRNFS.read as jest.Mock).mockResolvedValue('XXXX');
+
+      watchBackgroundDownload({
+        downloadId: '42',
+        modelsDir: MODELS_DIR,
+        backgroundDownloadContext: bgContext,
+        backgroundDownloadMetadataCallback: metadataCallback,
+        onComplete,
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBeUndefined();
+      expect(mockedRNFS.unlink).not.toHaveBeenCalledWith(`${MODELS_DIR}/vision-mmproj.gguf`);
+    });
+
+    // Regression: with no expected size (0/undefined, as on crash-restore) the size
+    // check used to be skipped entirely, so a truncated stub with an inconclusive
+    // magic read passed as valid. The absolute floor now rejects it.
+    it('catch-up: rejects a sub-1KB stub even when expectedSize is unknown', async () => {
+      stubStartDownload(['42', '43']);
+      const completeCbs = captureCompleteCallbacks();
+      mockService.getActiveDownloads.mockResolvedValue([
+        { downloadId: '43', status: 'completed' } as any,
+      ]);
+      mockService.moveCompletedDownload.mockImplementation((id: string) =>
+        id === '43'
+          ? Promise.reject(new Error('catch-up move failed: target exists'))
+          : Promise.resolve(`${MODELS_DIR}/vision.gguf`),
+      );
+      const onComplete = jest.fn();
+
+      await performBackgroundDownload({
+        modelId: 'test/model',
+        file: visionFile(4_000_000_000, 0), // mmproj expected size unknown
+        modelsDir: MODELS_DIR,
+        backgroundDownloadContext: bgContext,
+        backgroundDownloadMetadataCallback: metadataCallback,
+      });
+
+      mockedRNFS.exists.mockResolvedValue(true);
+      mockedRNFS.stat.mockResolvedValue({ size: 100 } as any); // truncated stub
+      (mockedRNFS.read as jest.Mock).mockResolvedValue(''); // inconclusive read
+
+      watchBackgroundDownload({
+        downloadId: '42',
+        modelsDir: MODELS_DIR,
+        backgroundDownloadContext: bgContext,
+        backgroundDownloadMetadataCallback: metadataCallback,
+        onComplete,
+      });
+
+      await new Promise(resolve => setImmediate(resolve));
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBeUndefined();
+    });
   });
 });
