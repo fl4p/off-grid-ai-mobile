@@ -142,7 +142,7 @@ const DeviceMemoryCard: React.FC = () => {
         <Text style={styles.deviceValue}>{hardwareService.formatBytes(deviceInfo?.availableMemory || 0)}</Text>
       </View>
       <View style={styles.deviceInfo}>
-        <Text style={styles.deviceLabel}>Max Memory</Text>
+        <Text style={styles.deviceLabel}>Total RAM</Text>
         <Text style={styles.deviceValue}>{hardwareService.formatBytes(deviceInfo?.totalMemory || 0)}</Text>
       </View>
     </Card>
@@ -165,7 +165,14 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
 
-  const { setDeviceInfo, setModelRecommendation, addDownloadedModel, downloadedModels } = useAppStore();
+  // Narrow selectors, not a whole-store `useAppStore()` destructure: otherwise the
+  // 3s setDeviceInfo tick in DeviceMemoryCard produces a new store reference and
+  // re-renders this whole screen (and every model card) every 3s, defeating the
+  // point of isolating the poll in its own component.
+  const setDeviceInfo = useAppStore(s => s.setDeviceInfo);
+  const setModelRecommendation = useAppStore(s => s.setModelRecommendation);
+  const addDownloadedModel = useAppStore(s => s.addDownloadedModel);
+  const downloadedModels = useAppStore(s => s.downloadedModels);
   const storeDownloads = useDownloadStore(s => s.downloads);
   const servers = useRemoteServerStore((s) => s.servers);
   const discoveredModels = useRemoteServerStore((s) => s.discoveredModels);

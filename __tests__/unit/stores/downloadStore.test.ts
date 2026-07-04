@@ -170,6 +170,74 @@ describe('updateProgress', () => {
     expect(measured.downloadSpeed).toBeGreaterThan(3_500_000);
     expect(measured.downloadSpeed).toBeLessThan(4_500_000);
   });
+
+  // Helper: seed the anchor then establish a real ~4000 B/s reading. Returns the
+  // exact seeded speed (a few B/s off 4000 due to real Date.now jitter) so callers
+  // assert relative to it rather than to a brittle literal.
+  const KEY = 'author/model/model.gguf';
+  const seedRunningAt4000 = (): number => {
+    useDownloadStore.getState().add(makeEntry({ combinedTotalBytes: 100000 }));
+    useDownloadStore.getState().updateProgress('dl-1', 1000, 100000); // seed anchor
+    const e1 = useDownloadStore.getState().downloads[KEY];
+    useDownloadStore.setState({
+      downloads: { ...useDownloadStore.getState().downloads,
+        [KEY]: { ...e1, lastSpeedUpdate: e1.lastSpeedUpdate! - 1000 } },
+    });
+    useDownloadStore.getState().updateProgress('dl-1', 5000, 100000); // 4000 B in ~1000ms
+    const speed = useDownloadStore.getState().downloads[KEY].downloadSpeed!;
+    expect(speed).toBeGreaterThan(3900); // ~4000 modulo clock jitter
+    expect(speed).toBeLessThan(4100);
+    return speed;
+  };
+  const rewindAnchor = (ms: number) => {
+    const e = useDownloadStore.getState().downloads[KEY];
+    useDownloadStore.setState({
+      downloads: { ...useDownloadStore.getState().downloads, [KEY]: { ...e, lastSpeedUpdate: e.lastSpeedUpdate! - ms } },
+    });
+  };
+
+  // Regression: a vision GGUF's completion echo (onAnyComplete re-reports the
+  // same final byte count while the mmproj sidecar is still transferring) is
+  // routed via updateProgressBytesOnly, so it must NOT touch speed/anchor.
+  it('leaves speed untouched on an updateProgressBytesOnly completion echo', () => {
+    const seeded = seedRunningAt4000();
+    const anchorBefore = useDownloadStore.getState().downloads[KEY].speedAnchorBytes;
+    rewindAnchor(1000);
+    useDownloadStore.getState().updateProgressBytesOnly('dl-1', 5000, 100000); // echo
+    const e3 = useDownloadStore.getState().downloads[KEY];
+    expect(e3.downloadSpeed).toBe(seeded);              // unchanged
+    expect(e3.speedAnchorBytes).toBe(anchorBefore);     // anchor untouched
+  });
+
+  // A genuine stall (iOS re-polls the same byte count every 1.5s over a hung
+  // connection) DOES cross the window with a real updateProgress and must decay
+  // the EMA toward 0 (instantSpeed 0 blended in), not freeze the last rate.
+  it('decays speed toward 0 on a real zero-delta stall poll', () => {
+    const seeded = seedRunningAt4000();
+    rewindAnchor(1000);
+    useDownloadStore.getState().updateProgress('dl-1', 5000, 100000); // same bytes, real poll
+    const e3 = useDownloadStore.getState().downloads[KEY];
+    expect(e3.downloadSpeed).toBeCloseTo(seeded * 0.7, 5); // 0.7*prev + 0.3*0 — decaying
+  });
+
+  // Date.now() is not monotonic: a backward clock jump (NTP/manual) makes deltaMs
+  // negative. Without re-anchoring, the sub-window branch would be taken forever
+  // and freeze a stale rate. It must re-anchor to the current sample and hold.
+  it('re-anchors and holds speed when the wall clock jumps backward', () => {
+    useDownloadStore.getState().add(makeEntry({ combinedTotalBytes: 100000 }));
+    useDownloadStore.getState().updateProgress('dl-1', 1000, 100000);
+    const e1 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    const future = e1.lastSpeedUpdate! + 100000; // anchor set in the future
+    useDownloadStore.setState({
+      downloads: { ...useDownloadStore.getState().downloads,
+        'author/model/model.gguf': { ...e1, downloadSpeed: 3000, speedAnchorBytes: 1000, lastSpeedUpdate: future } },
+    });
+    useDownloadStore.getState().updateProgress('dl-1', 2000, 100000); // now - future < 0
+    const e2 = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(e2.downloadSpeed).toBe(3000);          // held, no garbage from negative deltaMs
+    expect(e2.speedAnchorBytes).toBe(2000);       // re-anchored to current bytes
+    expect(e2.lastSpeedUpdate!).toBeLessThan(future); // anchor time reset to ~now
+  });
 });
 
 describe('updateMmProjProgress', () => {

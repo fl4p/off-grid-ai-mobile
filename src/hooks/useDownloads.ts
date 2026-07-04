@@ -61,9 +61,11 @@ export function useDownloadListeners() {
         return;
       }
 
-      // gguf complete — if waiting on mmproj, don't mark complete yet
+      // gguf complete — if waiting on mmproj, don't mark complete yet. Use the
+      // bytes-only update: this is the final-byte echo, not live throughput, so
+      // it must not inject a 0 B/s sample while the mmproj sidecar streams on.
       if (entry.mmProjDownloadId && entry.mmProjStatus !== 'completed') {
-        useDownloadStore.getState().updateProgress(event.downloadId, event.bytesDownloaded, event.totalBytes);
+        useDownloadStore.getState().updateProgressBytesOnly(event.downloadId, event.bytesDownloaded, event.totalBytes);
         return;
       }
 
@@ -75,7 +77,7 @@ export function useDownloadListeners() {
       // Text model finalization (file move + model registration) is handled by
       // watchDownload callbacks in the download initiator. Don't mark complete here.
       if (entry.modelType === 'text') {
-        useDownloadStore.getState().updateProgress(event.downloadId, event.bytesDownloaded, event.totalBytes);
+        useDownloadStore.getState().updateProgressBytesOnly(event.downloadId, event.bytesDownloaded, event.totalBytes);
         return;
       }
 

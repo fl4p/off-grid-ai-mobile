@@ -25,6 +25,7 @@ let mockCancelDownload: jest.Mock;
 
 const mockGetState = jest.fn();
 const mockUpdateProgress = jest.fn();
+const mockUpdateProgressBytesOnly = jest.fn();
 const mockUpdateMmProjProgress = jest.fn();
 const mockSetStatus = jest.fn();
 const mockSetProcessing = jest.fn();
@@ -69,6 +70,7 @@ function makeStoreState(overrides: Partial<any> = {}) {
     downloadIdIndex: {},
     downloads: mockDownloads,
     updateProgress: mockUpdateProgress,
+    updateProgressBytesOnly: mockUpdateProgressBytesOnly,
     updateMmProjProgress: mockUpdateMmProjProgress,
     setStatus: mockSetStatus,
     setProcessing: mockSetProcessing,
@@ -212,11 +214,14 @@ describe('useDownloads', () => {
     expect(mockSetCompleted).not.toHaveBeenCalled();
   });
 
-  it('calls updateProgress when main gguf finishes but mmproj not yet done', () => {
+  it('calls updateProgressBytesOnly when main gguf finishes but mmproj not yet done', () => {
     withSingleTextEntry('dl-1', { mmProjDownloadId: 'mmproj-1', mmProjStatus: 'running' });
     renderHook(() => useDownloadListeners());
     act(() => { fireComplete({ downloadId: 'dl-1', bytesDownloaded: 1000, totalBytes: 1000 }); });
-    expect(mockUpdateProgress).toHaveBeenCalled();
+    // Bytes-only (not updateProgress) so the completion echo doesn't inject a 0 B/s
+    // sample into the speed EMA while the mmproj sidecar is still transferring.
+    expect(mockUpdateProgressBytesOnly).toHaveBeenCalled();
+    expect(mockUpdateProgress).not.toHaveBeenCalled();
     expect(mockSetCompleted).not.toHaveBeenCalled();
   });
 
@@ -231,11 +236,11 @@ describe('useDownloads', () => {
     expect(mockSetCompleted).not.toHaveBeenCalled();
   });
 
-  it('calls updateProgress for text model on complete (finalization handled elsewhere)', () => {
+  it('calls updateProgressBytesOnly for text model on complete (finalization handled elsewhere)', () => {
     withSingleTextEntry();
     renderHook(() => useDownloadListeners());
     act(() => { fireComplete({ downloadId: 'dl-1', bytesDownloaded: 1000, totalBytes: 1000 }); });
-    expect(mockUpdateProgress).toHaveBeenCalled();
+    expect(mockUpdateProgressBytesOnly).toHaveBeenCalled();
     expect(mockSetCompleted).not.toHaveBeenCalled();
   });
 
