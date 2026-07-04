@@ -390,6 +390,35 @@ describe('DownloadManagerScreen', () => {
     expect(getByText('3.0 MB/s')).toBeTruthy();
   });
 
+  // Regression: downloadSpeed is 0 on the first progress tick of every download.
+  // The guard used to be `item.downloadSpeed && ... && (...)`, which evaluates to
+  // the number 0 and renders a bare "0" text node outside a <Text> — a hard crash
+  // on the real RN renderer. With the `!!(...)` fix the speed row is simply hidden.
+  it('hides the speed row when downloadSpeed is 0', () => {
+    mockDownloadStoreDownloads = {
+      'author/model-id/model-file.gguf': {
+        modelKey: 'author/model-id/model-file.gguf',
+        downloadId: 'dl-1',
+        modelId: 'author/model-id',
+        fileName: 'model-file.gguf',
+        quantization: 'Q4_K_M',
+        modelType: 'text',
+        status: 'running',
+        bytesDownloaded: 1024,
+        totalBytes: 4 * 1024 * 1024 * 1024,
+        combinedTotalBytes: 4 * 1024 * 1024 * 1024,
+        progress: 0.01,
+        downloadSpeed: 0,
+        createdAt: Date.now(),
+        lastProgressAt: Date.now(),
+      },
+    };
+
+    const { getByText, queryByText } = render(<DownloadManagerScreen />);
+    expect(getByText('model-file.gguf')).toBeTruthy(); // renders without crashing
+    expect(queryByText(/\/s$/)).toBeNull(); // no speed row rendered at 0 B/s
+  });
+
   it('shows storage total when models exist', () => {
     setupSingleModelState({ modelOverrides: { fileSize: 1024 * 1024 * 1024 } }, 1024 * 1024 * 1024);
 

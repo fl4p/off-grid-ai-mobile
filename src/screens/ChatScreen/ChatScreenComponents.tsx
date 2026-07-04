@@ -66,6 +66,7 @@ export const NoModelScreen: React.FC<{
       isLoading={isModelLoading}
       currentModelPath={llmService.getLoadedModelPath()}
       onSelectionComplete={() => setShowModelSelector(false)}
+      onAddServer={() => navigation.navigate('RemoteServers')}
     />
   </SafeAreaView>
 );

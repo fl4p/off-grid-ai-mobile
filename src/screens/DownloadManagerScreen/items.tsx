@@ -122,7 +122,7 @@ export const ActiveDownloadCard: React.FC<ActiveDownloadCardProps> = ({ item, on
           <Text style={styles.progressText}>
             {formatBytes(item.bytesDownloaded)} / {formatBytes(item.fileSize)}
           </Text>
-          {item.downloadSpeed && item.downloadSpeed > 0 && item.status === 'running' && (
+          {!!(item.downloadSpeed && item.downloadSpeed > 0) && item.status === 'running' && (
             <Text style={styles.progressSpeedText}>{formatSpeed(item.downloadSpeed)}</Text>
           )}
         </View>
