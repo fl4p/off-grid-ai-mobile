@@ -185,7 +185,7 @@ export const EmptyChat: React.FC<{
           <Text style={styles.onlineToolsSubtext}>
             {onlineToolsEnabled
               ? 'The model can search the web and read links.'
-              : 'Off - turn on to let the model search the web and read links.'}
+              : 'The model cannot access the web.'}
           </Text>
         </View>
         <AnimatedToggle
