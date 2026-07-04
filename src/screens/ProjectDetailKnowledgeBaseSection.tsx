@@ -114,7 +114,7 @@ export const KnowledgeBaseSection: React.FC<KBSectionProps> = ({ projectId, colo
         </View>
       </TouchableOpacity>
 
-      {indexingFile && (
+      {!!indexingFile && (
         <View style={styles.kbIndexing}>
           <ActivityIndicator size="small" color={colors.primary} />
           <Text style={styles.kbIndexingText} numberOfLines={1}>Indexing {indexingFile}...</Text>

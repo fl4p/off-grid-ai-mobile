@@ -356,7 +356,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             >
               <View style={styles.iconWrapper}>
                 <Icon name="settings" size={18} color={disabled ? colors.textMuted : colors.textSecondary} />
-                {showSettingsDot && <View style={styles.toolWarningDot} />}
+                {!!showSettingsDot && <View style={styles.toolWarningDot} />}
               </View>
             </TouchableOpacity>
           </Animated.View>

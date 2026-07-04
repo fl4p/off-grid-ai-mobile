@@ -192,7 +192,7 @@ export const KnowledgeBaseScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {indexingFile && (
+      {!!indexingFile && (
         <View style={styles.indexingBanner}>
           <ActivityIndicator size="small" color={colors.primary} />
           <Text style={styles.indexingText}>Indexing {indexingFile}...</Text>

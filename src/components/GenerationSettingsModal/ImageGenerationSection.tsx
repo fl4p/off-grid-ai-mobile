@@ -41,7 +41,7 @@ const ImageModelPicker: React.FC = () => {
         />
       </TouchableOpacity>
 
-      {showPicker && (
+      {!!showPicker && (
         <View style={styles.modelPickerList}>
           {downloadedImageModels.length === 0 ? (
             <Text style={styles.noModelsText}>
@@ -77,7 +77,7 @@ const ImageModelPicker: React.FC = () => {
                       <Text style={styles.modelPickerItemText}>{model.name}</Text>
                       <Text style={styles.modelPickerItemDesc}>{model.style}</Text>
                     </View>
-                    {isActive && <Icon name="check" size={18} color={colors.primary} />}
+                    {!!isActive && <Icon name="check" size={18} color={colors.primary} />}
                   </TouchableOpacity>
                 );
               })}
@@ -178,7 +178,7 @@ const ClassifierModelPicker: React.FC = () => {
         />
       </TouchableOpacity>
 
-      {showPicker && (
+      {!!showPicker && (
         <View style={styles.modelPickerList}>
           <TouchableOpacity
             style={[
@@ -212,10 +212,10 @@ const ClassifierModelPicker: React.FC = () => {
                   <Text style={styles.modelPickerItemText}>{model.name}</Text>
                   <Text style={styles.modelPickerItemDesc}>
                     {hardwareService.formatModelSize(model)}
-                    {isFast && ' • Fast'}
+                    {isFast ? ' • Fast' : ''}
                   </Text>
                 </View>
-                {isActive && <Icon name="check" size={18} color={colors.primary} />}
+                {!!isActive && <Icon name="check" size={18} color={colors.primary} />}
               </TouchableOpacity>
             );
           })}
@@ -242,8 +242,8 @@ const ImageAdvancedSection: React.FC = () => {
   return (
     <>
       <ImageQualityAdvancedSliders />
-      {isAutoMode && <AutoDetectMethodToggle />}
-      {isAutoMode && isLlmDetect && <ClassifierModelPicker />}
+      {!!isAutoMode && <AutoDetectMethodToggle />}
+      {!!isAutoMode && !!isLlmDetect && <ClassifierModelPicker />}
       <View style={[styles.modeToggleContainer, !hasTextModel && styles.dimmed]}>
         <View style={styles.modeToggleInfo}>
           <Text style={styles.modeToggleLabel}>Enhance Image Prompts</Text>
@@ -327,7 +327,7 @@ export const ImageGenerationSection: React.FC = () => {
 
       <AdvancedToggle isExpanded={showAdvanced} onPress={() => setShowAdvanced(!showAdvanced)} testID="modal-image-advanced-toggle" />
 
-      {showAdvanced && <ImageAdvancedSection />}
+      {!!showAdvanced && <ImageAdvancedSection />}
     </View>
   );
 };

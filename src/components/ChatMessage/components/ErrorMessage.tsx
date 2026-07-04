@@ -25,11 +25,9 @@ export const ErrorMessage: React.FC<{
         <Text style={[styles.toolStatusText, { color: colors.error }]} numberOfLines={expanded ? undefined : 3}>
           {message.content}
         </Text>
-        {hasDetails && (
-          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={12} color={colors.textMuted} />
-        )}
+        {!!hasDetails && <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={12} color={colors.textMuted} />}
       </TouchableOpacity>
-      {expanded && hasDetails && (
+      {!!expanded && !!hasDetails && (
         <View testID="error-details" style={styles.toolDetailContainer}>
           <MarkdownText dimmed>{message.errorDetails!}</MarkdownText>
         </View>

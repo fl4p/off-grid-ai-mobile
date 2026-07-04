@@ -198,18 +198,18 @@ export const ChatsListScreen: React.FC = () => {
               </Text>
               <Text style={styles.chatDate}>{formatDate(item.updatedAt)}</Text>
             </View>
-            {lastMessage && (
+            {!!lastMessage && (
               <Text style={styles.chatPreview} numberOfLines={1}>
                 {lastMessage.role === 'user' ? 'You: ' : ''}{lastMessage.content}
               </Text>
             )}
-            {modelName && (
+            {!!modelName && (
               <View style={styles.modelRow}>
                 <Icon name="layers" size={11} color={colors.textMuted} style={styles.modelIcon} />
                 <Text style={styles.modelName} numberOfLines={1}>{modelName}</Text>
               </View>
             )}
-            {project && (
+            {!!project && (
               <View style={styles.projectBadge}>
                 <Text style={styles.projectBadgeText}>{project.name}</Text>
               </View>
@@ -258,7 +258,7 @@ export const ChatsListScreen: React.FC = () => {
                 : 'Download a model from the Models tab to start chatting.'}
             </Text>
           </AnimatedEntry>
-          {hasModels && (
+          {!!hasModels && (
             <AnimatedListItem index={3} staggerMs={60} trigger={focusTrigger} hapticType="impactLight" style={styles.emptyButton} onPress={handleNewChat}>
               <Icon name="plus" size={18} color={colors.primary} />
               <Text style={styles.emptyButtonText}>New Chat</Text>

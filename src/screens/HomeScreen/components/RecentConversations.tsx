@@ -104,23 +104,17 @@ export const RecentConversations: React.FC<Props> = ({
                     </Text>
                   );
                 })()}
-                {(modelName || projectName) && (
+                {!!(modelName || projectName) && (
                   <View style={styles.conversationModelRow}>
-                    {modelName && (
-                      <>
+                    {!!modelName && <>
                         <Icon name="layers" size={10} color={colors.textMuted} style={styles.conversationModelIcon} />
                         <Text style={styles.conversationModelName} numberOfLines={1}>{modelName}</Text>
-                      </>
-                    )}
-                    {modelName && projectName && (
-                      <Text style={styles.conversationMetaSeparator}>·</Text>
-                    )}
-                    {projectName && (
-                      <>
+                      </>}
+                    {!!modelName && !!projectName && <Text style={styles.conversationMetaSeparator}>·</Text>}
+                    {!!projectName && <>
                         <Icon name="folder" size={10} color={colors.primary} style={styles.conversationProjectIcon} />
                         <Text style={styles.conversationProjectName} numberOfLines={1}>{projectName}</Text>
-                      </>
-                    )}
+                      </>}
                   </View>
                 )}
               </View>

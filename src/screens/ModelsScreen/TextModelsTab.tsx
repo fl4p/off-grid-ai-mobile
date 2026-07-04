@@ -224,7 +224,7 @@ const ModelDetailView: React.FC<DetailProps> = ({
       <Card style={styles.modelInfoCard}>
         <View style={styles.authorRow}>
           <Text style={styles.modelAuthor}>{selectedModel.author}</Text>
-          {selectedModel.credibility && (
+          {!!selectedModel.credibility && (
             <View style={[styles.credibilityBadge, { backgroundColor: `${CREDIBILITY_LABELS[selectedModel.credibility.source].color}25` }]}>
               {selectedModel.credibility.source === 'lmstudio' && <Text style={[styles.credibilityIcon, { color: CREDIBILITY_LABELS[selectedModel.credibility.source].color }]}>★</Text>}
               {selectedModel.credibility.source === 'official' && <Text style={[styles.credibilityIcon, { color: CREDIBILITY_LABELS[selectedModel.credibility.source].color }]}>✓</Text>}
@@ -318,7 +318,7 @@ const LITERT_PARENT_RECOMMENDED = {
 const DeviceBanner: React.FC<{ ramGB: number; rec: { maxParameters: number; recommendedQuantization: string }; showTitle: boolean; styles: any }> = ({ ramGB, rec, showTitle, styles }) => (
   <View>
     <View style={styles.deviceBanner}><Text style={styles.deviceBannerText}>{Math.round(ramGB)}GB RAM — models up to {rec.maxParameters}B recommended ({rec.recommendedQuantization})</Text></View>
-    {showTitle && <Text style={styles.recommendedTitle}>Recommended for your device</Text>}
+    {!!showTitle && <Text style={styles.recommendedTitle}>Recommended for your device</Text>}
   </View>
 );
 
@@ -435,7 +435,7 @@ export const TextModelsTab: React.FC<Props> = (props) => {
           testID="sort-pill"
         >
           <Icon name={currentSort.icon} size={14} color={sortToggleActive ? colors.primary : colors.textMuted} />
-          {isSortActive && <View style={styles.filterDot} />}
+          {!!isSortActive && <View style={styles.filterDot} />}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterToggle, filterToggleActive && styles.filterToggleActive]}
@@ -444,13 +444,13 @@ export const TextModelsTab: React.FC<Props> = (props) => {
           testID="text-filter-toggle"
         >
           <Icon name="sliders" size={14} color={filterToggleActive ? colors.primary : colors.textMuted} />
-          {hasNonSortActiveFilters && <View style={styles.filterDot} />}
+          {!!hasNonSortActiveFilters && <View style={styles.filterDot} />}
         </TouchableOpacity>
       </View>
 
       {filterState.expandedDimension === 'sort' && <SortPanel filterState={filterState} setSortOption={setSortOption} styles={styles} colors={colors} />}
 
-      {textFiltersVisible && (
+      {!!textFiltersVisible && (
         <TextFiltersSection
           filterState={filterState}
           hasActiveFilters={hasNonSortActiveFilters}

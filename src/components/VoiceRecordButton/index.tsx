@@ -256,7 +256,7 @@ export const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
 
     return (
       <View style={styles.container}>
-        {isRecording && <ReanimatedAnimated.View style={[styles.rippleRing, rippleStyle]} />}
+        {!!isRecording && <ReanimatedAnimated.View style={[styles.rippleRing, rippleStyle]} />}
         <Animated.View
           style={[styles.buttonWrapper, { transform: [{ scale: isRecording ? pulseAnim : 1 }] }]}
         >
@@ -280,19 +280,19 @@ export const VoiceRecordButton: React.FC<VoiceRecordButtonProps> = ({
   // ── Chat mode: hold-to-record with slide-to-cancel ─────────────────────────
   return (
     <View style={styles.container}>
-      {isRecording && (
+      {!!isRecording && (
         <Animated.View
           style={[styles.cancelHint, { opacity: cancelOffsetX.interpolate({ inputRange: [-CANCEL_DISTANCE, 0], outputRange: [1, 0], extrapolate: 'clamp' }) }]}
         >
           <Text style={styles.cancelHintText}>Slide to cancel</Text>
         </Animated.View>
       )}
-      {isRecording && partialResult && (
+      {!!isRecording && !!partialResult && (
         <View style={styles.partialResultContainer}>
           <Text style={styles.partialResultText} numberOfLines={1}>{partialResult}</Text>
         </View>
       )}
-      {isRecording && <ReanimatedAnimated.View style={[styles.rippleRing, rippleStyle]} />}
+      {!!isRecording && <ReanimatedAnimated.View style={[styles.rippleRing, rippleStyle]} />}
       <Animated.View
         style={[styles.buttonWrapper, { transform: [{ scale: isRecording ? pulseAnim : 1 }, { translateX: cancelOffsetX }] }]}
         {...(disabled ? {} : panResponder.panHandlers)}

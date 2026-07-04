@@ -28,7 +28,7 @@ export const ToolsSentCollapsible: React.FC<ToolsSentCollapsibleProps> = ({ name
         </Text>
         <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={12} color={colors.textMuted} />
       </TouchableOpacity>
-      {expanded && (
+      {!!expanded && (
         <View style={styles.toolDetailContainer}>
           {names.map(name => (
             <Text key={name} style={styles.toolStatusText}>{`• ${name}`}</Text>

@@ -144,7 +144,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
           })}
         </Card>
 
-        {acceptsKey && (
+        {!!acceptsKey && (
           <Card style={styles.section}>
             <Text style={styles.sectionTitle}>{selectedOption?.label} API Key</Text>
             <ApiKeyInput

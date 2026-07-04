@@ -37,11 +37,11 @@ export const Card: React.FC<CardProps> = ({
       activeOpacity={onPress ? 0.7 : 1}
       testID={testID}
     >
-      {(title || subtitle || headerRight) && (
+      {!!(title || subtitle || headerRight) && (
         <View style={styles.header}>
           <View style={styles.headerText}>
-            {title && <Text style={styles.title}>{title}</Text>}
-            {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+            {!!title && <Text style={styles.title}>{title}</Text>}
+            {!!subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
           </View>
           {headerRight}
         </View>

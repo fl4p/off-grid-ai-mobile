@@ -85,7 +85,7 @@ const TabBarIcon: React.FC<{ name: string; focused: boolean }> = ({ name, focuse
           color={focused ? colors.primary : colors.textMuted}
         />
       </Animated.View>
-      {focused && <View style={tabStyles.focusDot} />}
+      {!!focused && <View style={tabStyles.focusDot} />}
     </View>
   );
 };

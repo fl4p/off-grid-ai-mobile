@@ -187,7 +187,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
           >
             <Icon name="message-square" size={16} color={activeTab === 'text' ? colors.primary : colors.textMuted} />
             <Text style={[styles.tabText, activeTab === 'text' && styles.tabTextActive]}>Text</Text>
-            {hasLoadedTextModel && (
+            {!!hasLoadedTextModel && (
               <View style={styles.tabBadge}>
                 <View style={styles.tabBadgeDot} />
               </View>
@@ -203,7 +203,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
             <Text style={[styles.tabText, activeTab === 'image' && styles.tabTextActive, activeTab === 'image' && { color: colors.info }]}>
               Image
             </Text>
-            {hasLoadedImageModel && (
+            {!!hasLoadedImageModel && (
               <View style={[styles.tabBadge, { backgroundColor: `${colors.info}30` }]}>
                 <View style={[styles.tabBadgeDot, { backgroundColor: colors.info }]} />
               </View>
@@ -211,7 +211,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
           </TouchableOpacity>
         </View>
 
-        {isAnyLoading && (
+        {!!isAnyLoading && (
           <View style={styles.loadingBanner}>
             <ActivityIndicator size="small" color={colors.primary} />
             <Text style={styles.loadingText}>Loading model...</Text>
@@ -248,7 +248,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
           )}
         </ScrollView>
 
-      {onBrowseModels && (
+      {!!onBrowseModels && (
         <TouchableOpacity
           style={[localStyles.browseMoreButton, { borderTopColor: colors.border }]}
           onPress={() => onBrowseModels(activeTab)}

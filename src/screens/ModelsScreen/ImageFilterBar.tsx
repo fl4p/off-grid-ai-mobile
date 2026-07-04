@@ -158,7 +158,7 @@ export const ImageFilterBar: React.FC<Props> = ({
             </Text>
           </TouchableOpacity>
         )}
-        {hasActiveImageFilters && (
+        {!!hasActiveImageFilters && (
           <TouchableOpacity style={styles.clearFiltersButton} onPress={clearImageFilters}>
             <Text style={styles.clearFiltersText}>Clear</Text>
           </TouchableOpacity>

@@ -143,7 +143,7 @@ export const ProjectDetailScreen: React.FC = () => {
               </Text>
               <Text style={styles.chatDate}>{formatDate(item.updatedAt)}</Text>
             </View>
-            {lastMessage && (
+            {!!lastMessage && (
               <Text style={styles.chatPreview} numberOfLines={1}>
                 {lastMessage.role === 'user' ? 'You: ' : ''}{lastMessage.content}
               </Text>
@@ -248,7 +248,7 @@ export const ProjectDetailScreen: React.FC = () => {
               <View style={styles.emptyState}>
                 <Icon name="message-circle" size={24} color={colors.textMuted} />
                 <Text style={styles.emptyStateText}>No chats yet</Text>
-                {hasModels && (
+                {!!hasModels && (
                   <Button
                     title="Start a Chat"
                     variant="primary"
