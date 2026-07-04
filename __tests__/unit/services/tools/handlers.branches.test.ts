@@ -276,6 +276,29 @@ describe('Tool Handlers — branch coverage', () => {
     });
   });
 
+  // ── isPrivateUrl: SSRF block covers the CGNAT / Tailscale range (100.64/10) ──
+  describe('read_url — private/SSRF blocking', () => {
+    const originalFetch = (globalThis as any).fetch;
+    afterEach(() => { (globalThis as any).fetch = originalFetch; });
+
+    it('blocks a Tailscale CGNAT host and never fetches it', async () => {
+      const fetchSpy = jest.fn();
+      (globalThis as any).fetch = fetchSpy;
+      const result = await runTool('read_url', { url: 'http://100.100.20.30/secret' });
+      expect(result.error).toContain('private/local network');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not block 100.x outside the CGNAT range', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200, text: jest.fn().mockResolvedValue('<p>public body</p>'),
+      });
+      const result = await runTool('read_url', { url: 'http://100.63.0.1/page' });
+      expect(result.error).toBeUndefined();
+      expect(result.content).toContain('public body');
+    });
+  });
+
   // ── read_url catch/rethrow logging (line 373) ─────────────────────────────
   describe('read_url — network failure', () => {
     const originalFetch = (globalThis as any).fetch;
