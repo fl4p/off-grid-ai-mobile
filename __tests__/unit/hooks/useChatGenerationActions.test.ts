@@ -81,6 +81,7 @@ jest.mock('../../../src/services/rag', () => ({
   ragService: {
     searchProject: jest.fn(() => Promise.resolve({ chunks: [], truncated: false })),
     getDocumentsByProject: jest.fn(() => Promise.resolve([])),
+    getEnabledDocumentCount: jest.fn(() => Promise.resolve(1)),
   },
   retrievalService: { formatForPrompt: jest.fn(() => '<knowledge_base>mock RAG context</knowledge_base>') },
 }));
@@ -95,6 +96,7 @@ jest.mock('../../../src/services/memory', () => ({
   memoryService: {
     searchMemory: jest.fn(() => Promise.resolve([])),
     formatForPrompt: jest.fn(() => '<memory_context>mock memory context</memory_context>'),
+    getActiveMemoryCount: jest.fn(() => Promise.resolve(1)),
   },
 }));
 
@@ -135,9 +137,11 @@ const { retrievalService } = require('../../../src/services/rag');
 const { memoryService } = require('../../../src/services/memory');
 const mockSearchProject = ragService.searchProject as jest.Mock;
 const mockGetDocsByProject = ragService.getDocumentsByProject as jest.Mock;
+const mockGetEnabledDocCount = ragService.getEnabledDocumentCount as jest.Mock;
 const mockFormatForPrompt = retrievalService.formatForPrompt as jest.Mock;
 const mockSearchMemory = memoryService.searchMemory as jest.Mock;
 const mockFormatMemoryForPrompt = memoryService.formatForPrompt as jest.Mock;
+const mockGetActiveMemoryCount = memoryService.getActiveMemoryCount as jest.Mock;
 
 
 const mockChatStoreGetState = jest.fn(() => ({ conversations: [] as any[], updateCompactionState: jest.fn() }));
@@ -186,9 +190,13 @@ beforeEach(() => {
   mockEnqueueMessage.mockReturnValue(undefined);
   mockSearchProject.mockResolvedValue({ chunks: [], truncated: false });
   mockGetDocsByProject.mockResolvedValue([]);
+  // Default: project knowledge base has searchable docs, so the KB tool is offered.
+  mockGetEnabledDocCount.mockResolvedValue(1);
   mockFormatForPrompt.mockReturnValue('<knowledge_base>mock RAG context</knowledge_base>');
   mockSearchMemory.mockResolvedValue([]);
   mockFormatMemoryForPrompt.mockReturnValue('<memory_context>mock memory context</memory_context>');
+  // Default: project has active memories, so search_memory is offered.
+  mockGetActiveMemoryCount.mockResolvedValue(1);
   mockChatStoreGetState.mockReturnValue({ conversations: [], updateCompactionState: jest.fn() });
   mockProjectStoreGetProject.mockReturnValue(null);
 });
@@ -937,6 +945,104 @@ describe('RAG context injection in startGenerationFn', () => {
   });
 
   it('auto-enables read-only memory search for local project conversations', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_knowledge_base', 'search_memory'],
+    }));
+  });
+
+  it('does NOT auto-enable search_knowledge_base when the project knowledge base is empty', async () => {
+    // Empty KB → the tool would only ever return "no results", so it must not be offered.
+    mockGetEnabledDocCount.mockResolvedValue(0);
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockGetEnabledDocCount).toHaveBeenCalledWith('proj-1');
+    // search_memory is still auto-enabled for local project chats; KB tool is not.
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_memory'],
+    }));
+  });
+
+  it('auto-enables search_knowledge_base once the knowledge base has enabled docs', async () => {
+    mockGetEnabledDocCount.mockResolvedValue(2);
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_knowledge_base', 'search_memory'],
+    }));
+  });
+
+  it('offers the KB tool as a fallback when the doc-count check throws', async () => {
+    // If the count query fails we keep the previous always-on behaviour rather than
+    // silently hiding a tool the user may need.
+    mockGetEnabledDocCount.mockRejectedValue(new Error('DB locked'));
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_knowledge_base', 'search_memory'],
+    }));
+  });
+
+  it('does NOT auto-enable search_memory when there are no active memories', async () => {
+    mockGetActiveMemoryCount.mockResolvedValue(0);
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockGetActiveMemoryCount).toHaveBeenCalledWith('proj-1');
+    // KB tool is still offered (default doc count > 0); the memory tool is not.
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_knowledge_base'],
+    }));
+  });
+
+  it('does not offer either project tool when both KB and memory are empty', async () => {
+    mockGetEnabledDocCount.mockResolvedValue(0);
+    mockGetActiveMemoryCount.mockResolvedValue(0);
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({ settings: { ...makeGenerationDeps().settings, enabledTools: [] } });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    // No enabled tools at all → pure text generation.
+    expect(mockGenerateWithTools).not.toHaveBeenCalled();
+    expect(mockGenerateResponse).toHaveBeenCalled();
+  });
+
+  it('offers the memory tool as a fallback when the memory-count check throws', async () => {
+    mockGetActiveMemoryCount.mockRejectedValue(new Error('DB locked'));
     const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
     mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
     mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });

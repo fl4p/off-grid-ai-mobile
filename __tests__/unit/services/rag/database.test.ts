@@ -174,6 +174,33 @@ describe('RagDatabase', () => {
     });
   });
 
+  describe('getEnabledDocumentCountByProject', () => {
+    it('returns the enabled document count for the project', async () => {
+      await ragDatabase.ensureReady();
+      mockExecuteSync.mockReturnValue({ rows: [{ count: 3 }] });
+
+      const count = ragDatabase.getEnabledDocumentCountByProject('proj1');
+      expect(count).toBe(3);
+      const call = mockExecuteSync.mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('COUNT(*)') && c[0].includes('enabled = 1')
+      );
+      expect(call).toBeDefined();
+      expect(call![1]).toEqual(['proj1']);
+    });
+
+    it('returns 0 when the project has no enabled documents', async () => {
+      await ragDatabase.ensureReady();
+      mockExecuteSync.mockReturnValue({ rows: [{ count: 0 }] });
+      expect(ragDatabase.getEnabledDocumentCountByProject('proj1')).toBe(0);
+    });
+
+    it('returns 0 when the query yields no rows', async () => {
+      await ragDatabase.ensureReady();
+      mockExecuteSync.mockReturnValue({ rows: [] });
+      expect(ragDatabase.getEnabledDocumentCountByProject('proj1')).toBe(0);
+    });
+  });
+
   describe('toggleEnabled', () => {
     it('updates enabled flag', async () => {
       await ragDatabase.ensureReady();

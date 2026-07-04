@@ -4,7 +4,7 @@ import { APP_CONFIG } from '../../constants';
 import {
   llmService, intentClassifier, generationService, imageGenerationService,
   onnxImageGeneratorService, ImageGenerationState, buildPromptWithToolNote,
-  contextCompactionService,
+  contextCompactionService, ragService, memoryService,
 } from '../../services';
 import { getToolExtensions } from '../../services/tools/extensions';
 import { liteRTService } from '../../services/litert';
@@ -228,7 +228,18 @@ const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLit
   const llamaWantsThink = !isRemote && llmService.isGemma4Model() && llmService.isThinkingEnabled();
   return (liteRTWantsThink || llamaWantsThink) ? `<|think|>\n${prompt}` : prompt;
 };
-function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _messageText: string): { enabledTools: string[]; rawPrompt: string; isLiteRT: boolean } {
+/** Auto-add a project-scoped tool only when its backing store has >=1 item in scope, re-checked per turn
+ *  so mid-session changes take effect on the next message. On a count-query error we fall back to offering
+ *  the tool (previous always-on behaviour). */
+async function withCountGatedTool(enabledTools: string[], opts: { toolId: string; eligible: boolean; projectId?: string; count: (id: string) => Promise<number> }): Promise<string[]> {
+  const { toolId, eligible, projectId, count } = opts;
+  if (!eligible || !projectId || enabledTools.includes(toolId)) return enabledTools;
+  try {
+    if ((await count(projectId)) <= 0) return enabledTools;
+  } catch { /* fall through and offer the tool */ }
+  return [...enabledTools, toolId];
+}
+async function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _messageText: string): Promise<{ enabledTools: string[]; rawPrompt: string; isLiteRT: boolean }> {
   const project = conversation?.projectId ? useProjectStore.getState().getProject(conversation.projectId) : null;
   const { activeServerId, activeRemoteTextModelId } = useRemoteServerStore.getState();
   const isLiteRT = deps.activeModel?.engine === 'litert' && liteRTService.isModelLoaded();
@@ -241,13 +252,10 @@ function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _message
     enabledTools = enabledTools.filter(toolId => !MEMORY_TOOL_IDS.includes(toolId));
   }
 
-  // Auto-add search_knowledge_base for project chats even if not in user's enabled list
-  if (conversation?.projectId && !enabledTools.includes('search_knowledge_base')) {
-    enabledTools = [...enabledTools, 'search_knowledge_base'];
-  }
-  if (canUseTools && !isRemote && conversation?.projectId && !enabledTools.includes('search_memory')) {
-    enabledTools = [...enabledTools, 'search_memory'];
-  }
+  // KB tool is offered for any project chat; memory search only for local (non-remote) project chats.
+  const projectId = conversation?.projectId;
+  enabledTools = await withCountGatedTool(enabledTools, { toolId: 'search_knowledge_base', eligible: true, projectId, count: id => ragService.getEnabledDocumentCount(id) });
+  enabledTools = await withCountGatedTool(enabledTools, { toolId: 'search_memory', eligible: canUseTools && !isRemote, projectId, count: id => memoryService.getActiveMemoryCount(id) });
 
   const rawPrompt = project?.systemPrompt || deps.settings.systemPrompt || APP_CONFIG.defaultSystemPrompt;
   return { enabledTools, rawPrompt, isLiteRT };
@@ -267,7 +275,7 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
     }
   }
   const conversation = useChatStore.getState().conversations.find(c => c.id === targetConversationId);
-  const { enabledTools, rawPrompt, isLiteRT } = resolveToolsAndPrompt(deps, conversation, messageText);
+  const { enabledTools, rawPrompt, isLiteRT } = await resolveToolsAndPrompt(deps, conversation, messageText);
   const isRemote = deps.activeModelInfo?.isRemote === true || !!useRemoteServerStore.getState().activeRemoteTextModelId;
   let basePrompt = await injectChatContext({
     projectId: conversation?.projectId,
@@ -431,7 +439,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   const messages = (conversation?.messages || []).filter((m: Message) => !m.isSystemInfo);
   const messagesUpToUser = messages.slice(0, messages.findIndex((m: Message) => m.id === userMessage.id) + 1)
     .map(m => m.id === userMessage.id ? { ...m, content: messageText } : m);
-  const { enabledTools, rawPrompt, isLiteRT: isLiteRTRegen } = resolveToolsAndPrompt(deps, conversation, messageText);
+  const { enabledTools, rawPrompt, isLiteRT: isLiteRTRegen } = await resolveToolsAndPrompt(deps, conversation, messageText);
   const isRemote = deps.activeModelInfo?.isRemote === true || !!useRemoteServerStore.getState().activeRemoteTextModelId;
   const activeTools = enabledTools;
   const basePrompt = await injectChatContext({

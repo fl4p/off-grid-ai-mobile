@@ -5,6 +5,7 @@ const mockSetEmbedding = jest.fn();
 const mockMarkUsed = jest.fn();
 const mockSetStatus = jest.fn();
 const mockDeleteProjectMemories = jest.fn();
+const mockGetActiveMemoryCount = jest.fn();
 
 jest.mock('../../../../src/services/memory/database', () => ({
   memoryDatabase: {
@@ -16,6 +17,7 @@ jest.mock('../../../../src/services/memory/database', () => ({
     markUsed: (...args: any[]) => mockMarkUsed(...args),
     setStatus: (...args: any[]) => mockSetStatus(...args),
     deleteProjectMemories: (...args: any[]) => mockDeleteProjectMemories(...args),
+    getActiveMemoryCount: (...args: any[]) => mockGetActiveMemoryCount(...args),
   },
 }));
 
@@ -114,6 +116,17 @@ describe('MemoryService', () => {
     expect(result).toHaveLength(1);
     expect(mockSearch).toHaveBeenCalledWith('proj-1', 'solar', 6);
     expect(mockMarkUsed).toHaveBeenCalledWith([7]);
+  });
+
+  it('reports the active memory count for a project scope', async () => {
+    mockGetActiveMemoryCount.mockReturnValue(4);
+    expect(await memoryService.getActiveMemoryCount('proj-1')).toBe(4);
+    expect(mockGetActiveMemoryCount).toHaveBeenCalledWith('proj-1');
+  });
+
+  it('reports 0 when there are no active memories', async () => {
+    mockGetActiveMemoryCount.mockReturnValue(0);
+    expect(await memoryService.getActiveMemoryCount('proj-1')).toBe(0);
   });
 
   it('formats memory prompt with source boundaries and strips injected tags', () => {

@@ -80,6 +80,9 @@ function executeMemorySql(sql: string, params: any[] = []) {
   if (normalized.includes('SELECT * FROM memory_items WHERE id = ?')) {
     return { rows: memories.filter(row => row.id === params[0]), insertId: 0, rowsAffected: 0 };
   }
+  if (normalized.includes('SELECT COUNT(*) as count FROM memory_items')) {
+    return { rows: [{ count: activeRows(params[0]).length }], insertId: 0, rowsAffected: 0 };
+  }
   if (normalized.includes('SELECT * FROM memory_items') && normalized.includes("status = 'active'")) {
     return { rows: activeRows(params[0]), insertId: 0, rowsAffected: 0 };
   }
@@ -189,6 +192,23 @@ describe('Memory Flow Integration', () => {
     expect(prompt).toContain('<memory_context>');
     expect(prompt).toContain('verify current IRS rules');
     expect(prompt).toContain('Jurisdiction: United States');
+  });
+
+  it('counts active memories in scope, including global, and 0 for an empty scope', async () => {
+    expect(await memoryService.getActiveMemoryCount('proj-tax')).toBe(0);
+
+    await memoryService.saveMemory({
+      projectId: 'proj-tax', title: 'Project note', body: 'Scoped to the tax project.', kind: 'research_note',
+    });
+    await memoryService.saveMemory({
+      scope: 'global', title: 'Global preference', body: 'User prefers concise answers.', kind: 'preference',
+    });
+
+    // proj-tax scope sees its own memory plus the global one; an unrelated project sees only global.
+    expect(await memoryService.getActiveMemoryCount('proj-tax')).toBe(2);
+    expect(await memoryService.getActiveMemoryCount('proj-other')).toBe(1);
+    // A global-only recall (no projectId) sees just the global memory.
+    expect(await memoryService.getActiveMemoryCount()).toBe(1);
   });
 
   it('keeps project memory scoped while global memory is available everywhere', async () => {
