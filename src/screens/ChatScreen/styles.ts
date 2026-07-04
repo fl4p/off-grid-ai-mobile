@@ -123,6 +123,7 @@ const createEmptyChatStyles = (colors: ThemeColors) => ({
     borderRadius: 8,
     marginTop: SPACING.xl,
     gap: SPACING.sm,
+    width: '100%' as const,
     maxWidth: 340,
   },
   onlineToolsCopy: { flex: 1 },
