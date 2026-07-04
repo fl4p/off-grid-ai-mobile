@@ -43,7 +43,13 @@ export interface AppSheetProps {
    * selection/caret gestures for any `TextInput`/selectable `Text` inside the
    * sheet. Turn this on for sheets that contain editable/selectable text (the
    * edit-message and select-text sheets); leave off for button-only sheets.
-   * Requires a `<PortalProvider>` above this component (mounted in App.tsx).
+   *
+   * Only takes effect on iOS (see `isPortal`): Android's Dialog-backed `<Modal>`
+   * doesn't have the bug and does give us hardware-back dismissal, which a JS
+   * Portal doesn't. Requires a `<PortalProvider>` above this component (mounted
+   * in App.tsx). Note: `@gorhom/portal` renders children at the PortalHost's tree
+   * position, so portalled sheet content must NOT depend on `NavigationContainer`
+   * -scoped hooks (`useNavigation`, `useRoute`, …) — the host sits outside it.
    */
   usePortal?: boolean;
   children: React.ReactNode;
@@ -123,6 +129,10 @@ export const AppSheet: React.FC<AppSheetProps> = ({
   const { elevation: elevationTokens } = useTheme();
   const styles = useThemedStyles(createStyles);
   const { bottom: bottomInset } = useSafeAreaInsets();
+  // Only portal on iOS: the bug this works around (a `<Modal>` in a separate
+  // UIWindow breaking text selection) is iOS-only, and RN's `<Modal>` gives us
+  // Android hardware-back dismissal (onRequestClose) that a JS Portal does not.
+  const isPortal = usePortal && Platform.OS === 'ios';
 
   const [modalVisible, setModalVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -261,8 +271,8 @@ export const AppSheet: React.FC<AppSheetProps> = ({
   // Portal mode has no Modal `onShow`, so run the entrance animation once the
   // overlay has mounted (modalVisible flips true).
   useEffect(() => {
-    if (usePortal && modalVisible) handleModalShow();
-  }, [usePortal, modalVisible, handleModalShow]);
+    if (isPortal && modalVisible) handleModalShow();
+  }, [isPortal, modalVisible, handleModalShow]);
 
   // User-initiated dismiss (backdrop tap, Done button, swipe).
   // Backdrop taps are gated by backdropEnabled to prevent the long-press
@@ -291,7 +301,7 @@ export const AppSheet: React.FC<AppSheetProps> = ({
   }
 
   const overlay = (
-    <View style={usePortal ? [styles.container, StyleSheet.absoluteFill] : styles.container}>
+    <View style={isPortal ? [styles.container, StyleSheet.absoluteFill] : styles.container}>
         {/* Backdrop — gated by backdropEnabled ref so the long-press
             finger-up can't close the sheet during animate-in */}
         <TouchableWithoutFeedback onPress={handleBackdropPress}>
@@ -363,7 +373,7 @@ export const AppSheet: React.FC<AppSheetProps> = ({
 
   // Portalled sheets render in the app's own window (so iOS text selection
   // works); everything else keeps RN's Modal.
-  if (usePortal) {
+  if (isPortal) {
     return <Portal>{overlay}</Portal>;
   }
   return (
