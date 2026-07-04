@@ -230,7 +230,7 @@ const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLit
   const llamaWantsThink = !isRemote && llmService.isGemma4Model() && llmService.isThinkingEnabled();
   return (liteRTWantsThink || llamaWantsThink) ? `<|think|>\n${prompt}` : prompt;
 };
-function resolveEnabledTools(deps: GenerationDeps, conversation: any, ctx: { canUseTools: boolean; isRemote: boolean }): string[] {
+export function resolveEnabledTools(deps: GenerationDeps, conversation: any, ctx: { canUseTools: boolean; isRemote: boolean }): string[] {
   const { canUseTools, isRemote } = ctx;
   // Online-tools switch off: withhold network tools so the model can't search/fetch.
   let enabledTools = canUseTools
