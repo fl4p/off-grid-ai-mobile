@@ -12,6 +12,7 @@ import {
   buildNoToolsNote,
   buildPromptWithToolNote,
   resolveEnabledToolIds,
+  filterToolsByNetworkAccess,
 } from '../../../../src/services/tools/registry';
 
 describe('Tool Registry', () => {
@@ -105,6 +106,60 @@ describe('Tool Registry', () => {
       const hint = buildToolSystemPromptHint(['run_python']);
       expect(hint).toContain('read_file');
       expect(hint).toContain('grep');
+    });
+  });
+
+  // ========================================================================
+  // Network-tool metadata (drives the online-tools gate)
+  // ========================================================================
+  describe('network metadata', () => {
+    it('marks web_search and read_url as network-only (no offlineCapable)', () => {
+      for (const id of ['web_search', 'read_url']) {
+        const tool = AVAILABLE_TOOLS.find(t => t.id === id)!;
+        expect(tool.requiresNetwork).toBe(true);
+        expect(tool.offlineCapable).not.toBe(true);
+      }
+    });
+
+    it('marks run_python as network-capable but offline-capable', () => {
+      const python = AVAILABLE_TOOLS.find(t => t.id === 'run_python')!;
+      expect(python.requiresNetwork).toBe(true);
+      expect(python.offlineCapable).toBe(true);
+    });
+  });
+
+  // ========================================================================
+  // filterToolsByNetworkAccess (the online-tools master gate)
+  // ========================================================================
+  describe('filterToolsByNetworkAccess', () => {
+    it('returns the list unchanged when online tools are enabled', () => {
+      const ids = ['web_search', 'read_url', 'run_python', 'calculator'];
+      expect(filterToolsByNetworkAccess(ids, true)).toEqual(ids);
+    });
+
+    it('removes network-only tools when online tools are disabled', () => {
+      const out = filterToolsByNetworkAccess(['web_search', 'read_url', 'calculator'], false);
+      expect(out).toEqual(['calculator']);
+    });
+
+    it('keeps offline-capable run_python when disabled (its network path is blocked at execution)', () => {
+      expect(filterToolsByNetworkAccess(['run_python', 'web_search'], false)).toEqual(['run_python']);
+    });
+
+    it('keeps non-network tools when disabled', () => {
+      const ids = ['calculator', 'get_current_datetime', 'search_knowledge_base', 'search_memory'];
+      expect(filterToolsByNetworkAccess(ids, false)).toEqual(ids);
+    });
+
+    it('leaves unknown ids (Pro/MCP tools) untouched under either state', () => {
+      expect(filterToolsByNetworkAccess(['mcp_custom'], false)).toEqual(['mcp_custom']);
+      expect(filterToolsByNetworkAccess(['mcp_custom'], true)).toEqual(['mcp_custom']);
+    });
+
+    it('does not mutate the input array', () => {
+      const ids = ['web_search', 'calculator'];
+      filterToolsByNetworkAccess(ids, false);
+      expect(ids).toEqual(['web_search', 'calculator']);
     });
   });
 

@@ -11,9 +11,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AttachStep } from 'react-native-spotlight-tour';
 import { ModelSelectorModal } from '../../components';
 import { AnimatedEntry } from '../../components/AnimatedEntry';
+import { AnimatedToggle } from '../../components/AnimatedToggle';
 import { llmService } from '../../services';
 import { createStyles } from './styles';
 import { useTheme } from '../../theme';
+import { useAppStore } from '../../stores';
 import { getSlot, SLOTS } from '../../bootstrap/slotRegistry';
 
 type StylesType = ReturnType<typeof createStyles>;
@@ -135,7 +137,10 @@ export const EmptyChat: React.FC<{
   activeProject: any;
   setShowProjectSelector: (v: boolean) => void;
   isRemote?: boolean;
-}> = ({ styles, colors, activeModel, activeModelName, serverName, activeProject, setShowProjectSelector, isRemote }) => (
+}> = ({ styles, colors, activeModel, activeModelName, serverName, activeProject, setShowProjectSelector, isRemote }) => {
+  const onlineToolsEnabled = useAppStore(s => s.settings.onlineToolsEnabled);
+  const updateSettings = useAppStore(s => s.updateSettings);
+  return (
   <View style={styles.emptyChat}>
     <AnimatedEntry index={0} staggerMs={60}>
       <View style={styles.emptyChatIconContainer}>
@@ -143,7 +148,7 @@ export const EmptyChat: React.FC<{
       </View>
     </AnimatedEntry>
     <AnimatedEntry index={1} staggerMs={60}>
-      <Text style={styles.emptyChatTitle}>Start a Conversation</Text>
+      <Text style={styles.emptyChatTitle}>How can I help you?</Text>
     </AnimatedEntry>
     <AnimatedEntry index={2} staggerMs={60}>
       <Text style={styles.emptyChatText}>
@@ -170,8 +175,32 @@ export const EmptyChat: React.FC<{
           : 'This conversation is completely private. All processing happens on your device.'}
       </Text>
     </AnimatedEntry>
+    <AnimatedEntry index={5} staggerMs={60}>
+      <View style={styles.onlineToolsRow}>
+        <Icon
+          name={onlineToolsEnabled ? 'wifi' : 'wifi-off'}
+          size={16}
+          color={onlineToolsEnabled ? colors.primary : colors.textMuted}
+        />
+        <View style={styles.onlineToolsCopy}>
+          <Text style={styles.onlineToolsLabel}>Allow online tools</Text>
+          <Text style={styles.onlineToolsSubtext}>
+            {onlineToolsEnabled
+              ? 'The model can search the web and read links.'
+              : 'Off - turn on to let the model search the web and read links.'}
+          </Text>
+        </View>
+        <AnimatedToggle
+          testID="empty-chat-online-tools-switch"
+          value={!!onlineToolsEnabled}
+          onValueChange={(v: boolean) => updateSettings({ onlineToolsEnabled: v })}
+          accessibilityLabel={`Online tools ${onlineToolsEnabled ? 'on' : 'off'}`}
+        />
+      </View>
+    </AnimatedEntry>
   </View>
-);
+  );
+};
 
 export const ImageProgressIndicator: React.FC<{
   styles: StylesType;
