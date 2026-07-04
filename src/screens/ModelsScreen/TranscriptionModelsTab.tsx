@@ -50,7 +50,7 @@ const WhisperCard: React.FC<WhisperCardProps> = ({
     <ModelCard
       compact
       model={{ id: model.id, name: model.name, author: formatSize(model.size), description: model.description }}
-      isDownloaded={present && !downloading}
+      isDownloaded={!!present && !downloading}
       isActive={active}
       isDownloading={downloading}
       downloadProgress={downloadProgress}
@@ -138,7 +138,7 @@ export const TranscriptionModelsTab: React.FC = () => {
         <Text style={shared.deviceBannerText}>Transcription runs on your phone, audio is never sent anywhere</Text>
       </View>
 
-      {whisperError && (
+      {!!whisperError && (
         <TouchableOpacity onPress={clearError}>
           <Text style={styles.error}>{whisperError} (tap to dismiss)</Text>
         </TouchableOpacity>

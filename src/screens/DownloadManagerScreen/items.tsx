@@ -196,7 +196,7 @@ export const CompletedDownloadCard: React.FC<CompletedDownloadCardProps> = ({ it
           <Text style={styles.fileName} numberOfLines={1}>{item.fileName}</Text>
           <Text style={styles.modelId} numberOfLines={1}>{item.author}</Text>
         </View>
-        {needsVisionRepair && !isRepairingVision && onRepairVision && (
+        {!!needsVisionRepair && !isRepairingVision && !!onRepairVision && (
           <TouchableOpacity
             style={styles.repairButton}
             testID="repair-vision-button"
@@ -222,10 +222,8 @@ export const CompletedDownloadCard: React.FC<CompletedDownloadCardProps> = ({ it
           </View>
         )}
         <Text style={styles.sizeText}>{formatBytes(item.fileSize)}</Text>
-        {item.downloadedAt && (
-          <Text style={styles.dateText}>{new Date(item.downloadedAt).toLocaleDateString()}</Text>
-        )}
-        {isRepairingVision && (
+        {!!item.downloadedAt && <Text style={styles.dateText}>{new Date(item.downloadedAt).toLocaleDateString()}</Text>}
+        {!!isRepairingVision && (
           <View style={styles.repairingBadge} testID="repairing-vision-badge">
             <ActivityIndicator size="small" color={colors.warning} />
             <Text style={styles.repairingBadgeText}>Repairing</Text>

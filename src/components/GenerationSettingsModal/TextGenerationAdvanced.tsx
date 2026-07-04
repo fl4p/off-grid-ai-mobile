@@ -79,7 +79,7 @@ export const BackendSelector: React.FC = () => {
         ))}
       </View>
 
-      {showLayers && (
+      {!!showLayers && (
         <View style={styles.gpuLayersInline}>
           <SliderSetting
             testID="gpu-layers-stepper"
@@ -193,7 +193,7 @@ export const KvCacheTypeToggle: React.FC = () => {
             testID={`cache-type-${ct}-button`}
             style={[styles.modeButton, displayCacheType === ct && styles.modeButtonActive]}
             onPress={() => handleCacheTypeChange(ct)}
-            disabled={cacheDisabled && ct !== 'f16'}
+            disabled={!!cacheDisabled && ct !== 'f16'}
           >
             <Text style={[styles.modeButtonText, displayCacheType === ct && styles.modeButtonTextActive]}>
               {ct}

@@ -35,7 +35,7 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
 
   return (
     <View>
-      {onOpenProject && (
+      {!!onOpenProject && (
         <TouchableOpacity style={styles.actionRow} onPress={onOpenProject}>
           <Icon name="folder" size={16} color={colors.textSecondary} />
           <Text style={styles.actionText}>
@@ -44,7 +44,7 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
           <Icon name="chevron-right" size={16} color={colors.textMuted} />
         </TouchableOpacity>
       )}
-      {onOpenGallery && conversationImageCount > 0 && (
+      {!!onOpenGallery && conversationImageCount > 0 && (
         <TouchableOpacity style={styles.actionRow} onPress={onOpenGallery}>
           <Icon name="image" size={16} color={colors.textSecondary} />
           <Text style={styles.actionText}>
@@ -53,13 +53,13 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
           <Icon name="chevron-right" size={16} color={colors.textMuted} />
         </TouchableOpacity>
       )}
-      {onCopyTranscript && (
+      {!!onCopyTranscript && (
         <TouchableOpacity style={styles.actionRow} onPress={onCopyTranscript}>
           <Icon name="copy" size={16} color={colors.textSecondary} />
           <Text style={styles.actionText}>Copy Transcript</Text>
         </TouchableOpacity>
       )}
-      {onDeleteConversation && (
+      {!!onDeleteConversation && (
         <TouchableOpacity style={styles.actionRow} onPress={onDeleteConversation}>
           <Icon name="trash-2" size={16} color={colors.error} />
           <Text style={styles.actionTextError}>Delete Conversation</Text>

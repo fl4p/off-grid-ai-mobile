@@ -37,10 +37,10 @@ export const GalleryGridItem: React.FC<GalleryGridItemProps> = ({
           source={{ uri: `file://${item.imagePath}` }}
           style={styles.gridImage}
         />
-        {isSelectMode && (
+        {!!isSelectMode && (
           <View style={[styles.selectionOverlay, isSelected && styles.selectionOverlaySelected]}>
             <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-              {isSelected && <Icon name="check" size={14} color="#fff" />}
+              {!!isSelected && <Icon name="check" size={14} color="#fff" />}
             </View>
           </View>
         )}

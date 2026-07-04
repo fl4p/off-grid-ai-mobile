@@ -174,7 +174,7 @@ export const ToolsScreen: React.FC = () => {
           <Icon name="chevron-right" size={18} color={colors.textMuted} />
         </TouchableOpacity>
 
-        {showHint && (
+        {!!showHint && (
           <View style={[styles.hintBanner, { backgroundColor: colors.surface }]}>
             <Icon name="alert-circle" size={16} color={TOOL_WARNING_COLOR} style={styles.hintIcon} />
             <View style={styles.hintBody}>
@@ -202,9 +202,7 @@ export const ToolsScreen: React.FC = () => {
               <View style={styles.toolInfo}>
                 <View style={styles.toolNameRow}>
                   <Text style={styles.toolName} testID={`tool-picker-name-${tool.id}`}>{tool.displayName}</Text>
-                  {tool.requiresNetwork && (
-                    <Icon name="wifi" size={12} color={colors.textMuted} style={styles.networkIcon} />
-                  )}
+                  {!!tool.requiresNetwork && <Icon name="wifi" size={12} color={colors.textMuted} style={styles.networkIcon} />}
                 </View>
                 <Text style={styles.toolDescription}>{description}</Text>
               </View>

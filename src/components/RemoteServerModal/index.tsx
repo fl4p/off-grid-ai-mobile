@@ -36,7 +36,7 @@ interface TestResultSectionProps {
 
 const TestResultSection: React.FC<TestResultSectionProps> = ({ testResult, discoveredModels, styles }) => (
   <>
-    {testResult && (
+    {!!testResult && (
       <View style={styles.statusContainer}>
         <View style={[styles.statusDot, testResult.success ? styles.statusDotSuccess : styles.statusDotError]} />
         <Text style={styles.statusText}>{testResult.message}</Text>
@@ -110,7 +110,7 @@ export const RemoteServerModal: React.FC<RemoteServerModalProps> = ({
           onChangeText={setName}
           autoCapitalize="words"
         />
-        {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
+        {!!errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
 
         <Text style={styles.label}>Endpoint URL</Text>
         <TextInput
@@ -123,8 +123,8 @@ export const RemoteServerModal: React.FC<RemoteServerModalProps> = ({
           autoCorrect={false}
           keyboardType="url"
         />
-        {errors.endpoint && <Text style={styles.errorText}>{errors.endpoint}</Text>}
-        {isPublicNetwork && (
+        {!!errors.endpoint && <Text style={styles.errorText}>{errors.endpoint}</Text>}
+        {!!isPublicNetwork && (
           <View style={styles.warningContainer}>
             <Text style={styles.warningText}>
               ⚠️ This endpoint is on the public internet. Your data will be sent to a remote server.

@@ -306,7 +306,7 @@ export const SettingsScreen: React.FC = () => {
         {getSettingsSections().map((Section, i) => <Section key={Section.displayName ?? String(i)} />)}
 
         {/* Dev-only tooling — stripped from release builds */}
-        {__DEV__ && (
+        {!!__DEV__ && (
           <AnimatedEntry index={10} staggerMs={40} trigger={focusTrigger}>
             <View style={styles.devButtonGroup}>
               <TouchableOpacity style={styles.devButton} onPress={handleResetOnboarding}>
@@ -330,7 +330,7 @@ export const SettingsScreen: React.FC = () => {
         )}
 
         <MadeWithLove />
-        {__DEV__ && <DebugLogsScreen visible={showDebugLogs} onClose={() => setShowDebugLogs(false)} />}
+        {!!__DEV__ && <DebugLogsScreen visible={showDebugLogs} onClose={() => setShowDebugLogs(false)} />}
       </ScrollView>
     </SafeAreaView>
   );

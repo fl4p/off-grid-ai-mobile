@@ -244,7 +244,7 @@ export const ProjectChatsScreen: React.FC = () => {
               </Text>
               <Text style={styles.chatDate}>{formatDate(item.updatedAt)}</Text>
             </View>
-            {lastMessage && (
+            {!!lastMessage && (
               <Text style={styles.chatPreview} numberOfLines={1}>
                 {lastMessage.role === 'user' ? 'You: ' : ''}{lastMessage.content}
               </Text>
@@ -283,7 +283,7 @@ export const ProjectChatsScreen: React.FC = () => {
               ? 'Start a new conversation for this project.'
               : 'Download a model to start chatting.'}
           </Text>
-          {hasModels && (
+          {!!hasModels && (
             <Button
               title="New Chat"
               variant="primary"

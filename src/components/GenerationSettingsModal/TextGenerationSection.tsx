@@ -195,14 +195,12 @@ const LiteRTTextGenerationSection: React.FC = () => {
 
       <AdvancedToggle isExpanded={showAdvanced} onPress={() => setShowAdvanced(!showAdvanced)} testID="modal-text-advanced-toggle" />
 
-      {showAdvanced && (
-        <>
+      {!!showAdvanced && <>
           {advancedSettings.map((c) => (
             <SettingSlider key={c.key} config={c} />
           ))}
           <LiteRTBackendSelector />
-        </>
-      )}
+        </>}
     </View>
   );
 };
@@ -230,8 +228,7 @@ const LlamaTextGenerationSection: React.FC = () => {
 
       <AdvancedToggle isExpanded={showAdvanced} onPress={() => setShowAdvanced(!showAdvanced)} testID="modal-text-advanced-toggle" />
 
-      {showAdvanced && (
-        <>
+      {!!showAdvanced && <>
           {advancedSettings.map((c) => (
             <SettingSlider key={c.key} config={c} />
           ))}
@@ -240,8 +237,7 @@ const LlamaTextGenerationSection: React.FC = () => {
           <BackendSelector />
           <FlashAttentionToggle />
           <KvCacheTypeToggle />
-        </>
-      )}
+        </>}
     </View>
   );
 };

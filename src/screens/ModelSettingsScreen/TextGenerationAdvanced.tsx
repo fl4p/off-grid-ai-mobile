@@ -81,7 +81,7 @@ const BackendSelectorSection: React.FC = () => {
         ))}
       </View>
 
-      {showLayers && (
+      {!!showLayers && (
         <SliderSetting
           testID="gpu-layers-stepper"
           label={current === INFERENCE_BACKENDS.HTP ? 'NPU Layers' : 'GPU Layers'}
@@ -190,7 +190,7 @@ const KvCacheSection: React.FC<{ cacheDisabled: boolean }> = ({ cacheDisabled })
             variant="secondary"
             size="small"
             active={displayCacheType === ct}
-            disabled={cacheDisabled && ct !== 'f16'}
+            disabled={!!cacheDisabled && ct !== 'f16'}
             onPress={() => handleCacheTypeChange(ct)}
             style={styles.flex1}
           />

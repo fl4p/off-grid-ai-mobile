@@ -60,7 +60,7 @@ export const MemoryCapturePanel: React.FC<MemoryCapturePanelProps> = ({
           checked: autoCaptureEnabled && autoSaveEnabled,
           disabled: !autoCaptureEnabled,
         }}
-        value={autoCaptureEnabled && autoSaveEnabled}
+        value={!!autoCaptureEnabled && autoSaveEnabled}
         disabled={!autoCaptureEnabled}
         onValueChange={(value) => updateSettings({ memoryAutoSaveEnabled: value })}
         trackColor={{ false: colors.border, true: colors.primary }}

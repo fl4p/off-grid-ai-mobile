@@ -53,7 +53,7 @@ export const TextFiltersSection: React.FC<Props> = ({
         {renderPill({ label: sourceLabel, isActive: filterState.source !== 'all', dim: 'source' })}
         {renderPill({ label: sizeLabel, isActive: filterState.size !== 'all', dim: 'size' })}
         {renderPill({ label: quantLabel, isActive: filterState.quant !== 'all', dim: 'quant' })}
-        {hasActiveFilters && (
+        {!!hasActiveFilters && (
           <TouchableOpacity style={styles.clearFiltersButton} onPress={clearFilters}>
             <Text style={styles.clearFiltersText}>Clear</Text>
           </TouchableOpacity>

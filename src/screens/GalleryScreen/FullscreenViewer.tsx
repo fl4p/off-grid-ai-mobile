@@ -46,7 +46,7 @@ export const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
           activeOpacity={1}
           onPress={onClose}
         />
-        {image && (
+        {!!image && (
           <View style={styles.viewerContent}>
             {!showDetails && (
               <Image
@@ -55,7 +55,7 @@ export const FullscreenViewer: React.FC<FullscreenViewerProps> = ({
                 resizeMode="contain"
               />
             )}
-            {showDetails && (
+            {!!showDetails && (
               <View style={styles.detailsSheet}>
                 <View style={styles.detailsSheetHeader}>
                   <Text style={styles.detailsSheetTitle}>Image Details</Text>
