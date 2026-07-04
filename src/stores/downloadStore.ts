@@ -29,6 +29,15 @@ export interface DownloadEntry {
   downloadSpeed?: number
   lastSpeedUpdate?: number
   speedAnchorBytes?: number
+  /**
+   * True once the main GGUF's own download-complete event has fired (its final
+   * byte echo went through updateProgressBytesOnly). This is the authoritative
+   * "main file is done" signal — do NOT infer it from bytesDownloaded >=
+   * totalBytes, because native completion can persist a totalBytes larger than
+   * the bytes actually written (CDN undershoot tolerance / skipSizeValidation
+   * for curated offgrid/* models), so the byte counts never meet even when done.
+   */
+  mainDownloadComplete?: boolean
   mmProjDownloadId?: string
   mmProjBytesDownloaded?: number
   mmProjStatus?: DownloadStatus
@@ -264,7 +273,11 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     if (!modelKey) return state;
     const entry = state.downloads[modelKey];
     if (!entry || entry.downloadId !== downloadId) return state;
-    return { downloads: { ...state.downloads, [modelKey]: { ...entry, ...progressPatch(entry, { bytes, total, touchSpeed: false }) } } };
+    // This is only ever called as the main GGUF's final-byte completion echo
+    // (see useDownloads onAnyComplete), so it is the authoritative point at
+    // which the main file is done and the mmproj sidecar becomes the sole
+    // remaining stream. Record it so setStatus can safely clear a stale speed.
+    return { downloads: { ...state.downloads, [modelKey]: { ...entry, ...progressPatch(entry, { bytes, total, touchSpeed: false }), mainDownloadComplete: true } } };
   }),
 
   updateMmProjProgress: (mmProjDownloadId, bytes) => set(state => {
@@ -327,13 +340,16 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
             // The download speed/anchor is a single combined (bytes, time) value
             // shared by the GGUF and mmproj streams, which download in parallel.
             // Only clear it from the sidecar branch once the main GGUF has
-            // finished and the sidecar is the sole remaining stream — then a
-            // sidecar pause/stop is the true stall signal and would otherwise
-            // freeze a stale rate. While the main GGUF is still flowing bytes we
-            // must NOT clear: a transient sidecar blip would blank the healthy
-            // main file's live speed, and its own updateProgress keeps the rate
-            // (or the main entry's setStatus clears it if the main itself stalls).
-            ...(status !== 'running' && entry.totalBytes > 0 && entry.bytesDownloaded >= entry.totalBytes
+            // finished (mainDownloadComplete) and the sidecar is the sole
+            // remaining stream — then a sidecar pause/stop is the true stall
+            // signal and would otherwise freeze a stale rate. While the main GGUF
+            // is still flowing bytes we must NOT clear: a transient sidecar blip
+            // would blank the healthy main file's live speed, and its own
+            // updateProgress keeps the rate (or the main entry's setStatus clears
+            // it if the main itself stalls). We key off the completion EVENT, not
+            // bytesDownloaded >= totalBytes, because native completion can persist
+            // a totalBytes above the bytes actually written (see the field doc).
+            ...(status !== 'running' && entry.mainDownloadComplete
               ? { downloadSpeed: 0, lastSpeedUpdate: undefined, speedAnchorBytes: undefined }
               : {}),
           },
@@ -420,6 +436,7 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
           downloadSpeed: 0,
           lastSpeedUpdate: undefined,
           speedAnchorBytes: undefined,
+          mainDownloadComplete: false,
           errorMessage: undefined,
           errorCode: undefined,
           // Preserve mmproj identity fields so the UI still knows this is a
