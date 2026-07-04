@@ -1,6 +1,6 @@
  import { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { AlertState, showAlert, hideAlert } from '../../components';
-import { APP_CONFIG } from '../../constants';
+import { resolveBaseSystemPrompt } from './baseSystemPrompt';
 import {
   llmService, intentClassifier, generationService, imageGenerationService,
   onnxImageGeneratorService, ImageGenerationState, buildPromptWithToolNote,
@@ -217,7 +217,7 @@ function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _message
     enabledTools = [...enabledTools, 'search_memory'];
   }
 
-  const rawPrompt = project?.systemPrompt || deps.settings.systemPrompt || APP_CONFIG.defaultSystemPrompt;
+  const rawPrompt = resolveBaseSystemPrompt(project?.systemPrompt || deps.settings.systemPrompt, isRemote);
   return { enabledTools, rawPrompt, isLiteRT, memoryEnabled };
 }
 export async function startGenerationFn(deps: GenerationDeps, call: StartGenerationCall): Promise<void> {
