@@ -402,13 +402,29 @@ export function useChatModelStateSync(deps: ModelStateSyncDeps): void {
     } else if (activeModel?.engine === 'litert' && liteRTService.isModelLoaded()) {
       setSupportsToolCalling(true);
       setSupportsThinking(true);
-    } else if (llmService.isModelLoaded()) {
-      setSupportsToolCalling(llmService.supportsToolCalling());
-      setSupportsThinking(llmService.supportsThinking());
+      // LiteRT models are always tool/thinking capable when loaded. Cache it so a
+      // cold start (LiteRT also loads lazily on first send) knows this before the
+      // model loads, same as the llama path below (issue #42).
+      if (activeModelId) useAppStore.getState().setModelCapability(activeModelId, { toolCalling: true, thinking: true });
+    } else if (activeModel && llmService.isModelLoaded() && llmService.getLoadedModelPath() === activeModel.filePath) {
+      // The active local model is loaded: read the live, authoritative capability
+      // and cache it so a future cold start knows it before the model reloads.
+      const toolCalling = llmService.supportsToolCalling();
+      const thinking = llmService.supportsThinking();
+      setSupportsToolCalling(toolCalling);
+      setSupportsThinking(thinking);
+      if (activeModelId) useAppStore.getState().setModelCapability(activeModelId, { toolCalling, thinking });
+    } else if (activeModelId && useAppStore.getState().modelCapabilities[activeModelId]) {
+      // Not loaded yet (or a different model is loaded) — fall back to the last
+      // detected capability so tools aren't shown as unavailable on a cold start
+      // until the model lazily loads on first send. Fixes issue #42.
+      const cached = useAppStore.getState().modelCapabilities[activeModelId];
+      setSupportsToolCalling(cached.toolCalling);
+      setSupportsThinking(cached.thinking);
     } else {
       setSupportsToolCalling(false);
       setSupportsThinking(false);
     }
 
-  }, [activeModelId, activeModel?.engine, isModelLoading, activeRemoteTextModelId, activeRemoteModel?.capabilities?.supportsToolCalling, activeRemoteModel?.capabilities?.supportsThinking]);
+  }, [activeModelId, activeModel, activeModel?.engine, isModelLoading, activeRemoteTextModelId, activeRemoteModel?.capabilities?.supportsToolCalling, activeRemoteModel?.capabilities?.supportsThinking]);
 }

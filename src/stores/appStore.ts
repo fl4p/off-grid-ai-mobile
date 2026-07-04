@@ -6,6 +6,12 @@ import { DeviceInfo, DownloadedModel, ModelRecommendation, ONNXImageModel, Image
 import type { SearchProviderId } from '../services/tools/search';
 import { DEFAULT_SETTINGS_SYSTEM_PROMPT } from '../constants';
 
+/** Capabilities of a local model that can only be determined by loading it. */
+export interface ModelCapability {
+  toolCalling: boolean;
+  thinking: boolean;
+}
+
 function isUnknownLike(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return normalized.length === 0 || normalized === 'unknown';
@@ -95,6 +101,12 @@ interface AppState {
   setDownloadedModels: (models: DownloadedModel[]) => void;
   addDownloadedModel: (model: DownloadedModel) => void;
   removeDownloadedModel: (modelId: string) => void;
+  // Tool-calling / thinking capability, detected the first time a local model is
+  // loaded and cached here so a cold start knows it before the model lazily loads
+  // on first send (downloadedModels is rebuilt from a disk scan each launch, so
+  // capability can't ride on the model object — it lives in this persisted map).
+  modelCapabilities: Record<string, ModelCapability>;
+  setModelCapability: (modelId: string, caps: ModelCapability) => void;
   activeModelId: string | null;
   setActiveModelId: (modelId: string | null) => void;
   /** Last text model the user explicitly selected. Persists across residency
@@ -268,7 +280,19 @@ export const useAppStore = create<AppState>()(
       setDeviceInfo: (info) => set({ deviceInfo: info }),
       setModelRecommendation: (rec) => set({ modelRecommendation: rec }),
       downloadedModels: [],
-      setDownloadedModels: (models) => set({ downloadedModels: models.filter(m => !isExcludedTextModel(m)) }),
+      setDownloadedModels: (models) => set((state) => {
+        const downloadedModels = models.filter(m => !isExcludedTextModel(m));
+        // Prune capability-cache entries for models that no longer exist, so the
+        // persisted map can't grow unbounded as models are added/removed on disk.
+        // Skip pruning on an empty list — a transient/partial scan shouldn't wipe
+        // caps for models that are still installed.
+        if (downloadedModels.length === 0) return { downloadedModels };
+        const presentIds = new Set(downloadedModels.map(m => m.id));
+        const modelCapabilities = Object.fromEntries(
+          Object.entries(state.modelCapabilities).filter(([id]) => presentIds.has(id)),
+        );
+        return { downloadedModels, modelCapabilities };
+      }),
       addDownloadedModel: (model) =>
         set((state) => {
           if (isExcludedTextModel(model)) return state;
@@ -277,10 +301,23 @@ export const useAppStore = create<AppState>()(
           };
         }),
       removeDownloadedModel: (modelId) =>
-        set((state) => ({
-          downloadedModels: state.downloadedModels.filter((m) => m.id !== modelId),
-          activeModelId: state.activeModelId === modelId ? null : state.activeModelId,
-        })),
+        set((state) => {
+          const { [modelId]: _removed, ...remainingCaps } = state.modelCapabilities;
+          return {
+            downloadedModels: state.downloadedModels.filter((m) => m.id !== modelId),
+            activeModelId: state.activeModelId === modelId ? null : state.activeModelId,
+            modelCapabilities: remainingCaps,
+          };
+        }),
+      modelCapabilities: {},
+      setModelCapability: (modelId, caps) =>
+        set((state) => {
+          const prev = state.modelCapabilities[modelId];
+          if (prev && prev.toolCalling === caps.toolCalling && prev.thinking === caps.thinking) {
+            return state;
+          }
+          return { modelCapabilities: { ...state.modelCapabilities, [modelId]: caps } };
+        }),
       activeModelId: null,
       setActiveModelId: (modelId) => set({ activeModelId: modelId }),
       lastTextModelId: null,
@@ -385,6 +422,7 @@ export const useAppStore = create<AppState>()(
         checklistDismissed: state.checklistDismissed,
         activeModelId: state.activeModelId,
         lastTextModelId: state.lastTextModelId,
+        modelCapabilities: state.modelCapabilities,
         settings: state.settings,
         activeImageModelId: state.activeImageModelId,
         generatedImages: state.generatedImages,
