@@ -17,6 +17,7 @@ import { createStyles } from './ProjectDetailScreen.styles';
 import { useChatStore, useProjectStore, useAppStore } from '../stores';
 import { useNewChatModel } from '../hooks/useActiveTextModel';
 import { Conversation } from '../types';
+import { getLastVisibleMessage } from '../utils/messageContent';
 import { RootStackParamList } from '../navigation/types';
 import { KnowledgeBaseSection } from './ProjectDetailKnowledgeBaseSection';
 
@@ -119,7 +120,7 @@ export const ProjectDetailScreen: React.FC = () => {
   );
 
   const renderChat = ({ item }: { item: Conversation }) => {
-    const lastMessage = item.messages[item.messages.length - 1];
+    const lastMessage = getLastVisibleMessage(item.messages);
 
     return (
       <Swipeable

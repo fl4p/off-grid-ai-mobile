@@ -264,7 +264,10 @@ function handleGenerationFailure(
 ): void {
   const msg = error?.message || error?.toString?.() || 'Failed to generate response';
   logger.error('[ChatGen] Generation failed:', msg, error);
-  const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens') || msg.includes('Input token ids');
+  // Local llama.cpp overflow phrasings plus the remote/compaction patterns, so a
+  // context error that survives compaction still gets the actionable modal.
+  const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens')
+    || msg.includes('Input token ids') || contextCompactionService.isContextFullError(error);
   if (isContextOverflow) {
     const dismiss = () => deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
     deps.setAlertState({

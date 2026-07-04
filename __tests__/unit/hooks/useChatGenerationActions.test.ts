@@ -1265,6 +1265,19 @@ describe('generateWithCompactionRetry — context full error path', () => {
     expect(deps.generatingForConversationRef.current).toBeNull();
   });
 
+  it('shows the actionable modal (not an inline error) when a context-full error survives compaction', async () => {
+    // Remote-style context error: matched by isContextFullError but none of the
+    // local llama.cpp substrings — must still get the Context-window-full modal.
+    mockGenerateResponse.mockRejectedValue(new Error('context length exceeded'));
+    mockIsContextFullError.mockReturnValue(true);
+    mockCompact.mockResolvedValue([{ id: 'system', role: 'system', content: 's', timestamp: 0 }]);
+    (llmService.stopGeneration as jest.Mock).mockResolvedValue(undefined);
+    const deps = makeGenerationDeps();
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
+    expect(deps.setAlertState).toHaveBeenCalledWith(expect.objectContaining({ title: 'Context window full', prominentMessage: true }));
+    expect(deps.addMessage).not.toHaveBeenCalledWith('conv-1', expect.objectContaining({ isError: true }));
+  });
+
   it('retries with compacted messages on context full error', async () => {
     const compactedMsgs = [{ id: 'system', role: 'system', content: 'summary', timestamp: 0 }];
     mockGenerateResponse

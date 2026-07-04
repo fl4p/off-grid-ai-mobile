@@ -22,6 +22,7 @@ import { useChatStore, useProjectStore, useAppStore, useRemoteServerStore } from
 import { useActiveTextModel } from '../hooks/useActiveTextModel';
 import { onnxImageGeneratorService, activeModelService, llmService, remoteServerManager } from '../services';
 import { Conversation, DownloadedModel, RemoteModel } from '../types';
+import { getLastVisibleMessage } from '../utils/messageContent';
 
 /**
  * Human-readable model name for a conversation row. Remote conversations resolve
@@ -192,7 +193,7 @@ export const ChatsListScreen: React.FC = () => {
 
   const renderChat = ({ item, index }: { item: Conversation; index: number }) => {
     const project = item.projectId ? getProject(item.projectId) : null;
-    const lastMessage = item.messages[item.messages.length - 1];
+    const lastMessage = getLastVisibleMessage(item.messages);
     const modelName = resolveConversationModelName(item, downloadedModels, discoveredModels);
 
     return (

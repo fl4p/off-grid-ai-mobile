@@ -6,7 +6,30 @@
  * Priority: P0 (Critical) - Prevents raw control tokens from appearing in chat.
  */
 
-import { stripControlTokens } from '../../../src/utils/messageContent';
+import { stripControlTokens, getLastVisibleMessage } from '../../../src/utils/messageContent';
+import type { Message } from '../../../src/types';
+
+const msg = (over: Partial<Message>): Message => ({ id: 'm', role: 'assistant', content: '', timestamp: 0, ...over });
+
+describe('getLastVisibleMessage', () => {
+  it('returns the last message when none are system-info', () => {
+    const messages = [msg({ id: 'a', role: 'user', content: 'hi' }), msg({ id: 'b', content: 'hello' })];
+    expect(getLastVisibleMessage(messages)?.id).toBe('b');
+  });
+
+  it('skips trailing system-info/error messages', () => {
+    const messages = [
+      msg({ id: 'a', role: 'user', content: 'draw a cat' }),
+      msg({ id: 'b', content: 'Generation failed: boom', isSystemInfo: true, isError: true }),
+    ];
+    expect(getLastVisibleMessage(messages)?.id).toBe('a');
+  });
+
+  it('returns undefined for an empty list or an all-system-info list', () => {
+    expect(getLastVisibleMessage([])).toBeUndefined();
+    expect(getLastVisibleMessage([msg({ id: 'x', isSystemInfo: true })])).toBeUndefined();
+  });
+});
 
 describe('stripControlTokens', () => {
   // ==========================================================================
