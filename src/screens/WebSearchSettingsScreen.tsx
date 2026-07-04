@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -13,8 +14,18 @@ import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors, ThemeShadows } from '../theme';
 import { TYPOGRAPHY, SPACING } from '../constants';
 import { useAppStore } from '../stores';
-import { SEARCH_PROVIDER_OPTIONS } from '../services/tools/search';
+import { SEARCH_PROVIDER_OPTIONS, validateSearchProviderKey } from '../services/tools/search';
+import type { KeyValidationResult } from '../services/tools/search';
 import { getSearchApiKey, storeSearchApiKey } from '../services/tools/search/searchKeychain';
+
+/** Local UI state for the key check: idle/validating plus the API outcomes. */
+type ValidationState =
+  | { status: 'idle' }
+  | { status: 'validating' }
+  | KeyValidationResult;
+
+/** Debounce before hitting the provider so we don't validate on every keystroke. */
+const VALIDATE_DEBOUNCE_MS = 700;
 
 export const WebSearchSettingsScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -26,19 +37,56 @@ export const WebSearchSettingsScreen: React.FC = () => {
 
   const selectedOption = SEARCH_PROVIDER_OPTIONS.find(o => o.id === searchProvider);
   const needsKey = selectedOption?.requiresApiKey ?? false;
+  // Brave requires no key but accepts one to upgrade to its official API, so the
+  // key field shows for both "requires" and "optional" providers.
+  const acceptsKey = needsKey || (selectedOption?.optionalApiKey ?? false);
 
   // The key lives in the keychain, not settings — mirror it into local state.
   const [apiKey, setApiKey] = useState('');
+  const [validation, setValidation] = useState<ValidationState>({ status: 'idle' });
+
+  // Pending debounce timer + abort controller for the in-flight validation, so a
+  // new keystroke (or unmount / provider switch) cancels the previous check.
+  const pendingValidation = useRef<{ timer: ReturnType<typeof setTimeout>; controller: AbortController } | null>(null);
+  const cancelPendingValidation = () => {
+    if (pendingValidation.current) {
+      clearTimeout(pendingValidation.current.timer);
+      pendingValidation.current.controller.abort();
+      pendingValidation.current = null;
+    }
+  };
+
   useEffect(() => {
     let active = true;
-    if (!needsKey) { setApiKey(''); return; }
+    // Loading the stored key (or switching provider) must NOT trigger validation
+    // — only an explicit edit does. Reset to idle so the mount shows the neutral
+    // "stored" hint, not a verified/rejected badge from a background probe.
+    cancelPendingValidation();
+    setValidation({ status: 'idle' });
+    if (!acceptsKey) { setApiKey(''); return; }
     getSearchApiKey(searchProvider).then(key => { if (active) setApiKey(key); });
     return () => { active = false; };
-  }, [searchProvider, needsKey]);
+  }, [searchProvider, acceptsKey]);
+
+  // Cancel any pending validation when the screen unmounts.
+  useEffect(() => cancelPendingValidation, []);
 
   const onChangeKey = (text: string) => {
     setApiKey(text);
     storeSearchApiKey(searchProvider, text).catch(() => {});
+
+    // Validate only on an actual edit — debounced, cancelling the prior request.
+    cancelPendingValidation();
+    const key = text.trim();
+    if (!acceptsKey || !key) { setValidation({ status: 'idle' }); return; }
+    setValidation({ status: 'validating' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      validateSearchProviderKey(searchProvider, key, controller.signal)
+        .then(result => setValidation(result))
+        .catch(() => { /* aborted by cancelPendingValidation */ });
+    }, VALIDATE_DEBOUNCE_MS);
+    pendingValidation.current = { timer, controller };
   };
 
   return (
@@ -64,11 +112,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
               >
                 <View style={styles.settingInfo}>
                   <Text style={styles.settingLabel}>{option.label}</Text>
-                  <Text style={styles.settingHint}>
-                    {option.requiresApiKey
-                      ? 'Sends your query to serper.dev with your API key. Requires a key.'
-                      : 'Runs on your device against Brave. No API key, no third-party proxy.'}
-                  </Text>
+                  <Text style={styles.settingHint}>{option.hint}</Text>
                 </View>
                 <Icon
                   name={selected ? 'check-circle' : 'circle'}
@@ -80,7 +124,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
           })}
         </Card>
 
-        {needsKey && (
+        {acceptsKey && (
           <Card style={styles.section}>
             <Text style={styles.sectionTitle}>{selectedOption?.label} API Key</Text>
             <ApiKeyInput
@@ -95,14 +139,51 @@ export const WebSearchSettingsScreen: React.FC = () => {
               toggleStyle={styles.apiKeyToggle}
             />
             {apiKey.trim() ? (
-              <Text style={styles.settingHint}>
-                Stored on device in the keychain. Sent only to serper.dev when searching.
-              </Text>
+              <>
+                {validation.status === 'idle' && (
+                  <Text style={styles.settingHint}>
+                    Stored on device in the keychain, used only when this provider runs a search.
+                  </Text>
+                )}
+                {validation.status === 'validating' && (
+                  <View style={styles.warningRow} testID="search-key-validating">
+                    <ActivityIndicator size="small" color={colors.textMuted} />
+                    <Text style={styles.warningText}>Checking the key with {selectedOption?.label}...</Text>
+                  </View>
+                )}
+                {validation.status === 'valid' && (
+                  <View style={styles.warningRow} testID="search-key-valid">
+                    <Icon name="check-circle" size={14} color={colors.success} />
+                    <Text style={[styles.warningText, { color: colors.success }]}>
+                      Key verified. Stored on device in the keychain, used only when this provider runs a search.
+                    </Text>
+                  </View>
+                )}
+                {validation.status === 'invalid' && (
+                  <View style={styles.warningRow} testID="search-key-invalid">
+                    <Icon name="x-circle" size={14} color={colors.error} />
+                    <Text style={[styles.warningText, { color: colors.error }]}>
+                      {validation.message}{' '}
+                      {selectedOption?.optionalApiKey
+                        ? 'Brave keeps running keyless on your device until the key works.'
+                        : 'Searches fall back to on-device Brave until the key works.'}
+                    </Text>
+                  </View>
+                )}
+                {validation.status === 'unknown' && (
+                  <View style={styles.warningRow} testID="search-key-unknown">
+                    <Icon name="alert-circle" size={14} color={colors.warning} />
+                    <Text style={styles.warningText}>{validation.message}</Text>
+                  </View>
+                )}
+              </>
             ) : (
               <View style={styles.warningRow}>
                 <Icon name="alert-circle" size={14} color={colors.textMuted} />
                 <Text style={styles.warningText}>
-                  No key set, so searches fall back to on-device Brave until you add one.
+                  {selectedOption?.optionalApiKey
+                    ? 'No key set, so Brave runs keyless on your device until you add one.'
+                    : 'No key set, so searches fall back to on-device Brave until you add one.'}
                 </Text>
               </View>
             )}
@@ -112,7 +193,7 @@ export const WebSearchSettingsScreen: React.FC = () => {
         <Card style={styles.infoCard}>
           <Icon name="info" size={18} color={colors.textMuted} />
           <Text style={styles.infoText}>
-            Brave runs the search on your device, so no query leaves for a third-party service. Serper returns Google results, including answer boxes, but sends each query to serper.dev.
+            Brave keeps the query on your device by default and only ever sends it to Brave. Adding a free Brave key switches to Brave's search API for steadier results. Serper returns Google results, including answer boxes, but sends each query to serper.dev.
           </Text>
         </Card>
       </ScrollView>

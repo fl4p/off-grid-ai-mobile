@@ -1,7 +1,3 @@
-/**
- * GenerationService helper implementations — extracted to keep generationService.ts under 350 lines.
- * All functions receive the GenerationService instance as `svc: any` and mutate its internal state.
- */
 import { llmService } from './llm';
 import { liteRTService } from './litert';
 import { getActiveEngineService } from './engines';
@@ -10,16 +6,15 @@ import type { Message, GenerationMeta } from '../types';
 import { runToolLoop, buildLiteRTHistory } from './generationToolLoop';
 import type { ToolResult } from './tools/types';
 import type { GenerationOptions, CompletionResult } from './providers/types';
+import type { MemoryRecallSummary } from './memory';
 import logger from '../utils/logger';
 
 export const FLUSH_INTERVAL_MS = 50; // ~20 updates/sec
 type StreamChunk = string | { content?: string; reasoningContent?: string };
-
 /** Returns true when the currently active model uses LiteRT engine. */
 function isLiteRTActive(): boolean {
   return getActiveEngineService() === liteRTService;
 }
-
 export interface GenerationRequest {
   conversationId: string;
   messages: Message[];
@@ -32,6 +27,7 @@ export interface GenerationWithToolsRequest {
   options: {
     enabledToolIds: string[];
     projectId?: string;
+    recalledMemories?: MemoryRecallSummary[];
     onToolCallStart?: (name: string, args: Record<string, any>) => void;
     onToolCallComplete?: (name: string, result: ToolResult) => void;
     onFirstToken?: () => void;
@@ -68,7 +64,9 @@ function buildLiteRTMeta(svc: any, modelName: string | undefined): GenerationMet
 export function buildGenerationMetaImpl(svc: any): GenerationMeta {
   const meta = buildBaseGenerationMeta(svc);
   const routed = svc.state?.routedToolNames;
+  const recalled = svc.currentRuntimeMeta?.recalledMemories;
   if (Array.isArray(routed) && routed.length > 0) meta.routedToolNames = routed;
+  if (!svc.isUsingRemoteProvider() && Array.isArray(recalled) && recalled.length > 0) meta.recalledMemories = recalled;
   return meta;
 }
 function buildBaseGenerationMeta(svc: any): GenerationMeta {
@@ -109,9 +107,8 @@ function buildBaseGenerationMeta(svc: any): GenerationMeta {
   };
 }
 
-/** Clear streaming buffers and reset generation state after a failure so the
- *  "thinking…" indicator stops and the single global isGenerating flag is freed
- *  (otherwise every other conversation stays blocked). */
+/** Clear streaming buffers and reset generation state after a failure so the "thinking…"
+ *  indicator stops and the single global isGenerating flag is freed (else other chats stay blocked). */
 function resetAfterGenerationError(svc: any, opts?: { markServerOffline?: boolean }): void {
   if (opts?.markServerOffline) {
     const failedServerId = useRemoteServerStore.getState().activeServerId;
@@ -160,7 +157,9 @@ export function buildToolLoopHandlersImpl(svc: any) {
       svc.state.streamingContent = content;
       useChatStore.getState().appendToStreamingMessage(content);
     },
-    onToolsRouted: (names: string[]) => { svc.state.routedToolNames = names; },
+    onToolsRouted: (names: string[]) => { svc.state.routedToolNames = names; svc.notifyStallProgress(); },
+    drainSteeringMessages: () => svc.drainSteeringMessages(),
+    onSteering: () => svc.notifyStallProgress(), // steering is progress — poke the stall watchdog
   };
 }
 
@@ -381,6 +380,7 @@ export async function generateResponseImpl(
   }
 }
 
+
 export async function generateRemoteResponseImpl(
   svc: any,
   req: GenerationRequest,
@@ -464,7 +464,6 @@ export async function generateRemoteWithToolsImpl(
   const { conversationId, messages, options } = req;
   if (!(await prepareGenerationImpl(svc, conversationId))) return;
   const provider = svc.getCurrentProvider();
-
   if (!provider) { svc.resetState(); throw new Error('No remote provider available'); }
 
   const { enabledToolIds, projectId, ...callbacks } = options;
@@ -477,23 +476,20 @@ export async function generateRemoteWithToolsImpl(
       forceRemote: true,
     });
   } catch (error) {
-    // Without this the state was left with isGenerating/isThinking=true, so the
-    // "thinking…" indicator spun forever and — because isGenerating is a single
-    // global flag — every other conversation was blocked from generating too.
+    // Without this, isGenerating/isThinking stayed true — spinner spun forever and
+    // (single global flag) every other chat was blocked. Don't mark the server offline:
+    // a runToolLoop failure can be a tool/context error the caller recovers from via
+    // compaction, and nothing flips health back — a false offline would stick.
     if (svc.abortRequested) return;
     logger.error('[GenerationService] Remote tool generation error:', error);
-    // Don't mark the server offline here: a runToolLoop failure can be a tool
-    // error or a context-length error the caller recovers from via compaction,
-    // and nothing flips health back to healthy — a false offline would stick.
     resetAfterGenerationError(svc);
     throw error;
   }
 
-  if (!svc.abortRequested) {
-    svc.forceFlushTokens();
-    const generationTime = svc.state.startTime ? Date.now() - svc.state.startTime : undefined;
-    useChatStore.getState().finalizeStreamingMessage(conversationId, generationTime, buildGenerationMetaImpl(svc));
-    svc.checkSharePrompt();
-    svc.resetState();
-  }
+  if (svc.abortRequested) return; // stopGeneration() already finalized
+  svc.forceFlushTokens();
+  const generationTime = svc.state.startTime ? Date.now() - svc.state.startTime : undefined;
+  useChatStore.getState().finalizeStreamingMessage(conversationId, generationTime, buildGenerationMetaImpl(svc));
+  svc.checkSharePrompt();
+  svc.resetState();
 }

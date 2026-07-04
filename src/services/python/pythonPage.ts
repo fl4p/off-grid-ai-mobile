@@ -13,7 +13,7 @@
 
 /** Message from the page to the runtime service. */
 export interface PythonPageMessage {
-  type: 'ready' | 'result' | 'boot_error';
+  type: 'booting' | 'ready' | 'result' | 'boot_error' | 'fs_snapshot' | 'fs_restore';
   id?: string;
   ok?: boolean;
   stdout?: string;
@@ -21,9 +21,16 @@ export interface PythonPageMessage {
   result?: string;
   error?: string;
   version?: string;
+  /** Boot progress marker (for `type: 'booting'`): which phase the page reached. */
+  phase?: string;
   /** Base64 PNGs of matplotlib figures captured after the run. */
   images?: string[];
+  /** Workspace snapshot manifest (JSON string) for `type: 'fs_snapshot'`. */
+  data?: string;
 }
+
+/** The persistent, snapshotted working directory both run_python and the fs tools use. */
+export const PYTHON_WORKSPACE_DIR = '/workspace';
 
 /** Request injected into the page. */
 export interface PythonPageRequest {
@@ -147,11 +154,138 @@ export function buildPythonPageHtml(): string {
     }
   }
 
+  // The persistent workspace: run_python and the fs tools both operate here (cwd),
+  // and the native side snapshots/restores it so files survive an interpreter
+  // reload. Set up + entered before 'ready' so the first op already sees it.
+  var WORKSPACE = ${JSON.stringify(PYTHON_WORKSPACE_DIR)};
+  var WORKSPACE_INIT_SRC =
+    'import os as _os\\n' +
+    '_os.makedirs(' + JSON.stringify(WORKSPACE) + ', exist_ok=True)\\n' +
+    '_os.chdir(' + JSON.stringify(WORKSPACE) + ')\\n';
+
+  // Snapshot: walk the workspace into a JSON manifest of {path, base64}. Capped so a
+  // runaway workspace can't build a giant blob. Restore: write the files back.
+  var FS_SNAPSHOT_SRC =
+    'import os as _os, json as _json, base64 as _b64\\n' +
+    'def _fs_snapshot():\\n' +
+    '    root = ' + JSON.stringify(WORKSPACE) + '\\n' +
+    '    files = []\\n' +
+    '    total = 0\\n' +
+    '    limit = 16 * 1024 * 1024\\n' +
+    '    if _os.path.isdir(root):\\n' +
+    '        for dp, _d, fns in _os.walk(root):\\n' +
+    '            for fn in fns:\\n' +
+    '                full = _os.path.join(dp, fn)\\n' +
+    '                rel = _os.path.relpath(full, root)\\n' +
+    '                try:\\n' +
+    '                    with open(full, "rb") as f:\\n' +
+    '                        data = f.read()\\n' +
+    '                except Exception:\\n' +
+    '                    continue\\n' +
+    '                if total + len(data) > limit:\\n' +
+    '                    return _json.dumps({"truncated": True, "files": files})\\n' +
+    '                total += len(data)\\n' +
+    '                files.append({"path": rel, "b64": _b64.b64encode(data).decode()})\\n' +
+    '    return _json.dumps({"truncated": False, "files": files})\\n';
+  // Restore CLEARS the workspace first, so swapping to another project's snapshot
+  // never leaves the previous project's files behind. rmtree removes cwd, so we
+  // recreate + re-enter it.
+  var FS_RESTORE_SRC =
+    'import os as _os, json as _json, base64 as _b64, shutil as _sh\\n' +
+    'def _fs_restore(_raw):\\n' +
+    '    root = ' + JSON.stringify(WORKSPACE) + '\\n' +
+    '    _d = _json.loads(_raw)\\n' +
+    '    if _os.path.isdir(root):\\n' +
+    '        _sh.rmtree(root, ignore_errors=True)\\n' +
+    '    _os.makedirs(root, exist_ok=True)\\n' +
+    '    _os.chdir(root)\\n' +
+    '    for _f in _d.get("files", []):\\n' +
+    '        _p = _os.path.join(root, _f["path"])\\n' +
+    '        _dir = _os.path.dirname(_p)\\n' +
+    '        if _dir:\\n' +
+    '            _os.makedirs(_dir, exist_ok=True)\\n' +
+    '        with open(_p, "wb") as _fh:\\n' +
+    '            _fh.write(_b64.b64decode(_f["b64"]))\\n' +
+    '    return len(_d.get("files", []))\\n';
+  // Export: zip the workspace and return the archive as base64 (for a .zip the user saves).
+  var FS_ZIP_SRC =
+    'import os as _os, io as _io, base64 as _b64, zipfile as _zip\\n' +
+    'def _fs_zip():\\n' +
+    '    root = ' + JSON.stringify(WORKSPACE) + '\\n' +
+    '    buf = _io.BytesIO()\\n' +
+    '    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as z:\\n' +
+    '        if _os.path.isdir(root):\\n' +
+    '            for dp, _d, fns in _os.walk(root):\\n' +
+    '                for fn in fns:\\n' +
+    '                    full = _os.path.join(dp, fn)\\n' +
+    '                    z.write(full, _os.path.relpath(full, root))\\n' +
+    '    return _b64.b64encode(buf.getvalue()).decode()\\n';
+  // Read one workspace file's full text for the in-app HTML preview. Unlike the
+  // read_file tool (which caps output for the model), this returns the whole file
+  // over the dedicated control channel so a large self-contained game HTML is not
+  // clipped by the stdout ceiling. The path is confined to the workspace and the
+  // size capped so a runaway file can not build a giant postMessage payload.
+  var FS_READFILE_SRC =
+    'import os as _os\\n' +
+    'def _fs_readfile(rel):\\n' +
+    '    root = ' + JSON.stringify(WORKSPACE) + '\\n' +
+    '    full = _os.path.realpath(_os.path.join(root, rel))\\n' +
+    '    if full != root and not full.startswith(root + "/"):\\n' +
+    '        raise ValueError("path escapes the workspace: " + rel)\\n' +
+    '    if not _os.path.isfile(full):\\n' +
+    '        raise ValueError("file not found: " + rel)\\n' +
+    '    if _os.path.getsize(full) > 8 * 1024 * 1024:\\n' +
+    '        raise ValueError("file too large to preview (over 8 MB)")\\n' +
+    '    with open(full, "r", errors="replace") as f:\\n' +
+    '        return f.read()\\n';
+
+  // Boot heartbeats: 'script' proves the page loaded and this script ran (rules
+  // out a blank WebView / failed page load); 'loading-pyodide' means we entered
+  // loadPyodide (the slow WASM fetch+compile). If boot times out, the last phase
+  // the service saw pinpoints where it stalled.
+  post({ type: 'booting', phase: 'script' });
   var bootPromise = (async function () {
+    post({ type: 'booting', phase: 'loading-pyodide' });
     var pyodide = await loadPyodide({ indexURL: './' });
     window.__pyodide = pyodide;
+    await pyodide.runPythonAsync(WORKSPACE_INIT_SRC);
     return pyodide;
   })();
+
+  // Native-side control ops for workspace persistence/export. Each posts a dedicated
+  // message (not stdout) so a large manifest/archive isn't clipped by the stdout cap.
+  window.__fsSnapshot = async function (id) {
+    try {
+      var pyodide = await bootPromise;
+      await pyodide.runPythonAsync(FS_SNAPSHOT_SRC);
+      var data = pyodide.globals.get('_fs_snapshot')();
+      post({ type: 'fs_snapshot', id: id, ok: true, data: data });
+    } catch (e) { post({ type: 'fs_snapshot', id: id, ok: false, error: String((e && e.message) || e) }); }
+  };
+  window.__fsRestore = async function (id, raw) {
+    try {
+      var pyodide = await bootPromise;
+      await pyodide.runPythonAsync(FS_RESTORE_SRC);
+      pyodide.globals.get('_fs_restore')(raw);
+      post({ type: 'fs_restore', id: id, ok: true });
+    } catch (e) { post({ type: 'fs_restore', id: id, ok: false, error: String((e && e.message) || e) }); }
+  };
+  window.__fsZip = async function (id) {
+    try {
+      var pyodide = await bootPromise;
+      await pyodide.runPythonAsync(FS_ZIP_SRC);
+      var data = pyodide.globals.get('_fs_zip')();
+      post({ type: 'fs_snapshot', id: id, ok: true, data: data });
+    } catch (e) { post({ type: 'fs_snapshot', id: id, ok: false, error: String((e && e.message) || e) }); }
+  };
+  window.__fsReadFile = async function (id, rel) {
+    try {
+      var pyodide = await bootPromise;
+      await pyodide.runPythonAsync(FS_READFILE_SRC);
+      var data = pyodide.globals.get('_fs_readfile')(rel);
+      post({ type: 'fs_snapshot', id: id, ok: true, data: data });
+    } catch (e) { post({ type: 'fs_snapshot', id: id, ok: false, error: String((e && e.message) || e) }); }
+  };
 
   window.__runPython = async function (req) {
     var out = makeSink();
@@ -216,7 +350,8 @@ export function buildRunInjection(request: PythonPageRequest): string {
 export function parsePythonPageMessage(raw: string): PythonPageMessage | null {
   try {
     const msg = JSON.parse(raw);
-    if (msg && (msg.type === 'ready' || msg.type === 'result' || msg.type === 'boot_error')) {
+    const TYPES = ['ready', 'result', 'boot_error', 'booting', 'fs_snapshot', 'fs_restore'];
+    if (msg && TYPES.includes(msg.type)) {
       return msg as PythonPageMessage;
     }
   } catch {

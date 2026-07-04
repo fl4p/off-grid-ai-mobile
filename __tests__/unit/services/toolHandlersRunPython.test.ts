@@ -10,11 +10,13 @@ import { executeToolCall } from '../../../src/services/tools/handlers';
 const mockExecute = jest.fn();
 const mockIsInstalled = jest.fn();
 const mockRefreshStatus = jest.fn();
+const mockInstall = jest.fn();
 jest.mock('../../../src/services/python/pythonRuntimeService', () => ({
   pythonRuntimeService: {
     execute: (...args: any[]) => mockExecute(...args),
     isInstalled: () => mockIsInstalled(),
     refreshStatus: () => mockRefreshStatus(),
+    install: () => mockInstall(),
   },
 }));
 
@@ -32,6 +34,7 @@ describe('run_python handler', () => {
     jest.clearAllMocks();
     mockStatus = 'installed';
     mockIsInstalled.mockReturnValue(true);
+    mockInstall.mockResolvedValue(undefined);
   });
 
   it('errors when code is missing', async () => {
@@ -39,12 +42,14 @@ describe('run_python handler', () => {
     expect(result.error).toContain('Missing required parameter: code');
   });
 
-  it('tells the model how the user can install the runtime when missing', async () => {
+  it('self-heals a missing runtime: kicks off the re-download and tells the user it is updating', async () => {
     mockIsInstalled.mockReturnValue(false);
     const result = await runPython('print(1)');
     expect(result.error).toBeUndefined();
-    expect(result.content).toContain('not installed');
+    // The enabled-but-not-installed case re-downloads instead of dead-ending.
+    expect(result.content).toContain('downloading');
     expect(result.content).toContain('Settings > Tools');
+    expect(mockInstall).toHaveBeenCalledTimes(1);
     expect(mockExecute).not.toHaveBeenCalled();
   });
 
@@ -74,11 +79,14 @@ describe('run_python handler', () => {
     expect(result.content).toContain('use print()');
   });
 
-  it('truncates very long output', async () => {
-    mockExecute.mockResolvedValue({ ok: true, stdout: 'a'.repeat(10000), stderr: '' });
+  it('truncates very long output, keeping the tail (the end is what matters)', async () => {
+    mockExecute.mockResolvedValue({ ok: true, stdout: `HEAD_MARKER${'a'.repeat(10000)}TAIL_MARKER`, stderr: '' });
     const result = await runPython('print("a" * 10000)');
     expect(result.content.length).toBeLessThan(6200);
-    expect(result.content).toContain('[Output truncated]');
+    expect(result.content).toContain('[earlier output truncated]');
+    // The tail survives, the head is dropped.
+    expect(result.content).toContain('TAIL_MARKER');
+    expect(result.content).not.toContain('HEAD_MARKER');
   });
 
   it('surfaces execution timeouts as tool errors', async () => {
@@ -123,6 +131,6 @@ describe('run_python handler', () => {
     const result = await runPython('print(...)');
     // No unpaired surrogate survives the cut.
     expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result.content)).toBe(false);
-    expect(result.content).toContain('[Output truncated]');
+    expect(result.content).toContain('[earlier output truncated]');
   });
 });

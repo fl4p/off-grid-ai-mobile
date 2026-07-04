@@ -317,7 +317,18 @@ jest.mock('../../../src/components', () => ({
       </View>
     );
   },
-  GenerationSettingsModal: ({ visible, onClose, onDeleteConversation, onOpenProject, onOpenGallery, conversationImageCount, activeProjectName }: any) => {
+  GenerationSettingsModal: ({
+    visible,
+    onClose,
+    onDeleteConversation,
+    onOpenProject,
+    onOpenGallery,
+    onOpenMemory,
+    onMemoryEnabledChange,
+    memoryEnabled = true,
+    conversationImageCount,
+    activeProjectName,
+  }: any) => {
     const { View, Text, TouchableOpacity } = require('react-native');
     if (!visible) return null;
     return (
@@ -336,6 +347,11 @@ jest.mock('../../../src/components', () => ({
         {onOpenGallery && (
           <TouchableOpacity testID="open-gallery-btn" onPress={onOpenGallery}>
             <Text>Open Gallery</Text>
+          </TouchableOpacity>
+        )}
+        {onOpenMemory && onMemoryEnabledChange && memoryEnabled && (
+          <TouchableOpacity testID="open-memory-btn" onPress={onOpenMemory}>
+            <Text>Manage Memory</Text>
           </TouchableOpacity>
         )}
         {conversationImageCount > 0 && <Text testID="image-count">{conversationImageCount} images</Text>}
@@ -1369,6 +1385,86 @@ describe('ChatScreen', () => {
       fireEvent.press(getByTestId('open-project-btn'));
 
       expect(queryByTestId('project-selector-sheet')).toBeTruthy();
+    });
+
+    it('opens shared memory from settings when the chat has no project', () => {
+      const { conversationId } = setupFullChat();
+      mockRoute.params = { conversationId };
+
+      const { getByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+      mockNavigate.mockClear();
+      fireEvent.press(getByTestId('open-memory-btn'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('Memory', undefined);
+    });
+
+    it('hides memory management from settings when chat memory is disabled', () => {
+      const { modelId, conversationId } = setupFullChat();
+      useChatStore.setState({
+        conversations: [{
+          ...createConversation({
+            id: conversationId,
+            modelId,
+            messages: [createUserMessage('Hi')],
+          }),
+          memoryEnabled: false,
+        }],
+        activeConversationId: conversationId,
+      });
+      mockRoute.params = { conversationId };
+
+      const { getByTestId, queryByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+
+      expect(queryByTestId('open-memory-btn')).toBeNull();
+    });
+
+    it('hides memory management from settings when project memory is disabled', () => {
+      const { modelId, conversationId } = setupFullChat();
+      const project = {
+        ...createProject({ name: 'Disabled Memory Project' }),
+        memoryEnabled: false,
+      };
+      useProjectStore.setState({ projects: [project] });
+      useChatStore.setState({
+        conversations: [createConversation({
+          id: conversationId,
+          modelId,
+          projectId: project.id,
+          messages: [createUserMessage('Hi')],
+        })],
+        activeConversationId: conversationId,
+      });
+      mockRoute.params = { conversationId };
+
+      const { getByTestId, queryByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+
+      expect(queryByTestId('open-memory-btn')).toBeNull();
+    });
+
+    it('opens project memory from settings when the chat has a project', () => {
+      const { modelId, conversationId } = setupFullChat();
+      const project = createProject({ name: 'Memory Project' });
+      useProjectStore.setState({ projects: [project] });
+      useChatStore.setState({
+        conversations: [createConversation({
+          id: conversationId,
+          modelId,
+          projectId: project.id,
+          messages: [createUserMessage('Hi')],
+        })],
+        activeConversationId: conversationId,
+      });
+      mockRoute.params = { conversationId };
+
+      const { getByTestId } = renderChatScreen();
+      fireEvent.press(getByTestId('chat-settings-icon'));
+      mockNavigate.mockClear();
+      fireEvent.press(getByTestId('open-memory-btn'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('Memory', { projectId: project.id });
     });
 
     it('assigns project to conversation when selected', () => {
@@ -4306,6 +4402,42 @@ describe('ChatScreen', () => {
 
       // Should NOT show warning (no model loaded)
       expect(queryByText(/Settings changed/i)).toBeNull();
+    });
+  });
+
+  // The message FlatList is NOT inverted (newest at the bottom). Setting
+  // autoscrollToTopThreshold on a non-inverted list makes it snap to the real
+  // top when a content-size change lands the anchor near the top - which read as
+  // the chat jumping back to the beginning when a reply finished. Guard against
+  // that config regressing.
+  describe('message list scroll config', () => {
+    it('keeps minIndexForVisible but does not set autoscrollToTopThreshold', () => {
+      const { modelId } = setupFullChat();
+      // The message FlatList only renders when there are messages to show
+      // (an empty conversation renders EmptyChat instead).
+      const conversation = createConversation({
+        modelId,
+        messages: [
+          createUserMessage('Hello from before'),
+          createAssistantMessage('Hi there!'),
+        ],
+      });
+      useChatStore.setState({
+        conversations: [conversation],
+        activeConversationId: conversation.id,
+      });
+      mockRoute.params = { conversationId: conversation.id };
+
+      const { getByText, UNSAFE_getAllByType } = renderChatScreen();
+      // Sanity: the list actually rendered (not the EmptyChat fallback).
+      expect(getByText('Hi there!')).toBeTruthy();
+      const { FlatList } = require('react-native');
+
+      const lists = UNSAFE_getAllByType(FlatList);
+      expect(lists.length).toBeGreaterThan(0);
+      const mvcp = lists[0].props.maintainVisibleContentPosition;
+      expect(mvcp).toEqual({ minIndexForVisible: 0 });
+      expect(mvcp?.autoscrollToTopThreshold).toBeUndefined();
     });
   });
 });

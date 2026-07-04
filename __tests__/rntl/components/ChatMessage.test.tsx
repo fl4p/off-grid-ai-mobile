@@ -22,6 +22,7 @@ import {
   createDocumentAttachment,
   createGenerationMeta,
 } from '../../utils/factories';
+import type { GenerationMeta } from '../../../src/types';
 
 // The Clipboard warning is expected (deprecated in RN). No additional mock needed
 // as the tests will still work with the deprecated API.
@@ -601,6 +602,47 @@ describe('ChatMessage', () => {
       expect(onRetry).toHaveBeenCalledWith(message);
     });
 
+    it('calls onRemember when Save to Memory is pressed', async () => {
+      const onRemember = jest.fn(() => Promise.resolve());
+      const message = createAssistantMessage('Remember this research note');
+
+      const { getByTestId, getByText } = render(
+        <ChatMessage message={message} onRemember={onRemember} showActions={true} />
+      );
+
+      fireEvent(getByTestId('assistant-message'), 'longPress');
+
+      expect(getByText('Save to Memory')).toBeTruthy();
+      await act(async () => {
+        fireEvent.press(getByTestId('action-remember'));
+        await Promise.resolve();
+      });
+
+      expect(onRemember).toHaveBeenCalledWith(message);
+    });
+
+    it('saves only visible assistant response text to memory', async () => {
+      const onRemember = jest.fn(() => Promise.resolve());
+      const message = createAssistantMessage(
+        '<|channel|>analysis<|message|>hidden reasoning<|channel|>final<|message|>Visible answer',
+      );
+
+      const { getByTestId } = render(
+        <ChatMessage message={message} onRemember={onRemember} showActions={true} />
+      );
+
+      fireEvent(getByTestId('assistant-message'), 'longPress');
+      await act(async () => {
+        fireEvent.press(getByTestId('action-remember'));
+        await Promise.resolve();
+      });
+
+      expect(onRemember).toHaveBeenCalledWith(expect.objectContaining({
+        id: message.id,
+        content: 'Visible answer',
+      }));
+    });
+
     it('shows edit option for user messages', () => {
       const onEdit = jest.fn();
       const message = createUserMessage('Edit me');
@@ -853,6 +895,39 @@ describe('ChatMessage', () => {
       // Should not crash, just show message without metadata
       expect(getByText('No metadata')).toBeTruthy();
       expect(queryByTestId('generation-meta')).toBeNull();
+    });
+
+    it('shows recalled memories in an expandable local context row', () => {
+      const meta: GenerationMeta = {
+        ...createGenerationMeta(),
+        recalledMemories: [
+          {
+            id: 7,
+            scope: 'project',
+            kind: 'research_note',
+            sourceType: 'manual',
+            jurisdiction: 'Portugal',
+            asOfDate: '2026-07-03',
+            score: 0.8,
+            reason: 'lexical',
+          },
+        ],
+      };
+      const message = createAssistantMessage('Answer with memory context', {
+        generationMeta: meta,
+      });
+
+      const { getByTestId, getByText, queryByText } = render(<ChatMessage message={message} />);
+
+      expect(getByTestId('memory-recall-collapsible')).toBeTruthy();
+      expect(getByText('Memories used (1)')).toBeTruthy();
+      expect(queryByText('Memory #7')).toBeNull();
+
+      fireEvent.press(getByText('Memories used (1)'));
+
+      expect(getByTestId('memory-recall-7')).toBeTruthy();
+      expect(getByText('Memory #7')).toBeTruthy();
+      expect(getByText(/Project.*research note.*Manual.*Portugal.*as of 2026-07-03.*lexical/)).toBeTruthy();
     });
   });
 
@@ -1558,6 +1633,20 @@ describe('ChatMessage', () => {
 
       // User messages should render as plain text including the ** markers
       expect(getByText(/\*\*not bold\*\*/)).toBeTruthy();
+    });
+
+    it('renders emoji in user messages using the system font', () => {
+      const message = createUserMessage('ship it 🚀');
+
+      const { getByText } = render(<ChatMessage message={message} />);
+
+      const emojiNode = getByText('🚀');
+      const fontFamily = Object.assign(
+        {},
+        ...[].concat(emojiNode.props.style as never).filter(Boolean)
+      ).fontFamily;
+      expect(fontFamily).toMatch(/System|sans-serif/);
+      expect(fontFamily).not.toBe('Menlo');
     });
 
     it('renders markdown in thinking block content when expanded', () => {

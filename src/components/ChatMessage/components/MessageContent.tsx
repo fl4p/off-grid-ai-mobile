@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text } from 'react-native';
 import { ThinkingIndicator } from '../../ThinkingIndicator';
 import { MarkdownText } from '../../MarkdownText';
+import { EmojiText } from '../../EmojiText';
 import { BlinkingCursor } from './BlinkingCursor';
 import { ThinkingBlock } from './ThinkingBlock';
 import type { ParsedContent } from '../types';
@@ -90,13 +91,13 @@ export function MessageContent({
         if (parsedContent.response) {
           if (isUser) {
             return (
-              <Text
+              <EmojiText
                 testID="message-text"
                 style={[styles.text, styles.userText]}
                 selectable
               >
                 {parsedContent.response}
-              </Text>
+              </EmojiText>
             );
           }
           return (

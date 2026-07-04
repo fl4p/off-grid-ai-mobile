@@ -26,8 +26,24 @@ function webSearch(query: string): Promise<any> {
 describe('web_search provider selection (integration)', () => {
   const originalFetch = (globalThis as any).fetch;
 
+  // Reset shared globals before AND after each test so this suite neither
+  // inherits nor leaks state across the jest worker (keychain mock, store
+  // setting, and global.fetch).
+  beforeEach(() => {
+    (mockedKeychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
+    useAppStore.getState().updateSettings({ searchProvider: 'brave' });
+  });
+
+  const restoreFetch = () => {
+    if (originalFetch === undefined) {
+      delete (globalThis as any).fetch;
+    } else {
+      (globalThis as any).fetch = originalFetch;
+    }
+  };
+
   afterEach(() => {
-    (globalThis as any).fetch = originalFetch;
+    restoreFetch();
     (mockedKeychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
     useAppStore.getState().updateSettings({ searchProvider: 'brave' });
   });
@@ -68,7 +84,7 @@ describe('web_search provider selection (integration)', () => {
         <p class="snippet-description">From brave</p>
       </div>
     </body></html>`;
-    const fetchSpy = jest.fn().mockResolvedValue({ text: jest.fn().mockResolvedValue(html) });
+    const fetchSpy = jest.fn().mockResolvedValue({ ok: true, status: 200, text: jest.fn().mockResolvedValue(html) });
     (globalThis as any).fetch = fetchSpy;
 
     const result = await webSearch('react native');
@@ -82,6 +98,8 @@ describe('web_search provider selection (integration)', () => {
     (mockedKeychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
 
     const fetchSpy = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
       text: jest.fn().mockResolvedValue('<html><body>No matching documents</body></html>'),
     });
     (globalThis as any).fetch = fetchSpy;

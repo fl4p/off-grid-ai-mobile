@@ -1,5 +1,6 @@
 import { ragService, retrievalService, memoryService } from '../../services';
 import { embeddingService } from '../../services/rag/embedding';
+import type { MemoryRecallSummary } from '../../services/memory';
 import logger from '../../utils/logger';
 
 async function injectRagContext(projectId: string | undefined, query: string, prompt: string): Promise<string> {
@@ -25,15 +26,40 @@ async function injectRagContext(projectId: string | undefined, query: string, pr
   return prompt;
 }
 
-async function injectMemoryContext(projectId: string | undefined, query: string, prompt: string): Promise<string> {
+type InjectedChatContext = {
+  prompt: string;
+  recalledMemories: MemoryRecallSummary[];
+};
+
+async function injectMemoryContext(
+  projectId: string | undefined,
+  query: string,
+  prompt: string,
+): Promise<InjectedChatContext> {
   try {
     const memories = await memoryService.searchMemory({ projectId, query, topK: 6 });
-    if (memories.length === 0) return prompt;
-    return `${prompt}\n\n${memoryService.formatForPrompt(memories)}`;
+    if (memories.length === 0) return { prompt, recalledMemories: [] };
+    return {
+      prompt: `${prompt}\n\n${memoryService.formatForPrompt(memories)}`,
+      recalledMemories: memoryService.formatRecallSummaries(memories),
+    };
   } catch (err) {
     logger.error('[Memory] Context injection failed', err);
-    return prompt;
+    return { prompt, recalledMemories: [] };
   }
+}
+
+export async function buildChatContext(params: {
+  projectId?: string;
+  query: string;
+  prompt: string;
+  includeMemory?: boolean;
+}): Promise<InjectedChatContext> {
+  const memoryContext = params.includeMemory === false
+    ? { prompt: params.prompt, recalledMemories: [] }
+    : await injectMemoryContext(params.projectId, params.query, params.prompt);
+  const prompt = await injectRagContext(params.projectId, params.query, memoryContext.prompt);
+  return { prompt, recalledMemories: memoryContext.recalledMemories };
 }
 
 export async function injectChatContext(params: {
@@ -42,8 +68,5 @@ export async function injectChatContext(params: {
   prompt: string;
   includeMemory?: boolean;
 }): Promise<string> {
-  const withMemory = params.includeMemory === false
-    ? params.prompt
-    : await injectMemoryContext(params.projectId, params.query, params.prompt);
-  return injectRagContext(params.projectId, params.query, withMemory);
+  return (await buildChatContext(params)).prompt;
 }

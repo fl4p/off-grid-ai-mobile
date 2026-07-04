@@ -1,3 +1,5 @@
+import type { MemoryRecallSummary } from '../services/memory/types';
+
 // Model category types
 export type ModelCategory = 'text-generation' | 'image-generation' | 'vision' | 'code';
 // Model source and credibility types
@@ -202,6 +204,8 @@ export interface GenerationMeta {
   cacheType?: string; // KV cache quantization type
   /** Tool names sent to the model for this turn (built-in + routed MCP/ext tools). */
   routedToolNames?: string[];
+  /** Local memories recalled into this turn's prompt. Body text is intentionally not stored here. */
+  recalledMemories?: MemoryRecallSummary[];
 }
 
 // Chat-related types
@@ -246,6 +250,7 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   projectId?: string;
+  memoryEnabled?: boolean;
   compactionSummary?: string;
   compactionCutoffMessageId?: string;
 }
@@ -375,6 +380,7 @@ export interface Project {
   description: string;
   systemPrompt: string;
   icon?: string;
+  memoryEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }

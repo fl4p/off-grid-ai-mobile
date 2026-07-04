@@ -64,10 +64,19 @@ export interface GenerationOptions {
   systemPrompt?: string;
   /** Tools available for calling */
   tools?: ToolDefinition[];
+  /**
+   * How the model may use tools. 'auto' (default) lets it call any tool; 'none'
+   * declares the tools but forbids calling one, forcing a text answer. Sending
+   * 'none' (instead of an empty tools array) keeps the server's tool-call parser
+   * configured so a DeepSeek-family model can't leak raw tool-call tokens as text.
+   */
+  toolChoice?: 'auto' | 'none';
   /** Stop sequences */
   stopSequences?: string[];
   /** Whether to enable thinking/reasoning mode (Ollama: sends "think" param; others: parsed from response) */
   enableThinking?: boolean;
+  /** Apply maxTokens to the provider request. Used for internal bounded completions, not normal chat. */
+  limitOutputTokens?: boolean;
 }
 
 /** Tool definition for function calling */

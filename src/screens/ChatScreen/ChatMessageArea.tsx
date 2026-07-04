@@ -94,7 +94,7 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
   const proToolsCount = proToolsActiveCount + extToolCount;
   // The free Tools page lists only AVAILABLE_TOOLS, so its badge counts just those
   // (pro email/calendar ids are surfaced under Pro Tools instead, not double-counted).
-  const freeToolIds = new Set(AVAILABLE_TOOLS.map(t => t.id));
+  const freeToolIds = new Set(AVAILABLE_TOOLS.filter(t => !t.hidden).map(t => t.id));
   const freeToolsCount = chat.enabledTools.filter(id => freeToolIds.has(id)).length;
   const totalToolCount = freeToolsCount + proToolsCount;
   const handleProToolsPress = useOpenProTools();
@@ -178,7 +178,12 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           onTouchStart={() => Keyboard.dismiss()}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 100 }}
+          // Non-inverted chat list (newest at the bottom). Keep minIndexForVisible so
+          // content changes above the viewport don't shift the read position, but do NOT
+          // set autoscrollToTopThreshold: on a non-inverted list it snaps to the real top
+          // when a content-size change (e.g. the reply finalizing its markdown) lands the
+          // anchor near the top, which read as the chat jumping back to the beginning.
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           removeClippedSubviews={Platform.OS !== 'android'}
         />
       )}
@@ -259,7 +264,7 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
               supportsVision: chat.supportsVision,
               imageOnly: chat.imageModelLoaded && !chat.hasTextModel,
             })}
-            onToolsPress={() => tabNav.navigate('Tools')}
+            onToolsPress={() => tabNav.navigate('Tools', { memoryEnabled: chat.activeConversation?.memoryEnabled !== false && chat.activeProject?.memoryEnabled !== false })}
             enabledToolCount={freeToolsCount}
             showSettingsDot={showSettingsDot}
             mcpToolCount={proToolsCount}

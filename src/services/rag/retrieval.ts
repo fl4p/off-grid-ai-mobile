@@ -53,13 +53,15 @@ class RetrievalService {
       return ragDatabase.getChunksByProject(projectId, topK);
     }
 
-    const scored = stored.map(entry => ({
-      doc_id: entry.doc_id,
-      name: entry.name,
-      content: entry.content,
-      position: entry.position,
-      score: cosineSimilarity(queryVec, entry.embedding),
-    }));
+    const scored = stored
+      .map(entry => ({
+        doc_id: entry.doc_id,
+        name: entry.name,
+        content: entry.content,
+        position: entry.position,
+        score: cosineSimilarity(queryVec, entry.embedding),
+      }))
+      .filter(entry => Number.isFinite(entry.score) && entry.score > 0);
 
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, topK);

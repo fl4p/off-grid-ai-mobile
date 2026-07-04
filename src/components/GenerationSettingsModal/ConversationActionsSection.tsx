@@ -12,6 +12,7 @@ interface ConversationActionsSectionProps {
   onOpenProject?: () => void;
   onOpenGallery?: () => void;
   onDeleteConversation?: () => void;
+  onCopyTranscript?: () => void;
   conversationImageCount: number;
   activeProjectName?: string | null;
 }
@@ -20,13 +21,14 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
   onOpenProject,
   onOpenGallery,
   onDeleteConversation,
+  onCopyTranscript,
   conversationImageCount,
   activeProjectName,
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
 
-  const hasActions = onOpenProject || onOpenGallery || onDeleteConversation;
+  const hasActions = onOpenProject || onOpenGallery || onDeleteConversation || onCopyTranscript;
   if (!hasActions) {
     return null;
   }
@@ -49,6 +51,12 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
             Gallery ({conversationImageCount})
           </Text>
           <Icon name="chevron-right" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+      )}
+      {onCopyTranscript && (
+        <TouchableOpacity style={styles.actionRow} onPress={onCopyTranscript}>
+          <Icon name="copy" size={16} color={colors.textSecondary} />
+          <Text style={styles.actionText}>Copy Transcript</Text>
         </TouchableOpacity>
       )}
       {onDeleteConversation && (

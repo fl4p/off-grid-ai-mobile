@@ -144,7 +144,8 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     id: 'run_python',
     name: 'run_python',
     displayName: 'Python',
-    description: 'Execute Python 3.12 code in a sandboxed on-device interpreter and return stdout, stderr, and the value of the last expression. numpy and pandas are preinstalled and run fully offline. To use other packages, list them in "packages" and they install from PyPI before the code runs (needs network). matplotlib plots are captured automatically and shown to the user in the chat - just build a figure with matplotlib (add matplotlib to packages); you do not need to call savefig or plt.show. Write a complete script and print() what you need to see. Variables persist between calls in the same session.',
+    uiDescription: 'Run Python 3.12 on-device with numpy, pandas, and matplotlib, plus file tools (read, write, edit, grep) on a scratch workspace. Plots show in the chat.',
+    description: 'Execute Python 3.12 code in a sandboxed on-device interpreter and return stdout, stderr, and the value of the last expression. numpy, pandas, and matplotlib are preinstalled and run fully offline. To use other packages, list them in "packages" and they install from PyPI before the code runs (needs network). To show a plot, build a figure with matplotlib (import matplotlib.pyplot as plt; plt.plot(...)); it is captured automatically and shown to the user in the chat, so you do not need savefig or plt.show. Do not draw charts by printing HTML, SVG, or <img> data URIs - those are shown as raw text, not rendered; only matplotlib figures become images. Write a complete script and print() what you need to see. Variables persist between calls in the same session.',
     icon: 'terminal',
     // Core use (numpy/pandas) is offline, but package installs fetch from PyPI.
     // Flag it so the tool list shows the network indicator, matching the app's
@@ -158,7 +159,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
       },
       packages: {
         type: 'string',
-        description: 'Optional comma-separated PyPI packages to install before running, e.g. "matplotlib, requests". Omit for numpy/pandas (already installed).',
+        description: 'Optional comma-separated PyPI packages to install before running, e.g. "requests, beautifulsoup4". Omit for numpy/pandas/matplotlib (already installed).',
       },
     },
   },
@@ -177,11 +178,101 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  // --- Python filesystem tools -------------------------------------------------
+  // Backed by the on-device Python runtime; they read/write the same in-memory
+  // Pyodide filesystem run_python uses. Hidden as individual rows and unlocked as a
+  // group when Python is enabled (see resolveEnabledToolIds). Paths resolve against
+  // the interpreter's working directory (its per-session scratch workspace).
+  {
+    id: 'read_file',
+    name: 'read_file',
+    displayName: 'Read File',
+    description: 'Read a text file from the Python workspace (the in-memory filesystem shared with run_python). Returns the contents with line numbers. Use offset/limit to page through large files.',
+    icon: 'file-text',
+    requiresPython: true,
+    hidden: true,
+    parameters: {
+      path: { type: 'string', description: 'File path, relative to the workspace (the interpreter working directory)', required: true },
+      offset: { type: 'number', description: 'First line to read (0-based). Optional.' },
+      limit: { type: 'number', description: 'Maximum number of lines to read. Optional.' },
+    },
+  },
+  {
+    id: 'write_file',
+    name: 'write_file',
+    displayName: 'Write File',
+    description: 'Create or overwrite a text file in the Python workspace (shared with run_python). Parent directories are created automatically. The file persists for the session and is readable by run_python and read_file.',
+    icon: 'file-plus',
+    requiresPython: true,
+    hidden: true,
+    parameters: {
+      path: { type: 'string', description: 'File path to write, relative to the workspace', required: true },
+      content: { type: 'string', description: 'Full file contents to write', required: true },
+    },
+  },
+  {
+    id: 'edit_file',
+    name: 'edit_file',
+    displayName: 'Edit File',
+    description: 'Replace an exact string in a file in the Python workspace. old_string must match exactly and be unique unless replace_all is set. Fails clearly if it is missing or ambiguous.',
+    icon: 'edit-3',
+    requiresPython: true,
+    hidden: true,
+    parameters: {
+      path: { type: 'string', description: 'File path to edit, relative to the workspace', required: true },
+      old_string: { type: 'string', description: 'Exact text to replace (include surrounding context to make it unique)', required: true },
+      new_string: { type: 'string', description: 'Replacement text', required: true },
+      replace_all: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match. Optional.' },
+    },
+  },
+  {
+    id: 'list_files',
+    name: 'list_files',
+    displayName: 'List Files',
+    description: 'List the entries in a directory of the Python workspace (directories marked with a trailing slash). Defaults to the working directory.',
+    icon: 'folder',
+    requiresPython: true,
+    hidden: true,
+    parameters: {
+      path: { type: 'string', description: 'Directory to list, relative to the workspace. Optional (defaults to the working directory).' },
+    },
+  },
+  {
+    id: 'grep',
+    name: 'grep',
+    displayName: 'Grep',
+    description: 'Search file contents in the Python workspace with a Python regular expression, returning path:line matches. Optionally restrict to a subtree (path) or filename glob (include).',
+    icon: 'search',
+    requiresPython: true,
+    hidden: true,
+    parameters: {
+      pattern: { type: 'string', description: 'Python regular expression to search for', required: true },
+      path: { type: 'string', description: 'File or directory to search under, relative to the workspace. Optional (defaults to the working directory).' },
+      include: { type: 'string', description: 'Only search files whose name matches this glob, e.g. "*.py". Optional.' },
+    },
+  },
 ];
 
+/** Tool ids unlocked as a group whenever run_python is enabled. */
+const PYTHON_COMPANION_TOOL_IDS = AVAILABLE_TOOLS.filter(t => t.requiresPython).map(t => t.id);
+
+/**
+ * Expand the user's enabled tool ids into the set actually offered to the model.
+ * Enabling Python (run_python) also unlocks its filesystem companions so the model
+ * can read/write/edit/search the workspace, without cluttering the Tools list with
+ * five extra toggles. A no-op for every other tool.
+ */
+export function resolveEnabledToolIds(enabledToolIds: string[]): string[] {
+  if (!enabledToolIds.includes('run_python')) return enabledToolIds;
+  const merged = new Set(enabledToolIds);
+  for (const id of PYTHON_COMPANION_TOOL_IDS) merged.add(id);
+  return [...merged];
+}
+
 export function getToolsAsOpenAISchema(enabledToolIds: string[]) {
+  const resolved = resolveEnabledToolIds(enabledToolIds);
   return AVAILABLE_TOOLS
-    .filter(tool => enabledToolIds.includes(tool.id))
+    .filter(tool => resolved.includes(tool.id))
     .map(tool => ({
       type: 'function' as const,
       function: {
@@ -208,7 +299,8 @@ export function getToolsAsOpenAISchema(enabledToolIds: string[]) {
 }
 
 export function buildToolSystemPromptHint(enabledToolIds: string[]): string {
-  const enabledTools = AVAILABLE_TOOLS.filter(t => enabledToolIds.includes(t.id));
+  const resolved = resolveEnabledToolIds(enabledToolIds);
+  const enabledTools = AVAILABLE_TOOLS.filter(t => resolved.includes(t.id));
   if (enabledTools.length === 0) return '';
 
   const toolList = enabledTools.map(t => `- ${t.name}: ${t.description}`).join('\n');

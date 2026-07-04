@@ -122,6 +122,40 @@ describe('RagDatabase', () => {
       expect(results[0].content).toBe('hello');
       expect(results[0].embedding).toBeInstanceOf(Array);
     });
+
+    it('decodes offset typed-array embedding blobs', async () => {
+      await ragDatabase.ensureReady();
+      const rawEmbedding = new Float32Array([0.25, 0.5]).buffer;
+      const backingBuffer = new ArrayBuffer(16 + rawEmbedding.byteLength);
+      const offsetBlob = new Uint8Array(backingBuffer, 8, rawEmbedding.byteLength);
+      offsetBlob.set(new Uint8Array(rawEmbedding));
+      mockExecuteSync.mockReturnValue({
+        rows: [{
+          chunk_rowid: 1, doc_id: 42, name: 'doc.txt',
+          content: 'hello', position: 0, embedding: offsetBlob,
+        }],
+      });
+
+      const results = ragDatabase.getEmbeddingsByProject('proj1');
+      expect(results[0].embedding).toEqual([0.25, 0.5]);
+    });
+
+    it('decodes Buffer-like embedding objects with byte offsets', async () => {
+      await ragDatabase.ensureReady();
+      const rawEmbedding = new Float32Array([0.75, 1]).buffer;
+      const backingBuffer = new ArrayBuffer(16 + rawEmbedding.byteLength);
+      new Uint8Array(backingBuffer, 8, rawEmbedding.byteLength).set(new Uint8Array(rawEmbedding));
+      mockExecuteSync.mockReturnValue({
+        rows: [{
+          chunk_rowid: 1, doc_id: 42, name: 'doc.txt',
+          content: 'hello', position: 0,
+          embedding: { buffer: backingBuffer, byteOffset: 8, byteLength: rawEmbedding.byteLength },
+        }],
+      });
+
+      const results = ragDatabase.getEmbeddingsByProject('proj1');
+      expect(results[0].embedding).toEqual([0.75, 1]);
+    });
   });
 
   describe('hasEmbeddingsForDocument', () => {

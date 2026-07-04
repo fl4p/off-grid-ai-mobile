@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Switch } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { AppSheet } from '../AppSheet';
 import { useTheme, useThemedStyles } from '../../theme';
@@ -21,16 +21,30 @@ const DEFAULT_SETTINGS = {
   nBatch: 512,
 };
 
+function hasAnyAction(actions: Array<unknown>): boolean {
+  return actions.some(Boolean);
+}
+
+function afterSheetClose(action: (() => void) | undefined, runAfterClose: (action: () => void) => void): (() => void) | undefined {
+  if (!action) return undefined;
+  return () => runAfterClose(action);
+}
+
 interface GenerationSettingsModalProps {
   visible: boolean;
   onClose: () => void;
   onOpenProject?: () => void;
   onOpenGallery?: () => void;
+  onOpenMemory?: () => void;
   onDeleteConversation?: () => void;
+  onCopyTranscript?: () => void;
   onOpenTTSSettings?: () => void;
   conversationImageCount?: number;
   activeProjectName?: string | null;
   isRemote?: boolean;
+  memoryEnabled?: boolean;
+  memoryDisabledByProject?: boolean;
+  onMemoryEnabledChange?: (enabled: boolean) => void;
 }
 
 export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = ({
@@ -38,11 +52,16 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
   onClose,
   onOpenProject,
   onOpenGallery,
+  onOpenMemory,
   onDeleteConversation,
+  onCopyTranscript,
   onOpenTTSSettings,
   conversationImageCount = 0,
   activeProjectName,
   isRemote,
+  memoryEnabled = true,
+  memoryDisabledByProject = false,
+  onMemoryEnabledChange,
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -66,10 +85,10 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
     updateSettings(DEFAULT_SETTINGS);
   };
 
-  // Conversation actions (open project/gallery, delete) each present another
-  // sheet or a confirm alert. On iOS a modal can't be presented while this one
-  // is still dismissing, so we close FIRST and run the action from AppSheet's
-  // onClosed (fired after the close animation completes) instead of on a timeout.
+  // Conversation actions (open project/gallery, delete, copy transcript) each
+  // present another sheet or a confirm alert. On iOS a modal can't be presented
+  // while this one is still dismissing, so we close FIRST and run the action from
+  // AppSheet's onClosed (fired after the close animation completes) not a timeout.
   const pendingAfterCloseRef = useRef<(() => void) | null>(null);
   const runAfterClose = (action: () => void) => {
     pendingAfterCloseRef.current = action;
@@ -81,7 +100,14 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
     action?.();
   };
 
-  const hasConversationActions = !!(onOpenProject || onOpenGallery || onDeleteConversation);
+  const hasConversationActions = hasAnyAction([
+    onOpenProject,
+    onOpenGallery,
+    onDeleteConversation,
+    onCopyTranscript,
+  ]);
+  const openMemoryAfterClose = afterSheetClose(onOpenMemory, runAfterClose);
+  const showManageMemory = !!(onMemoryEnabledChange && memoryEnabled && openMemoryAfterClose);
 
   return (
     <AppSheet
@@ -114,12 +140,49 @@ export const GenerationSettingsModal: React.FC<GenerationSettingsModalProps> = (
         showsVerticalScrollIndicator={false}
       >
         <ConversationActionsSection
-          onOpenProject={onOpenProject ? () => runAfterClose(onOpenProject) : undefined}
-          onOpenGallery={onOpenGallery ? () => runAfterClose(onOpenGallery) : undefined}
-          onDeleteConversation={onDeleteConversation ? () => runAfterClose(onDeleteConversation) : undefined}
+          onOpenProject={afterSheetClose(onOpenProject, runAfterClose)}
+          onOpenGallery={afterSheetClose(onOpenGallery, runAfterClose)}
+          onDeleteConversation={afterSheetClose(onDeleteConversation, runAfterClose)}
+          onCopyTranscript={afterSheetClose(onCopyTranscript, runAfterClose)}
           conversationImageCount={conversationImageCount}
           activeProjectName={activeProjectName}
         />
+
+        {onMemoryEnabledChange && (
+          <View testID="chat-memory-section">
+            <View testID="chat-memory-control-row" style={styles.memoryControlRow}>
+              <Icon name="bookmark" size={16} color={colors.textSecondary} />
+              <View style={styles.memoryControlText}>
+                <Text style={styles.actionText}>Memory</Text>
+                <Text style={styles.memoryControlDescription}>
+                  {memoryDisabledByProject
+                    ? 'Disabled by project settings'
+                    : 'Use local memory recall and suggestions in this chat'}
+                </Text>
+              </View>
+              <Switch
+                testID="chat-memory-toggle"
+                value={memoryEnabled}
+                disabled={memoryDisabledByProject}
+                onValueChange={onMemoryEnabledChange}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.surface}
+              />
+            </View>
+
+            {showManageMemory && (
+              <TouchableOpacity
+                testID="chat-manage-memory-row"
+                style={styles.actionRow}
+                onPress={openMemoryAfterClose}
+              >
+                <Icon name="bookmark" size={16} color={colors.textSecondary} />
+                <Text style={styles.actionText}>Manage Memory</Text>
+                <Icon name="chevron-right" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* IMAGE GENERATION SETTINGS */}
         <TouchableOpacity

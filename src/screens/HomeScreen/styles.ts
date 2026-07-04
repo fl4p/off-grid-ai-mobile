@@ -202,6 +202,31 @@ const createSectionStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     color: colors.textSecondary,
     marginTop: 1,
   },
+  conversationModelRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'flex-start' as const,
+    marginTop: SPACING.xs,
+  },
+  conversationModelIcon: {
+    marginRight: SPACING.xs / 2,
+  },
+  conversationModelName: {
+    ...TYPOGRAPHY.metaSmall,
+    color: colors.textMuted,
+  },
+  conversationMetaSeparator: {
+    ...TYPOGRAPHY.metaSmall,
+    color: colors.textMuted,
+    marginHorizontal: SPACING.xs,
+  },
+  conversationProjectIcon: {
+    marginRight: SPACING.xs / 2,
+  },
+  conversationProjectName: {
+    ...TYPOGRAPHY.metaSmall,
+    color: colors.primary,
+  },
   deleteAction: {
     backgroundColor: colors.errorBackground,
     justifyContent: 'center' as const,

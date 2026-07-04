@@ -134,7 +134,7 @@ describe('GenerationSettingsModal', () => {
     const onOpenGallery = jest.fn();
     const onDeleteConversation = jest.fn();
 
-    const { getByText } = render(
+    const { getByText, queryByText } = render(
       <GenerationSettingsModal
         {...defaultProps}
         onOpenProject={onOpenProject}
@@ -146,6 +146,7 @@ describe('GenerationSettingsModal', () => {
 
     expect(getByText(/Project:/)).toBeTruthy();
     expect(getByText('Gallery (3)')).toBeTruthy();
+    expect(queryByText('Manage Memory')).toBeNull();
     expect(getByText('Delete Conversation')).toBeTruthy();
   });
 
@@ -296,6 +297,43 @@ describe('GenerationSettingsModal', () => {
     expect(onDeleteConversation).toHaveBeenCalled();
   });
 
+  it('shows Copy Transcript action when onCopyTranscript is provided', () => {
+    const onCopyTranscript = jest.fn();
+
+    const { getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onCopyTranscript={onCopyTranscript}
+      />,
+    );
+
+    expect(getByText('Copy Transcript')).toBeTruthy();
+  });
+
+  it('closes first and runs onCopyTranscript only after the sheet has closed', () => {
+    const onClose = jest.fn();
+    const onCopyTranscript = jest.fn();
+
+    const { getByText, getByTestId } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onClose={onClose}
+        onCopyTranscript={onCopyTranscript}
+      />,
+    );
+
+    fireEvent.press(getByText('Copy Transcript'));
+
+    // Sheet is asked to close, but the copy (which presents a confirm alert)
+    // must NOT run while it is still on screen.
+    expect(onClose).toHaveBeenCalled();
+    expect(onCopyTranscript).not.toHaveBeenCalled();
+
+    // Once the sheet reports it has fully closed, the action runs.
+    fireEvent.press(getByTestId('app-sheet-closed'));
+    expect(onCopyTranscript).toHaveBeenCalled();
+  });
+
   it('shows active project name in Project action', () => {
     const onOpenProject = jest.fn();
 
@@ -308,6 +346,37 @@ describe('GenerationSettingsModal', () => {
     );
 
     expect(getByText('Project: My Project')).toBeTruthy();
+  });
+
+  it('calls onMemoryEnabledChange from the chat memory switch', () => {
+    const onMemoryEnabledChange = jest.fn();
+    const { getByTestId, getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        memoryEnabled
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(getByText('Memory')).toBeTruthy();
+    fireEvent(getByTestId('chat-memory-toggle'), 'valueChange', false);
+
+    expect(onMemoryEnabledChange).toHaveBeenCalledWith(false);
+  });
+
+  it('locks the chat memory switch when project memory is disabled', () => {
+    const onMemoryEnabledChange = jest.fn();
+    const { getByTestId, getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        memoryEnabled={false}
+        memoryDisabledByProject
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(getByText('Disabled by project settings')).toBeTruthy();
+    expect(getByTestId('chat-memory-toggle').props.disabled).toBe(true);
   });
 
   // ============================================================================
@@ -734,6 +803,68 @@ describe('GenerationSettingsModal', () => {
 
     fireEvent.press(getByTestId('app-sheet-closed'));
     expect(onOpenGallery).toHaveBeenCalled();
+  });
+
+  it('closes first and runs onOpenMemory only after the sheet has closed', () => {
+    const onClose = jest.fn();
+    const onOpenMemory = jest.fn();
+    const onMemoryEnabledChange = jest.fn();
+
+    const { getByText, getByTestId } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onClose={onClose}
+        onOpenMemory={onOpenMemory}
+        memoryEnabled
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    fireEvent.press(getByText('Manage Memory'));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(onOpenMemory).not.toHaveBeenCalled();
+
+    fireEvent.press(getByTestId('app-sheet-closed'));
+    expect(onOpenMemory).toHaveBeenCalled();
+  });
+
+  it('shows Manage Memory under the enabled chat memory switch', () => {
+    const onOpenMemory = jest.fn();
+    const onMemoryEnabledChange = jest.fn();
+
+    const { getByTestId, getByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onOpenMemory={onOpenMemory}
+        memoryEnabled
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(getByText('Memory')).toBeTruthy();
+    expect(getByText('Manage Memory')).toBeTruthy();
+    const memorySection = getByTestId('chat-memory-section');
+    const childTestIds = memorySection.children
+      .map((child: any) => child.props?.testID)
+      .filter(Boolean);
+    expect(childTestIds).toEqual(['chat-memory-control-row', 'chat-manage-memory-row']);
+  });
+
+  it('hides Manage Memory when chat memory is disabled', () => {
+    const onOpenMemory = jest.fn();
+    const onMemoryEnabledChange = jest.fn();
+
+    const { queryByText } = render(
+      <GenerationSettingsModal
+        {...defaultProps}
+        onOpenMemory={onOpenMemory}
+        memoryEnabled={false}
+        onMemoryEnabledChange={onMemoryEnabledChange}
+      />,
+    );
+
+    expect(queryByText('Manage Memory')).toBeNull();
   });
 
   it('shows "Default" when activeProjectName is null', () => {

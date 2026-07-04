@@ -63,6 +63,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     remoteImageModels,
     activeRemoteTextModelId,
     activeRemoteImageModelId,
+    remoteDiscoveredModels,
     handleSelectTextModel,
     handleUnloadTextModel,
     handleSelectImageModel,
@@ -201,6 +202,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
                   onContinueChat={continueChat}
                   onDeleteConversation={handleDeleteConversation}
                   onSeeAll={() => navigation.navigate('ChatsTab')}
+                  downloadedModels={downloadedModels}
+                  discoveredModels={remoteDiscoveredModels}
                 />
               </AnimatedEntry>
             )

@@ -1,5 +1,11 @@
+/* eslint-disable max-lines */
 /**
  * Python Runtime Service
+ *
+ * One cohesive owner of the runtime lifecycle: install/status, the loopback
+ * server, the WebView executor, execution, and per-project workspace persistence.
+ * Splitting these would fragment tightly-coupled state (executor + pending maps +
+ * workspace key), so it exceeds the max-lines guideline by design.
  *
  * Manages the on-demand Pyodide runtime: downloads the pinned distribution
  * from jsDelivr into app storage, serves it over a loopback static server,
@@ -19,12 +25,13 @@ import {
   PYODIDE_ALL_ASSETS,
   PYODIDE_TOTAL_BYTES,
   PYODIDE_VERSION,
+  PYODIDE_MANIFEST_REVISION,
   PYTHON_PAGE_FILE,
   PYTHON_RUNTIME_DIR_NAME,
   PYTHON_RUNTIME_MARKER_FILE,
   pyodideAssetUrl,
 } from './pyodideManifest';
-import { buildPythonPageHtml, buildRunInjection, parsePythonPageMessage } from './pythonPage';
+import { buildPythonPageHtml, buildRunInjection, parsePythonPageMessage, type PythonPageMessage } from './pythonPage';
 
 export interface PythonExecutionResult {
   ok: boolean;
@@ -40,6 +47,13 @@ export interface ExecuteOptions {
   timeoutMs?: number;
   /** PyPI/pyodide packages to install (micropip) before running the code. */
   packages?: string[];
+  /**
+   * Project the call belongs to. The workspace filesystem is scoped per project
+   * (shared across that project's conversations); a call for a different project
+   * than the one currently loaded triggers a snapshot+restore swap. Undefined uses
+   * the shared global workspace (chats not tied to a project).
+   */
+  projectId?: string;
 }
 
 /** Bridge the PythonRuntimeHost WebView registers while mounted. */
@@ -54,11 +68,53 @@ interface PendingExecution {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface ControlPending {
+  resolve: (data: string) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** Per-project workspace snapshots live here; `__global__` is the no-project chat. */
+const WORKSPACE_STORE_SUBDIR = 'python-workspace';
+const GLOBAL_WORKSPACE_KEY = '__global__';
+/** Coalesce snapshots: save ~this long after the last workspace-touching call. */
+const SNAPSHOT_DEBOUNCE_MS = 1500;
+const CONTROL_INJECT_TIMEOUT_MS = 30000;
+
+/** JS string literal that survives injectJavaScript, escaping U+2028/2029 line terminators. */
+function jsStringLiteral(value: string): string {
+  const LS = String.fromCharCode(0x2028);
+  const PS = String.fromCharCode(0x2029);
+  return JSON.stringify(value).split(LS).join('\u2028').split(PS).join('\u2029');
+}
+
+/**
+ * Lighttpd config fragment giving the loopback server a MIME map. Without it the
+ * server labels `pyodide.asm.wasm` as octet-stream and WebAssembly streaming
+ * compilation refuses to boot the interpreter. The trailing "" key is Lighttpd's
+ * default for any extension not listed.
+ */
+export const PYTHON_SERVER_MIME_CONFIG = [
+  'mimetype.assign = (',
+  '  ".html" => "text/html",',
+  '  ".js"   => "text/javascript",',
+  '  ".mjs"  => "text/javascript",',
+  '  ".json" => "application/json",',
+  '  ".wasm" => "application/wasm",',
+  '  ".zip"  => "application/zip",',
+  '  ""      => "application/octet-stream"',
+  ')',
+].join('\n');
+
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 30000;
 /** Installing packages downloads wheels over the network — allow more headroom. */
 export const PACKAGE_INSTALL_TIMEOUT_MS = 120000;
-/** First boot compiles WASM and imports the stdlib — generous on old phones. */
-const EXECUTOR_BOOT_TIMEOUT_MS = 60000;
+/**
+ * First boot fetches ~13 MB of WASM+stdlib over the loopback server and compiles
+ * it inside the WebView — on a real device this can run well past a minute cold.
+ * 60s was too aggressive (observed boot timeouts on device), so allow 3 minutes.
+ */
+const EXECUTOR_BOOT_TIMEOUT_MS = 180000;
 
 class PythonRuntimeService {
   private executor: PythonExecutor | null = null;
@@ -72,9 +128,28 @@ class PythonRuntimeService {
   // interpreter each call, and the namespace is shared, so overlapping runs would
   // cross-contaminate. Tool calls are sequential today, but this makes it safe.
   private runQueue: Promise<unknown> = Promise.resolve();
+  // Last boot phase the page reported ('script' = page loaded, 'loading-pyodide'
+  // = inside the WASM fetch/compile). Surfaced in the boot-timeout error so a
+  // stall points at where it got stuck instead of a bare "did not start".
+  private lastBootPhase = 'not-started';
+  // Pending snapshot/restore/zip control injections, keyed by request id.
+  private controlPending = new Map<string, ControlPending>();
+  // Which project's files are currently loaded in the interpreter's /workspace.
+  // null = nothing loaded yet (fresh boot / after a reset), forcing a restore.
+  private activeWorkspaceKey: string | null = null;
+  private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
   getRuntimeDir(): string {
     return `${RNFS.DocumentDirectoryPath}/${PYTHON_RUNTIME_DIR_NAME}`;
+  }
+
+  private workspaceStoreDir(): string {
+    return `${RNFS.DocumentDirectoryPath}/${WORKSPACE_STORE_SUBDIR}`;
+  }
+
+  private snapshotPath(key: string): string {
+    const safe = key.replace(/[^A-Za-z0-9_-]/g, '_');
+    return `${this.workspaceStoreDir()}/${safe}.json`;
   }
 
   /** Re-derive install status from disk. Call once on startup or before use. */
@@ -85,12 +160,15 @@ class PythonRuntimeService {
       const markerPath = `${this.getRuntimeDir()}/${PYTHON_RUNTIME_MARKER_FILE}`;
       if (await RNFS.exists(markerPath)) {
         const marker = JSON.parse(await RNFS.readFile(markerPath, 'utf8'));
-        if (marker.version === PYODIDE_VERSION) {
+        // Both must match: a new pyodide version OR a new bundled asset set
+        // (e.g. matplotlib added) requires re-downloading. `?? 1` treats a
+        // pre-revision marker as the original asset set.
+        if (marker.version === PYODIDE_VERSION && (marker.revision ?? 1) === PYODIDE_MANIFEST_REVISION) {
           store.setStatus('installed');
           return;
         }
-        // Different pinned version — force a re-install.
-        logger.log('[PythonRuntime] Version changed, reinstall required:', marker.version, '->', PYODIDE_VERSION);
+        logger.log('[PythonRuntime] Manifest changed, reinstall required:',
+          `${marker.version}/rev${marker.revision ?? 1}`, '->', `${PYODIDE_VERSION}/rev${PYODIDE_MANIFEST_REVISION}`);
       }
       store.setStatus('not_installed');
     } catch (error) {
@@ -122,7 +200,7 @@ class PythonRuntimeService {
     const dir = this.getRuntimeDir();
     try {
       // Clear any prior install first: asset filenames are version-tagged, so a
-      // version bump would otherwise leave the old ~24 MB of wheels/WASM orphaned
+      // version bump would otherwise leave the old ~33 MB of wheels/WASM orphaned
       // on disk, and a half-written retry could leave stale files behind.
       if (await RNFS.exists(dir)) {
         await RNFS.unlink(dir);
@@ -164,7 +242,7 @@ class PythonRuntimeService {
       await RNFS.writeFile(`${dir}/${PYTHON_PAGE_FILE}`, buildPythonPageHtml(), 'utf8');
       await RNFS.writeFile(
         `${dir}/${PYTHON_RUNTIME_MARKER_FILE}`,
-        JSON.stringify({ version: PYODIDE_VERSION, installedAt: new Date().toISOString() }),
+        JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION, installedAt: new Date().toISOString() }),
         'utf8',
       );
 
@@ -194,6 +272,15 @@ class PythonRuntimeService {
 
   /** Stop the server and unmount the WebView; frees the interpreter's memory. */
   async shutdownExecutor(): Promise<void> {
+    // Persist the loaded project first, so disabling Python doesn't drop the
+    // workspace. Best-effort: a failure here must not block the teardown.
+    if (this.activeWorkspaceKey && this.executorReady && this.executor) {
+      await this.doSnapshot(this.activeWorkspaceKey).catch(() => { /* best-effort */ });
+    }
+    if (this.snapshotTimer) {
+      clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
     usePythonRuntimeStore.getState().setExecutorRequested(false);
     this.executorReady = false;
     this.rejectAllPending(new Error('Python runtime was shut down'));
@@ -232,16 +319,35 @@ class PythonRuntimeService {
   }
 
   /**
+   * Called by PythonRuntimeHost when the WebView reports a load failure
+   * (onError / onHttpError). Turns a silent page-load failure — which would
+   * otherwise show only as a boot timeout minutes later — into an immediate,
+   * specific error so the cause (bad origin, 404, ATS block) is visible.
+   */
+  notifyLoadError(detail: string): void {
+    logger.error('[PythonRuntime] WebView failed to load the page:', detail);
+    this.executorReady = false;
+    const err = new Error(`Python page failed to load: ${detail}`);
+    this.flushReadyWaiters(err);
+    this.rejectAllPending(err);
+  }
+
+  /**
    * Run Python code and return captured output. Boots the server + WebView on
    * first use and keeps them warm; interpreter globals persist across calls
    * until a timeout forces a reload.
    */
   async execute(code: string, opts: ExecuteOptions = {}): Promise<PythonExecutionResult> {
-    // Chain onto the previous run so calls never overlap on the shared interpreter.
-    // A prior failure must not break the chain, so swallow it before running ours.
-    const run = this.runQueue
-      .catch(() => { })
-      .then(() => this.runExecution(code, opts));
+    return this.enqueue(() => this.runExecution(code, opts));
+  }
+
+  /**
+   * Serialize work on the shared interpreter: chain onto the previous run so calls
+   * never overlap (stdout sinks and the namespace are global). A prior failure must
+   * not break the chain, so swallow it before running ours.
+   */
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.runQueue.catch(() => { }).then(fn);
     this.runQueue = run.catch(() => { });
     return run;
   }
@@ -254,6 +360,7 @@ class PythonRuntimeService {
       throw new Error('Python runtime is not installed');
     }
     await this.ensureExecutorReady();
+    await this.ensureWorkspaceLoaded(opts.projectId);
 
     const id = generateId();
     const packages = opts.packages?.length ? opts.packages : undefined;
@@ -311,8 +418,15 @@ class PythonRuntimeService {
     const msg = parsePythonPageMessage(raw);
     if (!msg) return;
 
+    if (msg.type === 'booting') {
+      this.lastBootPhase = msg.phase ?? 'unknown';
+      logger.log('[PythonRuntime] Boot phase:', this.lastBootPhase);
+      return;
+    }
+
     if (msg.type === 'ready') {
       logger.log('[PythonRuntime] Interpreter ready, pyodide', msg.version);
+      this.lastBootPhase = 'ready';
       this.executorReady = true;
       this.flushReadyWaiters(null);
       return;
@@ -321,6 +435,11 @@ class PythonRuntimeService {
     if (msg.type === 'boot_error') {
       logger.error('[PythonRuntime] Interpreter boot failed:', msg.error);
       this.flushReadyWaiters(new Error(`Python interpreter failed to start: ${msg.error}`));
+      return;
+    }
+
+    if (msg.type === 'fs_snapshot' || msg.type === 'fs_restore') {
+      this.resolveControlMessage(msg);
       return;
     }
 
@@ -336,6 +455,18 @@ class PythonRuntimeService {
       error: msg.error,
       images: Array.isArray(msg.images) && msg.images.length ? msg.images : undefined,
     });
+    // A run may have created/edited files - persist the active workspace (debounced).
+    this.scheduleSnapshot();
+  }
+
+  /** Settle a pending snapshot/restore/zip control injection from its page reply. */
+  private resolveControlMessage(msg: PythonPageMessage): void {
+    const cp = msg.id ? this.controlPending.get(msg.id) : undefined;
+    if (!cp) return;
+    this.controlPending.delete(msg.id!);
+    clearTimeout(cp.timer);
+    if (msg.ok === false) cp.reject(new Error(msg.error || `${msg.type} failed`));
+    else cp.resolve(msg.data ?? '');
   }
 
   /** True when the URL's origin matches the loopback server we started. */
@@ -348,6 +479,7 @@ class PythonRuntimeService {
   private async ensureExecutorReady(): Promise<void> {
     if (this.executorReady && this.executor) return;
 
+    this.lastBootPhase = 'not-started';
     await this.ensureServer();
     usePythonRuntimeStore.getState().setExecutorRequested(true);
 
@@ -357,8 +489,9 @@ class PythonRuntimeService {
         this.readyWaiters = this.readyWaiters.filter(w => w !== waiter);
         // Self-heal: the interpreter never signalled ready (dead WebView/server
         // after backgrounding). Rebuild on the next call instead of failing forever.
-        this.notifyExecutorCrashed('interpreter did not start in time');
-        reject(new Error('Python interpreter did not start in time'));
+        // Include the last boot phase so the stall point is visible in logs/errors.
+        this.notifyExecutorCrashed(`interpreter did not start in time (last phase: ${this.lastBootPhase})`);
+        reject(new Error(`Python interpreter did not start in time (stalled at: ${this.lastBootPhase})`));
       }, EXECUTOR_BOOT_TIMEOUT_MS);
       this.readyWaiters.push(waiter);
       if (this.executorReady) {
@@ -388,11 +521,137 @@ class PythonRuntimeService {
     const server = new StaticServer({
       fileDir: this.getRuntimeDir(),
       stopInBackground: false,
+      // The bundled Lighttpd ships no mimetype map, so every asset is served as
+      // application/octet-stream. Pyodide boots via WebAssembly.compileStreaming,
+      // which rejects anything that isn't `application/wasm` ("Incorrect response
+      // MIME type") — so the interpreter never starts. Map the handful of types
+      // the page fetches; the "" entry is Lighttpd's catch-all default for the
+      // rest (wheels/stdlib are read as ArrayBuffers, where MIME is irrelevant).
+      extraConfig: PYTHON_SERVER_MIME_CONFIG,
     });
     const origin = await server.start();
     this.server = server;
     usePythonRuntimeStore.getState().setServerOrigin(origin);
     logger.log('[PythonRuntime] Static server started at', origin);
+  }
+
+  /**
+   * Inject a page control function (__fsSnapshot/__fsRestore/__fsZip) and await its
+   * dedicated message. Unlike execute(), the reply travels outside the stdout sink,
+   * so a large manifest/zip isn't clipped by the 100k cap.
+   */
+  private injectControl(fnName: string, arg?: string): Promise<string> {
+    if (!this.executor) return Promise.reject(new Error('Python executor not available'));
+    const id = generateId();
+    const argJs = arg === undefined ? '' : `, ${jsStringLiteral(arg)}`;
+    const js = `window.${fnName}(${JSON.stringify(id)}${argJs}); true;`;
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.controlPending.delete(id);
+        reject(new Error(`${fnName} timed out`));
+      }, CONTROL_INJECT_TIMEOUT_MS);
+      this.controlPending.set(id, { resolve, reject, timer });
+      try {
+        this.executor!.inject(js);
+      } catch (error) {
+        clearTimeout(timer);
+        this.controlPending.delete(id);
+        reject(error instanceof Error ? error : new Error('Failed to dispatch control op'));
+      }
+    });
+  }
+
+  /**
+   * Make the interpreter's /workspace hold `projectId`'s files. If a different
+   * project is loaded, snapshot it first, then restore the target (restore clears
+   * the workspace, so nothing bleeds across projects). Runs inside the execution
+   * queue (called from runExecution), before the code is injected.
+   */
+  private async ensureWorkspaceLoaded(projectId?: string): Promise<void> {
+    const key = projectId || GLOBAL_WORKSPACE_KEY;
+    if (this.activeWorkspaceKey === key) return;
+    const isFirstLoad = this.activeWorkspaceKey === null;
+    if (!isFirstLoad) {
+      // Save the outgoing project before its files are cleared for the new one.
+      await this.doSnapshot(this.activeWorkspaceKey!).catch(e =>
+        logger.warn('[PythonRuntime] snapshot before project swap failed:', e));
+    }
+    let snapshot: string | null = null;
+    try {
+      const path = this.snapshotPath(key);
+      if (await RNFS.exists(path)) snapshot = await RNFS.readFile(path, 'utf8');
+    } catch (error) {
+      logger.warn('[PythonRuntime] read workspace snapshot failed:', error);
+    }
+    // Restore clears the workspace first, so we only need to inject when there is a
+    // saved snapshot to load, or when swapping away a previous project (to clear its
+    // files). A first load with no snapshot reuses the empty /workspace the page set
+    // up at boot - no round-trip needed.
+    if (snapshot !== null) {
+      await this.injectControl('__fsRestore', snapshot);
+    } else if (!isFirstLoad) {
+      await this.injectControl('__fsRestore', '{"files":[]}');
+    }
+    this.activeWorkspaceKey = key;
+  }
+
+  /** Write the current /workspace to the given project's on-disk snapshot. */
+  private async doSnapshot(key: string): Promise<void> {
+    if (!this.executorReady || !this.executor) return;
+    const data = await this.injectControl('__fsSnapshot');
+    await RNFS.mkdir(this.workspaceStoreDir()).catch(() => { /* exists */ });
+    await RNFS.writeFile(this.snapshotPath(key), data, 'utf8');
+  }
+
+  /** Debounced persist of the active workspace after a run that may have touched files. */
+  private scheduleSnapshot(): void {
+    const key = this.activeWorkspaceKey;
+    if (key === null) return;
+    if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = setTimeout(() => {
+      this.snapshotTimer = null;
+      this.enqueue(() => this.doSnapshot(key)).catch(e =>
+        logger.warn('[PythonRuntime] scheduled snapshot failed:', e));
+    }, SNAPSHOT_DEBOUNCE_MS);
+  }
+
+  /**
+   * Export a project's workspace as a .zip, returned base64-encoded. Boots the
+   * runtime and loads the project first, so it works even if that project hasn't
+   * run any code this session.
+   */
+  async exportProjectZip(projectId?: string): Promise<string> {
+    return this.enqueue(async () => {
+      if (!this.isInstalled()) throw new Error('Python runtime is not installed');
+      await this.ensureExecutorReady();
+      // With a project id, export that project. Without one (a context-free button),
+      // export whatever is currently loaded, loading the global workspace if nothing is.
+      if (projectId !== undefined) {
+        await this.ensureWorkspaceLoaded(projectId);
+      } else if (this.activeWorkspaceKey === null) {
+        await this.ensureWorkspaceLoaded(undefined);
+      }
+      return this.injectControl('__fsZip');
+    });
+  }
+
+  /**
+   * Read one file's full text from a project's workspace, for the in-app HTML
+   * preview. Loads the project first (like exportProjectZip) so it works even if
+   * that project hasn't run code this session. Returns the whole file over the
+   * control channel, so a large self-contained page isn't clipped by the stdout cap.
+   */
+  async readWorkspaceFile(path: string, projectId?: string): Promise<string> {
+    return this.enqueue(async () => {
+      if (!this.isInstalled()) throw new Error('Python runtime is not installed');
+      await this.ensureExecutorReady();
+      if (projectId !== undefined) {
+        await this.ensureWorkspaceLoaded(projectId);
+      } else if (this.activeWorkspaceKey === null) {
+        await this.ensureWorkspaceLoaded(undefined);
+      }
+      return this.injectControl('__fsReadFile', path);
+    });
   }
 
   /** Reload the WebView page: kills a hung script, resets Python globals. */
@@ -408,6 +667,14 @@ class PythonRuntimeService {
       pending.reject(error);
     }
     this.pending.clear();
+    for (const [, cp] of this.controlPending) {
+      clearTimeout(cp.timer);
+      cp.reject(error);
+    }
+    this.controlPending.clear();
+    // The interpreter's in-RAM workspace is gone with the reset; force a fresh
+    // restore on the next call rather than trusting the stale "loaded" marker.
+    this.activeWorkspaceKey = null;
   }
 
   private flushReadyWaiters(error: Error | null): void {

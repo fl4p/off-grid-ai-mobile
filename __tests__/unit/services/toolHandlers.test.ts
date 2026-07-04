@@ -414,7 +414,7 @@ describe('web_search handler', () => {
   });
 
   it('returns no-results message when search returns empty HTML', async () => {
-    mockFetch.mockResolvedValue({ text: async () => '<html><body>Nothing here</body></html>' });
+    mockFetch.mockResolvedValue({ ok: true, status: 200, text: async () => '<html><body>Nothing here</body></html>' });
     const result = await executeToolCall({ id: 'ws_2', name: 'web_search', arguments: { query: 'xyzzy' } });
     expect(result.error).toBeUndefined();
     expect(result.content).toContain('No results found');
@@ -428,7 +428,7 @@ describe('web_search handler', () => {
       '<p class="snippet">This is a snippet about the result</p>',
       '</div>',
     ].join('');
-    mockFetch.mockResolvedValue({ text: async () => html });
+    mockFetch.mockResolvedValue({ ok: true, status: 200, text: async () => html });
     const result = await executeToolCall({ id: 'ws_3', name: 'web_search', arguments: { query: 'example' } });
     expect(result.error).toBeUndefined();
     expect(result.content).toBeDefined();

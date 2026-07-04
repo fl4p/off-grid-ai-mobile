@@ -9,6 +9,7 @@ import { imageToBase64DataUrl } from '../httpClient';
 import { useAppStore } from '../../stores/appStore';
 import logger from '../../utils/logger';
 import { generateId } from '../../utils/generateId';
+import { collectMemoryToolCallIds, isMemoryToolName } from '../memory/toolPrivacy';
 
 /** Build multimodal content array for a vision-capable user message */
 async function buildVisionContent(
@@ -33,11 +34,18 @@ async function buildVisionContent(
 }
 
 /** Build an assistant message with tool calls */
-function buildAssistantToolCallMessage(msg: Message): OpenAIChatMessage {
+function buildAssistantToolCallMessage(msg: Message, excludedToolCallIds: Set<string>): OpenAIChatMessage | null {
+  const toolCalls = (msg.toolCalls || []).filter(tc => {
+    if (isMemoryToolName(tc.name)) return false;
+    return !tc.id || !excludedToolCallIds.has(tc.id);
+  });
+  if (toolCalls.length === 0 && !msg.content) return null;
+  if (toolCalls.length === 0) return { role: 'assistant', content: msg.content };
+
   return {
     role: 'assistant',
     content: msg.content || '',
-    tool_calls: (msg.toolCalls || []).map(tc => ({
+    tool_calls: toolCalls.map(tc => ({
       id: tc.id || `call_${generateId()}`,
       type: 'function' as const,
       function: { name: tc.name, arguments: tc.arguments },
@@ -56,6 +64,7 @@ export async function buildOpenAIMessagesImpl(
 ): Promise<OpenAIChatMessage[]> {
   const openaiMessages: OpenAIChatMessage[] = [];
   const hasSystemMessage = messages.some(m => m.role === 'system');
+  const memoryToolCallIds = collectMemoryToolCallIds(messages);
 
   // Add system prompt if provided and no system message exists in messages
   const systemPrompt = options.systemPrompt || useAppStore.getState().settings.systemPrompt;
@@ -70,6 +79,9 @@ export async function buildOpenAIMessagesImpl(
     }
 
     if (msg.role === 'tool') {
+      if (isMemoryToolName(msg.toolName) || (msg.toolCallId && memoryToolCallIds.has(msg.toolCallId))) {
+        continue;
+      }
       // Tool result — wrap as array so models with strict Jinja templates (e.g. qwen3.5)
       // that iterate over message['content'] don't fail on plain strings
       openaiMessages.push({
@@ -86,7 +98,8 @@ export async function buildOpenAIMessagesImpl(
       const content = await buildVisionContent(msg, capabilities);
       openaiMessages.push({ role: 'user', content });
     } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-      openaiMessages.push(buildAssistantToolCallMessage(msg));
+      const assistantMessage = buildAssistantToolCallMessage(msg, memoryToolCallIds);
+      if (assistantMessage) openaiMessages.push(assistantMessage);
     } else if (msg.role === 'user') {
       // Wrap user content as array — some model templates (e.g. qwen3.5) require
       // message['content'] to be iterable, not a plain string

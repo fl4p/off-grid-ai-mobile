@@ -16,10 +16,12 @@ type MessageRendererProps = {
   isGeneratingImage: boolean;
   showGenerationDetails: boolean;
   onCopy: (content: string) => void;
+  onRemember: (message: Message) => Promise<void> | void;
   onRetry: (message: Message) => void;
   onEdit: (message: Message, newContent: string) => void;
   onGenerateImage: (prompt: string) => void;
   onImagePress: (uri: string) => void;
+  onOpenHtml: (path: string) => void;
 };
 
 export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
@@ -33,10 +35,12 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
     isGeneratingImage,
     showGenerationDetails,
     onCopy,
+    onRemember,
     onRetry,
     onEdit,
     onGenerateImage,
     onImagePress,
+    onOpenHtml,
   } = props;
 
   const interfaceMode = useUiModeStore((s) => s.interfaceMode);
@@ -78,10 +82,12 @@ export const MessageRenderer: React.FC<MessageRendererProps> = (props) => {
       message={msg}
       isStreaming={isStreamingThis}
       onCopy={onCopy}
+      onRemember={onRemember}
       onRetry={onRetry}
       onEdit={onEdit}
       onGenerateImage={onGenerateImage}
       onImagePress={onImagePress}
+      onOpenHtml={onOpenHtml}
       canGenerateImage={imageModelLoaded && !isStreaming && !isGeneratingImage}
       showGenerationDetails={showGenerationDetails}
       animateEntry={animateEntry}

@@ -1,20 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, Switch, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, Switch, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import RNFS from 'react-native-fs';
+import { shareLocalFile } from '../../utils/shareFile';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import IconMC from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme, useThemedStyles } from '../../theme';
 import { FONTS, TYPOGRAPHY, SPACING } from '../../constants';
 import { AVAILABLE_TOOLS } from '../../services/tools';
+import { filterMemoryToolNames, isMemoryToolName } from '../../services/memory/toolPrivacy';
 import { useAppStore } from '../../stores';
 import { usePythonRuntimeStore } from '../../stores/pythonRuntimeStore';
 import { pythonRuntimeService } from '../../services/python/pythonRuntimeService';
 import { useOpenProTools } from '../../hooks/useOpenProTools';
 import { CustomAlert, showAlert, hideAlert, AlertState, initialAlertState } from '../../components/CustomAlert';
 import type { ThemeColors, ThemeShadows } from '../../theme';
+import type { RootStackParamList } from '../../navigation/types';
 
 const TOOL_WARNING_COLOR = '#F59E0B';
+type ToolsRouteProp = RouteProp<RootStackParamList, 'Tools'>;
 
 /**
  * Full-page tool picker (replaces the old bottom-sheet drawer). Lists the free
@@ -25,17 +30,25 @@ const TOOL_WARNING_COLOR = '#F59E0B';
  */
 export const ToolsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const route = useRoute<ToolsRouteProp>();
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
   const openProTools = useOpenProTools();
 
   const enabledTools = useAppStore(st => st.settings.enabledTools) || [];
+  const memoryEnabled = route.params?.memoryEnabled !== false;
+  const visibleEnabledTools = memoryEnabled ? enabledTools : filterMemoryToolNames(enabledTools);
+  // Hidden tools (e.g. the Python filesystem companions) are unlocked via another
+  // tool's toggle, not listed as their own rows.
+  const listableTools = AVAILABLE_TOOLS.filter(tool => !tool.hidden);
+  const visibleTools = memoryEnabled ? listableTools : listableTools.filter(tool => !isMemoryToolName(tool.id));
   const updateSettings = useAppStore(st => st.updateSettings);
   const toolCountHintDismissed = useAppStore(st => st.toolCountHintDismissed);
   const setToolCountHintDismissed = useAppStore(st => st.setToolCountHintDismissed);
   const pythonStatus = usePythonRuntimeStore(st => st.status);
   const pythonProgress = usePythonRuntimeStore(st => st.downloadProgress);
   const [alertState, setAlertState] = useState<AlertState>(initialAlertState);
+  const [exportingWorkspace, setExportingWorkspace] = useState(false);
 
   useEffect(() => {
     pythonRuntimeService.refreshStatus().catch(() => { });
@@ -58,10 +71,44 @@ export const ToolsScreen: React.FC = () => {
     }
   };
 
+  const exportWorkspace = async () => {
+    if (exportingWorkspace) return;
+    setExportingWorkspace(true);
+    try {
+      const base64 = await pythonRuntimeService.exportProjectZip();
+      const path = `${RNFS.DocumentDirectoryPath}/python-workspace.zip`;
+      await RNFS.writeFile(path, base64, 'base64');
+      await shareLocalFile(path, { title: 'Python workspace', mimeType: 'application/zip' });
+    } catch (error) {
+      setAlertState(showAlert(
+        'Export Failed',
+        error instanceof Error ? error.message : 'Could not export the Python workspace.',
+      ));
+    } finally {
+      setExportingWorkspace(false);
+    }
+  };
+
+  // Heal an enabled-but-not-installed runtime: a bundled-asset update (e.g. adding
+  // matplotlib) invalidates a prior install, leaving Python toggled on yet unusable
+  // until the model calls it and fails. Re-download once so the enabled state is
+  // real again, showing the same inline progress as a fresh install.
+  const healedRef = useRef(false);
+  useEffect(() => {
+    if (healedRef.current) return;
+    const enabled = (useAppStore.getState().settings.enabledTools || []).includes('run_python');
+    if (enabled && pythonStatus === 'not_installed') {
+      healedRef.current = true;
+      startPythonInstall();
+    }
+    // One-shot, guarded by healedRef; startPythonInstall is recreated each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pythonStatus]);
+
   const promptPythonInstall = () => {
     setAlertState(showAlert(
       'Download Python Runtime',
-      'Python needs a one-time 24 MB download (Python 3.12 with numpy and pandas). It runs entirely on your device and works offline afterwards.',
+      'Python needs a one-time 33 MB download (Python 3.12 with numpy, pandas, and matplotlib). It runs entirely on your device and works offline afterwards.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -76,6 +123,7 @@ export const ToolsScreen: React.FC = () => {
   };
 
   const handleToggleTool = (toolId: string) => {
+    if (!memoryEnabled && isMemoryToolName(toolId)) return;
     const cur = useAppStore.getState().settings.enabledTools || [];
     const enabling = !cur.includes(toolId);
     if (toolId === 'run_python' && enabling && usePythonRuntimeStore.getState().status !== 'installed') {
@@ -93,7 +141,7 @@ export const ToolsScreen: React.FC = () => {
     });
   };
 
-  const showHint = enabledTools.length > 3 && !toolCountHintDismissed;
+  const showHint = visibleEnabledTools.length > 3 && !toolCountHintDismissed;
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -140,12 +188,12 @@ export const ToolsScreen: React.FC = () => {
           </View>
         )}
 
-        {AVAILABLE_TOOLS.map(tool => {
-          const isEnabled = enabledTools.includes(tool.id);
+        {visibleTools.map(tool => {
+          const isEnabled = visibleEnabledTools.includes(tool.id);
           const isPythonDownloading = tool.id === 'run_python' && pythonStatus === 'downloading';
           const description = isPythonDownloading
             ? `Downloading Python runtime... ${Math.round(pythonProgress * 100)}%`
-            : tool.description;
+            : (tool.uiDescription || tool.description);
           return (
             <View key={tool.id} style={styles.toolRow} testID={`tool-picker-row-${tool.id}`}>
               <View style={styles.toolIcon}>
@@ -173,6 +221,27 @@ export const ToolsScreen: React.FC = () => {
         <Text style={styles.hint}>
           Enabling more tools can confuse the model and increases latency on first response.
         </Text>
+
+        {pythonStatus === 'installed' && (
+          <TouchableOpacity
+            style={styles.proToolsButton}
+            onPress={exportWorkspace}
+            activeOpacity={0.75}
+            disabled={exportingWorkspace}
+            testID="tools-export-workspace"
+          >
+            <View style={styles.proToolsIcon}>
+              <Icon name="download" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.toolInfo}>
+              <Text style={styles.toolName}>Export Python workspace</Text>
+              <Text style={styles.toolDescription}>Save the current workspace files as a .zip</Text>
+            </View>
+            {exportingWorkspace
+              ? <ActivityIndicator size="small" color={colors.textMuted} />
+              : <Icon name="share" size={18} color={colors.textMuted} />}
+          </TouchableOpacity>
+        )}
       </ScrollView>
       <CustomAlert
         {...alertState}
