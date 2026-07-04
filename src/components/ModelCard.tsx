@@ -6,6 +6,7 @@ import { QUANTIZATION_INFO, CREDIBILITY_LABELS } from '../constants';
 import { ModelFile, DownloadedModel, ModelCredibility } from '../types';
 import { needsVisionRepair } from '../utils/visionRepair';
 import { getMmProjFileSize } from '../utils/modelHelpers';
+import { formatSpeed } from '../utils/formatSpeed';
 import { createStyles } from './ModelCard.styles';
 import {
   CompactModelCardContent,
@@ -35,6 +36,7 @@ interface ModelCardProps {
   isDownloading?: boolean;
   downloadProgress?: number;
   downloadBytes?: { downloaded: number; total: number };
+  downloadSpeed?: number;
   isActive?: boolean;
   isCompatible?: boolean;
   incompatibleReason?: string;
@@ -79,9 +81,11 @@ function resolveCredibility(
 const DownloadProgressSection: React.FC<{
   progress: number;
   bytes?: { downloaded: number; total: number };
+  speed?: number;
   tight?: boolean;
-}> = ({ progress, bytes, tight }) => {
+}> = ({ progress, bytes, speed, tight }) => {
   const styles = useThemedStyles(createStyles);
+  const speedText = speed ? formatSpeed(speed) : '';
   return (
   <View style={styles.progressSection}>
     <View style={[styles.progressContainer, tight && styles.progressContainerTight]}>
@@ -93,6 +97,7 @@ const DownloadProgressSection: React.FC<{
     {bytes && bytes.total > 0 && (
       <Text style={styles.progressBytesText}>
         {formatBytes(bytes.downloaded)} / {formatBytes(bytes.total)}
+        {speedText ? `  \u00B7  ${speedText}` : ''}
       </Text>
     )}
   </View>
@@ -146,6 +151,7 @@ export const ModelCard: React.FC<ModelCardProps> = ({
   isDownloading,
   downloadProgress = 0,
   downloadBytes,
+  downloadSpeed,
   isActive,
   isCompatible = true,
   incompatibleReason,
@@ -242,7 +248,7 @@ export const ModelCard: React.FC<ModelCardProps> = ({
           )}
 
           {isDownloading && (
-            <DownloadProgressSection progress={downloadProgress} bytes={downloadBytes} tight={!!recommended} />
+            <DownloadProgressSection progress={downloadProgress} bytes={downloadBytes} speed={downloadSpeed} tight={!!recommended} />
           )}
           {failedState && (
             <FailedSection

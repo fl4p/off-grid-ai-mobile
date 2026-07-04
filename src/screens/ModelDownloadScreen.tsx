@@ -38,7 +38,7 @@ interface RecommendedCardProps {
   model: typeof RECOMMENDED_MODELS[number];
   recFile: ModelFile;
   index: number;
-  progress: { progress: number } | null | undefined;
+  progress: { progress: number; bytesDownloaded?: number; totalBytes?: number; downloadSpeed?: number } | null | undefined;
   downloaded: DownloadedModel | undefined;
   totalRamGB: number;
   isTrending: boolean;
@@ -57,6 +57,8 @@ const RecommendedModelCard: React.FC<RecommendedCardProps> = ({ model, recFile, 
     isDownloaded={!!downloaded}
     isDownloading={!!progress}
     downloadProgress={progress?.progress}
+    downloadBytes={progress?.bytesDownloaded != null && progress?.totalBytes != null ? { downloaded: progress.bytesDownloaded, total: progress.totalBytes } : undefined}
+    downloadSpeed={progress?.downloadSpeed}
     isCompatible={model.minRam <= totalRamGB && (!model.maxRam || totalRamGB <= model.maxRam)}
     isTrending={isTrending}
     onPress={() => {}}
@@ -69,7 +71,7 @@ interface LiteRTCardProps {
   file: ModelFile;
   index: number;
   curatedEntry: CuratedLiteRTEntry | undefined;
-  progress: { progress: number } | null | undefined;
+  progress: { progress: number; bytesDownloaded?: number; totalBytes?: number; downloadSpeed?: number } | null | undefined;
   downloaded: DownloadedModel | undefined;
   totalRamGB: number;
   onDownload: () => void;
@@ -90,6 +92,8 @@ const LiteRTModelCard: React.FC<LiteRTCardProps> = ({ file, index, curatedEntry,
     isDownloaded={!!downloaded}
     isDownloading={!!progress}
     downloadProgress={progress?.progress}
+    downloadBytes={progress?.bytesDownloaded != null && progress?.totalBytes != null ? { downloaded: progress.bytesDownloaded, total: progress.totalBytes } : undefined}
+    downloadSpeed={progress?.downloadSpeed}
     isCompatible={file.size / (1024 ** 3) < totalRamGB * 0.6}
     recommended={{ pillLabel: 'Recommended', highlightText: curatedEntry?.highlight }}
     onPress={() => {}}
@@ -118,6 +122,7 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
   const storeDownloads = useDownloadStore(s => s.downloads);
   const servers = useRemoteServerStore((s) => s.servers);
   const discoveredModels = useRemoteServerStore((s) => s.discoveredModels);
+  const updateServer = useRemoteServerStore((s) => s.updateServer);
 
   // Init hardware + model recommendations
   useEffect(() => {
@@ -244,6 +249,13 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
       }
       const textModel = models.find(m => !m.capabilities.supportsVision) || models[0];
       if (textModel) await remoteServerManager.setActiveRemoteTextModel(server.id, textModel.id);
+      // Only surface the "Connected!" success modal the first time this endpoint
+      // connects. On later reconnects, go straight to chat without interrupting.
+      if (server.connectedModalShown) {
+        navigation.replace('Main');
+        return;
+      }
+      updateServer(server.id, { connectedModalShown: true });
       setAlertState(showAlert('Connected!', `${server.name} is ready with ${models.length} model${models.length === 1 ? '' : 's'}. You can start chatting now.`,
         [{ text: 'Continue', onPress: () => { setAlertState(hideAlert()); navigation.replace('Main'); } }]));
     } catch (e) { setAlertState(showAlert('Connection Failed', (e as Error).message)); }
@@ -353,7 +365,7 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
             const modelKey = makeModelKey(LITERT_PARENT_ID, file.name);
             const dlEntry = storeDownloads[modelKey];
             const progress = dlEntry && isActiveStatus(dlEntry.status)
-              ? { progress: dlEntry.progress }
+              ? { progress: dlEntry.progress, bytesDownloaded: dlEntry.bytesDownloaded, totalBytes: dlEntry.combinedTotalBytes || dlEntry.totalBytes, downloadSpeed: dlEntry.downloadSpeed }
               : null;
             return (
               <LiteRTModelCard
@@ -375,7 +387,7 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
             const modelKey = makeModelKey(model.id, recFile.name);
             const entry = storeDownloads[modelKey];
             const progress = entry && isActiveStatus(entry.status)
-              ? { progress: entry.progress }
+              ? { progress: entry.progress, bytesDownloaded: entry.bytesDownloaded, totalBytes: entry.combinedTotalBytes || entry.totalBytes, downloadSpeed: entry.downloadSpeed }
               : null;
             return (
               <RecommendedModelCard

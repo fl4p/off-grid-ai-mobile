@@ -127,6 +127,37 @@ const ToolCallMessage: React.FC<{ message: Message; styles: any; colors: any }> 
   </View>
 );
 
+const ErrorMessage: React.FC<{
+  message: Message; styles: ReturnType<typeof createStyles>; colors: any;
+}> = ({ message, styles, colors }) => {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetails = !!message.errorDetails;
+  return (
+    <View testID="error-message" style={styles.systemInfoContainer}>
+      <TouchableOpacity
+        testID="error-message-toggle"
+        style={styles.toolStatusRow}
+        onPress={hasDetails ? () => setExpanded(!expanded) : undefined}
+        activeOpacity={hasDetails ? 0.6 : 1}
+        disabled={!hasDetails}
+      >
+        <Icon name="alert-triangle" size={13} color={colors.error} />
+        <Text style={[styles.toolStatusText, { color: colors.error }]} numberOfLines={expanded ? undefined : 3}>
+          {message.content}
+        </Text>
+        {hasDetails && (
+          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={12} color={colors.textMuted} />
+        )}
+      </TouchableOpacity>
+      {expanded && hasDetails && (
+        <View testID="error-details" style={styles.toolDetailContainer}>
+          <MarkdownText dimmed>{message.errorDetails!}</MarkdownText>
+        </View>
+      )}
+    </View>
+  );
+};
+
 const SystemInfoMessage: React.FC<{
   content: string; styles: ReturnType<typeof createStyles>;
   alertState: AlertState; onCloseAlert: () => void;
@@ -306,6 +337,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     callHook(HOOKS.audioSpeak, displayContent, message.id);
   };
 
+  if (message.isError) {
+    return <ErrorMessage message={message} styles={styles} colors={colors} />;
+  }
   if (message.isSystemInfo) {
     return <SystemInfoMessage content={displayContent} styles={styles}
       alertState={alertState} onCloseAlert={() => setAlertState(hideAlert())} />;

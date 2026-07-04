@@ -136,6 +136,7 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
           styles={styles} colors={colors}
           activeModel={chat.activeModel}
           activeModelName={chat.activeModelName}
+          serverName={chat.activeServerName}
           activeProject={chat.activeProject}
           setShowProjectSelector={chat.setShowProjectSelector}
           isRemote={chat.activeModelInfo?.isRemote}

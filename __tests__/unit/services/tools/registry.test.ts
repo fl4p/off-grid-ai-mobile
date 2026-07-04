@@ -9,6 +9,8 @@ import {
   AVAILABLE_TOOLS,
   getToolsAsOpenAISchema,
   buildToolSystemPromptHint,
+  buildNoToolsNote,
+  buildPromptWithToolNote,
 } from '../../../../src/services/tools/registry';
 
 describe('Tool Registry', () => {
@@ -161,6 +163,58 @@ describe('Tool Registry', () => {
       const hint = buildToolSystemPromptHint(['get_current_datetime']);
       expect(hint).toContain('get_current_datetime');
       expect(hint).toContain('date and time');
+    });
+  });
+
+  // ========================================================================
+  // buildNoToolsNote
+  // ========================================================================
+  describe('buildNoToolsNote', () => {
+    it('tells the model it has no tools and not to fake execution', () => {
+      const note = buildNoToolsNote();
+      expect(note).toMatch(/no tools/i);
+      expect(note).toMatch(/run code|make plots/i);
+      expect(note).toMatch(/not pretend/i);
+    });
+
+    it('stays short for small-context models (one line, well under 400 chars)', () => {
+      const note = buildNoToolsNote();
+      expect(note.trim().length).toBeLessThan(400);
+      // Only the leading blank-line separator, no other newlines.
+      expect(note.trimStart().includes('\n')).toBe(false);
+    });
+  });
+
+  // ========================================================================
+  // buildPromptWithToolNote
+  // ========================================================================
+  describe('buildPromptWithToolNote', () => {
+    const BASE = 'You are a helpful assistant.';
+
+    it('adds the calling-convention hint for text-hint models', () => {
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: ['calculator'], useTextHint: true });
+      expect(out).toContain(BASE);
+      expect(out).toContain('Tools available');
+      expect(out).toContain('calculator');
+    });
+
+    it('adds the no-tools note when nothing is available', () => {
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: [], useTextHint: false });
+      expect(out).toContain(BASE);
+      expect(out).toMatch(/no tools/i);
+    });
+
+    it('does NOT add the no-tools note when MCP/extension tools are present', () => {
+      // A user with 0 built-in tools but active MCP tools still has tools — the
+      // note would otherwise contradict the tool schema injected downstream.
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: [], useTextHint: false, hasOtherTools: true });
+      expect(out).toBe(BASE);
+      expect(out).not.toMatch(/no tools/i);
+    });
+
+    it('appends nothing for native tool calling with built-in tools (schema carries them)', () => {
+      const out = buildPromptWithToolNote(BASE, { activeToolIds: ['web_search'], useTextHint: false });
+      expect(out).toBe(BASE);
     });
   });
 });

@@ -120,7 +120,7 @@ interface ChatState {
   streamingForConversationId: string | null;
   isStreaming: boolean;
   isThinking: boolean;
-  createConversation: (modelId: string, title?: string, projectId?: string) => string;
+  createConversation: (modelId: string, title?: string, projectId?: string, serverId?: string) => string;
   deleteConversation: (conversationId: string) => void;
   setActiveConversation: (conversationId: string | null) => void;
   getActiveConversation: () => Conversation | null;
@@ -156,12 +156,14 @@ export const useChatStore = create<ChatState>()(
       isStreaming: false,
       isThinking: false,
 
-      createConversation: (modelId, title, projectId) => {
+      // eslint-disable-next-line max-params -- optional serverId lets a remote-model conversation be reconstructed on reopen; an options object would churn ~12 positional call sites across store tests
+      createConversation: (modelId, title, projectId, serverId) => {
         const id = generateId();
         const conversation: Conversation = {
           id,
           title: title || 'New Conversation',
           modelId,
+          ...(serverId ? { serverId } : {}),
           messages: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),

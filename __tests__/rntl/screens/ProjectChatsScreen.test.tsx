@@ -42,10 +42,18 @@ jest.mock('../../../src/stores', () => ({
     setActiveConversation: mockSetActiveConversation,
     createConversation: mockCreateConversation,
   })),
-  useAppStore: jest.fn(() => ({
-    downloadedModels: mockDownloadedModels,
-    activeModelId: mockActiveModelId,
-  })),
+  useAppStore: jest.fn((selector?: any) => {
+    const state = {
+      downloadedModels: mockDownloadedModels,
+      activeModelId: mockActiveModelId,
+      lastTextModelId: null,
+    };
+    return selector ? selector(state) : state;
+  }),
+  useRemoteServerStore: jest.fn((selector?: any) => {
+    const state = { activeServerId: null, activeRemoteTextModelId: null, discoveredModels: {} };
+    return selector ? selector(state) : state;
+  }),
 }));
 
 jest.mock('../../../src/components/Button', () => ({
@@ -175,7 +183,7 @@ describe('ProjectChatsScreen', () => {
       const { getByText } = render(<ProjectChatsScreen />);
       fireEvent.press(getByText('New Chat'));
       await flushPromises();
-      expect(mockCreateConversation).toHaveBeenCalledWith('model1', undefined, 'proj1');
+      expect(mockCreateConversation).toHaveBeenCalledWith('model1', undefined, 'proj1', undefined);
       expect(mockNavigate).toHaveBeenCalledWith('Chat', { conversationId: 'new-conv-id', projectId: 'proj1' });
     });
 
@@ -192,7 +200,7 @@ describe('ProjectChatsScreen', () => {
       const { getByText } = render(<ProjectChatsScreen />);
       fireEvent.press(getByText('New Chat'));
       await flushPromises();
-      expect(mockCreateConversation).toHaveBeenCalledWith('model2', undefined, 'proj1');
+      expect(mockCreateConversation).toHaveBeenCalledWith('model2', undefined, 'proj1', undefined);
     });
   });
 

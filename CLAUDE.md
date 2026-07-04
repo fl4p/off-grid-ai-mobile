@@ -130,3 +130,41 @@ The repo has three automated reviewers on every PR. After pushing, loop until al
 4. Re-run local quality gates (`npm run lint && npm test && npx tsc --noEmit`)
 5. Push fixes, comment `/gemini review` on the PR to re-trigger Gemini
 6. Repeat until all three reviewers pass with no blocking issues
+## Pulling App Data & Chat Transcripts (debug builds)
+
+Chats persist via zustand -> AsyncStorage; the RAG knowledge base is SQLite. Both are directly readable for E2E verification (e.g. asserting OCR'd attachment text reached the model).
+
+### iOS Simulator
+
+```bash
+APP_DATA=$(xcrun simctl get_app_container booted ai.offgridmobile data)
+# Chat transcripts (JSON): key "local-llm-chat-storage" in the manifest
+python3 -c "import json; m=json.load(open('$APP_DATA/Library/Application Support/ai.offgridmobile/RCTAsyncLocalStorage_V1/manifest.json')); print(m['local-llm-chat-storage'])"
+# Knowledge base
+sqlite3 "$APP_DATA/Library/rag.db" 'SELECT * FROM rag_documents;'
+```
+
+Large AsyncStorage values are stored as separate hash-named files next to `manifest.json` (value in manifest is then null); settings live under key `local-llm-app-storage`, whisper state under `local-llm-whisper-storage`. Attached files persist in `Documents/attachments/`.
+
+### Android (debug build, device or emulator)
+
+AsyncStorage is a SQLite DB on Android:
+
+```bash
+adb exec-out run-as ai.offgridmobile.dev cat databases/RKStorage > /tmp/rkstorage.db
+sqlite3 /tmp/rkstorage.db "SELECT value FROM catalystLocalStorage WHERE key='local-llm-chat-storage';"
+adb exec-out run-as ai.offgridmobile.dev cat files/rag.db > /tmp/rag.db
+```
+
+`run-as` works only with debug builds (`ai.offgridmobile.dev` application id).
+
+## Multi-Agent Coordination
+
+Several agent sessions work on this repo simultaneously. Rules to avoid stepping on each other:
+
+1. **One worktree per agent.** Never work directly in the primary checkout unless you own it. Create your own: `git worktree add ../offgrid-<task> <your-branch>` (then symlink node_modules: `ln -s <primary>/node_modules <worktree>/node_modules` so lint/tsc/jest run). Never `git checkout`/`git switch` in a tree another session is using.
+2. **Never commit to main.** Enforced by `.githooks/pre-commit` (core.hooksPath). Branch first: `feat/`, `fix/`, `docs/`, `chore/`, `test/`. Everything merges via PR.
+3. **Do not stage or commit files you did not change.** Before committing, check `git status` for other agents' work-in-progress and stage only your own paths. Never use `git add -A`/`git add .` in a shared tree.
+4. **The primary checkout owns the live app.** Only one session runs Metro (port 8081) and deploys to the simulator/device. Saving files in the primary tree hot-refreshes the running app - mid-edit saves tear it. If you only need tests, use your own worktree.
+5. **Serialize native builds.** Do not run gradle/xcodebuild against the same tree concurrently with another session, and never kill a native build mid-write (this corrupts .cxx/intermediates and costs an hour of rebuilds). Check `ps` for running builds first.
+6. **Coordinate over channels.** Use the channel skill (`/tmp/claude-channels`) to hand off findings, claim files, or request a deploy from the primary-tree owner, instead of editing the same files.

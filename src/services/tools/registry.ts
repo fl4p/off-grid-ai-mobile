@@ -214,3 +214,31 @@ export function buildToolSystemPromptHint(enabledToolIds: string[]): string {
   const toolList = enabledTools.map(t => `- ${t.name}: ${t.description}`).join('\n');
   return `\n\nTools available:\n${toolList}\nUse these tools proactively and precisely — call the right tool at the right moment rather than guessing or saying you cannot help.`;
 }
+
+/**
+ * Short system-prompt line for when the model has no tools this turn. Without
+ * it, a tool-less model hallucinates capabilities ("I'll run the Python...")
+ * and fakes results. Kept to one sentence — the target models can have a tiny
+ * (4k) context, so every token counts.
+ */
+export function buildNoToolsNote(): string {
+  return '\n\nYou have no tools this session: you cannot run code, make plots, browse, or read files. Do not pretend to — give code for the user to run instead.';
+}
+
+/**
+ * Append the right tool line to a base system prompt: the calling-convention hint
+ * for text-hint models, or a short "no tools" note when none are available (stops
+ * a tool-less model hallucinating that it ran code). With native/remote tool
+ * calling the schema carries the tools, so nothing is appended.
+ *
+ * `hasOtherTools` covers MCP/extension tools, which are counted out-of-band from
+ * activeToolIds — without it the note would wrongly fire (and contradict the
+ * tool-loop augmentation) for a user with MCP tools but no built-in tools.
+ */
+export function buildPromptWithToolNote(
+  basePrompt: string,
+  opts: { activeToolIds: string[]; useTextHint: boolean; hasOtherTools?: boolean },
+): string {
+  if (opts.useTextHint) return `${basePrompt}${buildToolSystemPromptHint(opts.activeToolIds)}`;
+  return (opts.activeToolIds.length === 0 && !opts.hasOtherTools) ? `${basePrompt}${buildNoToolsNote()}` : basePrompt;
+}

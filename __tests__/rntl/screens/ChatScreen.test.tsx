@@ -431,8 +431,14 @@ jest.mock('../../../src/components/AnimatedPressable', () => ({
 // entry animation, which doesn't flush synchronously in tests, so we render a
 // lightweight stand-in that exposes the same `models-row-*` testIDs and callback.
 jest.mock('../../../src/components/models/ModelsManagerSheet', () => ({
-  ModelsManagerSheet: ({ visible, onOpenRow }: any) => {
+  ModelsManagerSheet: ({ visible, onOpenRow, onClosed }: any) => {
+    const React = require('react');
     const { View, Text, TouchableOpacity } = require('react-native');
+    // Mirror the real sheet: fire onClosed after it goes invisible so actions
+    // deferred through onClosed (opening a picker) actually run in tests.
+    React.useEffect(() => {
+      if (!visible) { onClosed?.(); }
+    }, [visible, onClosed]);
     if (!visible) return null;
     const rows = ['text', 'image', 'voice', 'speech'];
     return (
@@ -705,7 +711,7 @@ describe('ChatScreen', () => {
       expect(getByText('My Test Chat')).toBeTruthy();
     });
 
-    it('shows the "Models" selector in the header', () => {
+    it('shows the active model name in the header selector', () => {
       const model = createDownloadedModel({ name: 'Llama-3.2-3B' });
       useAppStore.setState({
         downloadedModels: [model],
@@ -720,9 +726,8 @@ describe('ChatScreen', () => {
       mockRoute.params = { conversationId: conv.id };
 
       const { getByTestId } = renderChatScreen();
-      // The header no longer embeds the model name — it shows a generic "Models"
-      // selector that opens the shared models manager sheet.
-      expect(getByTestId('model-loaded-indicator').props.children).toBe('Models');
+      // The header selector shows the currently-selected model's name.
+      expect(getByTestId('model-loaded-indicator').props.children).toBe('Llama-3.2-3B');
     });
 
     it('navigates back when back button is pressed', () => {
@@ -3719,8 +3724,8 @@ describe('ChatScreen', () => {
   // ============================================================================
   // generateResponse error handling — line 768
   // ============================================================================
-  describe('generateResponse error shows alert', () => {
-    it('shows Generation Error alert when generateResponse throws', async () => {
+  describe('generateResponse error shows inline error message', () => {
+    it('renders an inline error message (Issue #9/#11) when generateResponse throws', async () => {
       const { conversationId } = setupFullChat();
       mockRoute.params = { conversationId };
       (llmService.isModelLoaded as jest.Mock).mockReturnValue(true);
@@ -3728,7 +3733,7 @@ describe('ChatScreen', () => {
       (llmService.getLoadedModelPath as jest.Mock).mockReturnValue('/mock/models/test-model.gguf');
       mockGenerateResponse.mockRejectedValue(new Error('Generation service down'));
 
-      const { getByTestId, queryByTestId } = renderChatScreen();
+      const { getByTestId, queryByTestId, queryByText } = renderChatScreen();
       await act(async () => { await new Promise<void>(r => setTimeout(() => r(), 50)); });
 
       await act(async () => {
@@ -3739,11 +3744,17 @@ describe('ChatScreen', () => {
       });
       await act(async () => { await new Promise<void>(r => setTimeout(() => r(), 500)); });
 
-      // The generation error should show an alert
+      // The failure surfaces as an inline message in the transcript, not behind a
+      // modal alert (Issue #9). (ChatMessage is mocked here to render its content.)
       await waitFor(() => {
-        expect(queryByTestId('custom-alert')).toBeTruthy();
+        expect(queryByText(/^Generation failed:/)).toBeTruthy();
       }, { timeout: 3000 });
-      expect(getByTestId('alert-title').props.children).toBe('Generation Error');
+      // The inline message is flagged as an error and kept out of LLM context.
+      const conv = useChatStore.getState().conversations.find((c) => c.id === conversationId);
+      const errorMsg = conv?.messages.find((m) => m.isError);
+      expect(errorMsg).toMatchObject({ role: 'assistant', isError: true, isSystemInfo: true });
+      expect(errorMsg?.errorDetails).toContain('Request:');
+      expect(queryByTestId('alert-title')).toBeNull();
     });
   });
 

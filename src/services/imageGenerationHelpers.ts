@@ -27,7 +27,9 @@ export function getConversationContext(conversationId: string): Message[] {
   if (!conversation?.messages) return [];
   return conversation.messages
     .slice(-10)
-    .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+    // Exclude system-info/error messages (e.g. "Generation failed: …") so they
+    // don't leak into the image-prompt enhancement context.
+    .filter(msg => !msg.isSystemInfo && (msg.role === 'user' || msg.role === 'assistant'))
     .map(msg => ({ id: `ctx-${msg.id}`, role: msg.role, content: msg.content.slice(0, 500), timestamp: msg.timestamp }));
 }
 

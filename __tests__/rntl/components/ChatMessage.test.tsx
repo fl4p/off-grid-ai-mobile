@@ -81,6 +81,39 @@ describe('ChatMessage', () => {
       expect(getByText('Model loaded successfully')).toBeTruthy();
     });
 
+    it('renders an error message with the failure headline (Issue #9)', () => {
+      const message = createMessage({
+        role: 'assistant',
+        content: 'Generation failed: network timeout',
+        isSystemInfo: true,
+        isError: true,
+        errorDetails: 'Request:\n- Model: Qwen 0.5B',
+      });
+
+      const { getByTestId, getByText, queryByTestId } = render(<ChatMessage message={message} />);
+
+      expect(getByTestId('error-message')).toBeTruthy();
+      expect(getByText('Generation failed: network timeout')).toBeTruthy();
+      // Details are collapsed by default (Issue #11).
+      expect(queryByTestId('error-details')).toBeNull();
+    });
+
+    it('expands request details when the error row is tapped (Issue #11)', () => {
+      const message = createMessage({
+        role: 'assistant',
+        content: 'Generation failed: boom',
+        isSystemInfo: true,
+        isError: true,
+        errorDetails: 'Request:\n- Model: Qwen 0.5B',
+      });
+
+      const { getByTestId, queryByTestId } = render(<ChatMessage message={message} />);
+      expect(queryByTestId('error-details')).toBeNull();
+      // Tapping the touchable row toggles the request details open.
+      fireEvent.press(getByTestId('error-message-toggle'));
+      expect(getByTestId('error-details')).toBeTruthy();
+    });
+
     it('renders empty content gracefully', () => {
       const message = createMessage({ content: '' });
       const { queryByText, getByTestId } = render(<ChatMessage message={message} />);

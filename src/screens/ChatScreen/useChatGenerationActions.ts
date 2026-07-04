@@ -3,18 +3,19 @@ import { AlertState, showAlert, hideAlert } from '../../components';
 import { APP_CONFIG } from '../../constants';
 import {
   llmService, intentClassifier, generationService, imageGenerationService,
-  onnxImageGeneratorService, ImageGenerationState, buildToolSystemPromptHint,
+  onnxImageGeneratorService, ImageGenerationState, buildPromptWithToolNote,
   contextCompactionService,
 } from '../../services';
 import { getToolExtensions } from '../../services/tools/extensions';
 import { liteRTService } from '../../services/litert';
 import { ensureDefaultClassifier } from '../../services/classifierProvisioning';
 import { abortPreload } from '../../services/modelPreloader';
-import { useChatStore, useProjectStore, useRemoteServerStore } from '../../stores';
+import { useAppStore, useChatStore, useProjectStore, useRemoteServerStore } from '../../stores';
 import { callHook, HOOKS } from '../../bootstrap/hookRegistry';
 import { Message, MediaAttachment, Project, DownloadedModel, RemoteModel, CacheType } from '../../types';
 import logger from '../../utils/logger';
 import { injectChatContext } from './contextInjection';
+import { buildGenerationRequestDebugInfo, buildGenerationErrorMessage } from './generationErrorDetails';
 type SetState<T> = Dispatch<SetStateAction<T>>;
 const FALLBACK_RECENT_MESSAGE_COUNT = 2;
 const MEMORY_TOOL_IDS = ['search_memory', 'save_memory', 'forget_memory'];
@@ -22,7 +23,7 @@ const MEMORY_TOOL_IDS = ['search_memory', 'save_memory', 'forget_memory'];
 export type GenerationDeps = {
   activeModelId: string | null;
   activeModel: DownloadedModel | null | undefined;
-  activeModelInfo?: { isRemote: boolean; model: DownloadedModel | RemoteModel | null; modelId: string | null; modelName: string };
+  activeModelInfo?: { isRemote: boolean; model: DownloadedModel | RemoteModel | null; modelId: string | null; modelName: string; serverId?: string };
   hasActiveModel?: boolean;
   hasTextModel?: boolean;
   /** Same tool gate the UI shows; when false the Tools badge reads "N/A" and the picker is locked, so generation must not inject tools either. */
@@ -66,7 +67,7 @@ export type GenerationDeps = {
   ensureTextModelForChat: () => Promise<boolean>;
   /** Stash a message to replay after the user picks a text model. */
   setPendingMessage?: (text: string, attachments?: MediaAttachment[]) => void;
-  createConversation: (modelId: string, title?: string, projectId?: string) => string;
+  createConversation: (modelId: string, title?: string, projectId?: string, serverId?: string) => string;
   pendingProjectId?: string;
 };
 function applyCompactionPrefix(conversation: any, systemPrompt: string, messages: Message[]): { prefix: Message[]; filtered: Message[] } {
@@ -252,6 +253,54 @@ function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _message
   const rawPrompt = project?.systemPrompt || deps.settings.systemPrompt || APP_CONFIG.defaultSystemPrompt;
   return { enabledTools, rawPrompt, isLiteRT };
 }
+/** Shared failure handling for the send and regenerate paths. A context-overflow
+ *  error keeps its actionable modal (Settings / New chat); any other failure is
+ *  surfaced inline in the chat (Issue #9) with the full request details collapsed
+ *  underneath (Issue #11), instead of a modal that hides the "…" indicator. */
+function handleGenerationFailure(
+  deps: GenerationDeps,
+  error: any,
+  ctx: { conversationId: string; prompt: string; tools: string[]; conversation: any },
+): void {
+  const msg = error?.message || error?.toString?.() || 'Failed to generate response';
+  logger.error('[ChatGen] Generation failed:', msg, error);
+  // Local llama.cpp overflow phrasings plus the remote/compaction patterns, so a
+  // context error that survives compaction still gets the actionable modal.
+  const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens')
+    || msg.includes('Input token ids') || contextCompactionService.isContextFullError(error);
+  if (isContextOverflow) {
+    const dismiss = () => deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
+    deps.setAlertState({
+      ...showAlert(
+        'Context window full',
+        'The conversation is too long for this model\'s context window.\n\nIncrease the context limit in Settings, reduce the number of enabled tools, or start a new chat.',
+        [
+          { text: 'Settings', onPress: () => { dismiss(); deps.setShowSettingsPanel?.(true); } },
+          {
+            text: 'New chat',
+            onPress: () => {
+              dismiss();
+              const modelId = deps.activeModelInfo?.modelId;
+              if (modelId) {
+                const serverId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
+                deps.setActiveConversation(deps.createConversation(modelId, undefined, undefined, serverId));
+              }
+            },
+          },
+        ],
+      ),
+      prominentMessage: true,
+    });
+    return;
+  }
+  const project = ctx.conversation?.projectId ? useProjectStore.getState().getProject(ctx.conversation.projectId) : null;
+  const requestDebugInfo = buildGenerationRequestDebugInfo(
+    { activeModelInfo: deps.activeModelInfo, activeModel: deps.activeModel ?? null, settings: useAppStore.getState().settings },
+    { conversationId: ctx.conversationId, prompt: ctx.prompt, tools: ctx.tools, projectId: ctx.conversation?.projectId, projectName: project?.name },
+  );
+  deps.addMessage(ctx.conversationId, buildGenerationErrorMessage(msg, requestDebugInfo));
+}
+
 export async function startGenerationFn(deps: GenerationDeps, call: StartGenerationCall): Promise<void> {
   const { setDebugInfo, targetConversationId, messageText } = call;
   if (!deps.hasActiveModel) return;
@@ -285,14 +334,10 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
   // llama.cpp uses text hint only when it lacks native Jinja tool calling support.
   const useTextHint = !isRemote && !isLiteRT && activeTools.length > 0 && !llmService.supportsToolCalling();
 
-  // MCP/extension hints are injected once, centrally, by augmentSystemPromptForTools
-  // in the tool loop (covers every engine + tool path). Do NOT add them here too, or
-  // the hint lands in the system prompt twice. Only the built-in-tools text hint is
-  // added here, and only when the model lacks native Jinja tool calling.
+  // buildPromptWithToolNote adds only the built-in-tools line; MCP/extension hints
+  // come solely from augmentSystemPromptForTools in the tool loop (no double-inject).
   const systemPrompt = applyGemma4ThinkToken(
-    useTextHint
-      ? `${basePrompt}${buildToolSystemPromptHint(activeTools)}`
-      : basePrompt,
+    buildPromptWithToolNote(basePrompt, { activeToolIds: activeTools, useTextHint, hasOtherTools: getToolExtensions().some(e => e.enabledToolCount() > 0) }),
     isRemote,
     { isLiteRT, thinkingEnabled: deps.settings.thinkingEnabled },
   );
@@ -301,39 +346,7 @@ export async function startGenerationFn(deps: GenerationDeps, call: StartGenerat
   try {
     await generateWithCompactionRetry({ id: targetConversationId, prompt: systemPrompt, messages: messagesForContext }, activeTools, conversation?.projectId);
   } catch (error: any) {
-    const msg = error?.message || error?.toString?.() || 'Failed to generate response';
-    logger.error('[ChatGen] Generation failed:', msg, error);
-    const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens') || msg.includes('Input token ids');
-    if (isContextOverflow) {
-      deps.setAlertState({
-        ...showAlert(
-          'Context window full',
-          'The conversation is too long for this model\'s context window.\n\nIncrease the context limit in Settings, reduce the number of enabled tools, or start a new chat.',
-          [
-            {
-              text: 'Settings',
-              onPress: () => { deps.setAlertState({ visible: false, title: '', message: '', buttons: [] }); deps.setShowSettingsPanel?.(true); },
-            },
-            {
-              text: 'New chat',
-              onPress: () => {
-                deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
-                const modelId = deps.activeModelInfo?.modelId;
-                if (modelId) {
-                  const newId = deps.createConversation(modelId);
-                  deps.setActiveConversation(newId);
-                }
-              },
-            },
-          ],
-        ),
-        prominentMessage: true,
-      });
-    } else {
-      deps.setAlertState(showAlert('Generation Error', msg));
-    }
-    deps.generatingForConversationRef.current = null;
-    return;
+    handleGenerationFailure(deps, error, { conversationId: targetConversationId, prompt: messageText, tools: activeTools, conversation });
   }
   deps.generatingForConversationRef.current = null;
 }
@@ -380,7 +393,8 @@ export async function handleSendFn(deps: GenerationDeps, call: SendCall): Promis
   let targetConversationId = deps.activeConversationId;
   if (!targetConversationId) {
     const fallbackModelId = deps.activeModelInfo?.modelId || deps.activeImageModel?.id;
-    targetConversationId = deps.createConversation(fallbackModelId!, undefined, deps.pendingProjectId);
+    const fallbackServerId = deps.activeModelInfo?.isRemote ? deps.activeModelInfo.serverId : undefined;
+    targetConversationId = deps.createConversation(fallbackModelId!, undefined, deps.pendingProjectId, fallbackServerId);
     deps.setActiveConversation(targetConversationId);
   }
   // Cross-modality serialization: queue if any generation is running (routed later).
@@ -446,9 +460,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   // MCP/extension hints come solely from augmentSystemPromptForTools in the tool loop
   // (see the send path above) — adding them here too would double-inject.
   const systemPrompt = applyGemma4ThinkToken(
-    useTextHint
-      ? `${basePrompt}${buildToolSystemPromptHint(activeTools)}`
-      : basePrompt,
+    buildPromptWithToolNote(basePrompt, { activeToolIds: activeTools, useTextHint, hasOtherTools: getToolExtensions().some(e => e.enabledToolCount() > 0) }),
     isRemote,
     { isLiteRT: isLiteRTRegen, thinkingEnabled: deps.settings.thinkingEnabled },
   );
@@ -456,36 +468,7 @@ export async function regenerateResponseFn(deps: GenerationDeps, call: Regenerat
   try {
     await generateWithCompactionRetry({ id: targetConversationId, prompt: systemPrompt, messages: [...prefix, ...filtered] }, activeTools, conversation?.projectId);
   } catch (error: any) {
-    const msg = error?.message || 'Failed to generate response';
-    const isContextOverflow = msg.includes('too long') || msg.includes('Exceeding the maximum number of tokens') || msg.includes('Input token ids');
-    if (isContextOverflow) {
-      deps.setAlertState({
-        ...showAlert(
-          'Context window full',
-          'The conversation is too long for this model\'s context window.\n\nIncrease the context limit in Settings, reduce the number of enabled tools, or start a new chat.',
-          [
-            {
-              text: 'Settings',
-              onPress: () => { deps.setAlertState({ visible: false, title: '', message: '', buttons: [] }); deps.setShowSettingsPanel?.(true); },
-            },
-            {
-              text: 'New chat',
-              onPress: () => {
-                deps.setAlertState({ visible: false, title: '', message: '', buttons: [] });
-                const modelId = deps.activeModelInfo?.modelId;
-                if (modelId) {
-                  const newId = deps.createConversation(modelId);
-                  deps.setActiveConversation(newId);
-                }
-              },
-            },
-          ],
-        ),
-        prominentMessage: true,
-      });
-    } else {
-      deps.setAlertState(showAlert('Generation Error', msg));
-    }
+    handleGenerationFailure(deps, error, { conversationId: targetConversationId, prompt: messageText, tools: activeTools, conversation });
   }
   deps.generatingForConversationRef.current = null;
 }

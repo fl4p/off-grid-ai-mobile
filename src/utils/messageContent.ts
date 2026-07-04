@@ -1,3 +1,15 @@
+import type { Message } from '../types';
+
+/** The message to show as a conversation preview: the last one that isn't a
+ *  system-info/error notice (model-loaded lines, "Generation failed: …"), so
+ *  previews reflect the last real user/assistant exchange. */
+export function getLastVisibleMessage(messages: Message[]): Message | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (!messages[i].isSystemInfo) return messages[i];
+  }
+  return undefined;
+}
+
 const CONTROL_TOKEN_PATTERNS: RegExp[] = [
   /<\|im_start\|>\s*(?:system|assistant|user|tool)?\s*\n?/gi,
   /<\|im_end\|>\s*\n?/gi,

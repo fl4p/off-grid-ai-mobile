@@ -5,7 +5,10 @@ import { useTheme, useThemedStyles } from '../../theme';
 import { createStyles } from './styles';
 
 interface ConversationActionsSectionProps {
-  onClose: () => void;
+  // Each action is pre-wrapped by the parent to close this sheet FIRST and run
+  // only after it has fully dismissed. iOS can't present a sheet/alert while
+  // another modal is still dismissing, so firing these on a fixed timeout (the
+  // old behaviour) deadlocked the app. See GenerationSettingsModal.runAfterClose.
   onOpenProject?: () => void;
   onOpenGallery?: () => void;
   onDeleteConversation?: () => void;
@@ -14,7 +17,6 @@ interface ConversationActionsSectionProps {
 }
 
 export const ConversationActionsSection: React.FC<ConversationActionsSectionProps> = ({
-  onClose,
   onOpenProject,
   onOpenGallery,
   onDeleteConversation,
@@ -29,25 +31,10 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
     return null;
   }
 
-  const handleOpenProject = () => {
-    onClose();
-    setTimeout(onOpenProject!, 350);
-  };
-
-  const handleOpenGallery = () => {
-    onClose();
-    setTimeout(onOpenGallery!, 200);
-  };
-
-  const handleDeleteConversation = () => {
-    onClose();
-    setTimeout(onDeleteConversation!, 200);
-  };
-
   return (
     <View>
       {onOpenProject && (
-        <TouchableOpacity style={styles.actionRow} onPress={handleOpenProject}>
+        <TouchableOpacity style={styles.actionRow} onPress={onOpenProject}>
           <Icon name="folder" size={16} color={colors.textSecondary} />
           <Text style={styles.actionText}>
             Project: {activeProjectName || 'Default'}
@@ -56,7 +43,7 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
         </TouchableOpacity>
       )}
       {onOpenGallery && conversationImageCount > 0 && (
-        <TouchableOpacity style={styles.actionRow} onPress={handleOpenGallery}>
+        <TouchableOpacity style={styles.actionRow} onPress={onOpenGallery}>
           <Icon name="image" size={16} color={colors.textSecondary} />
           <Text style={styles.actionText}>
             Gallery ({conversationImageCount})
@@ -65,7 +52,7 @@ export const ConversationActionsSection: React.FC<ConversationActionsSectionProp
         </TouchableOpacity>
       )}
       {onDeleteConversation && (
-        <TouchableOpacity style={styles.actionRow} onPress={handleDeleteConversation}>
+        <TouchableOpacity style={styles.actionRow} onPress={onDeleteConversation}>
           <Icon name="trash-2" size={16} color={colors.error} />
           <Text style={styles.actionTextError}>Delete Conversation</Text>
         </TouchableOpacity>

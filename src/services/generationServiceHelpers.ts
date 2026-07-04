@@ -109,6 +109,20 @@ function buildBaseGenerationMeta(svc: any): GenerationMeta {
   };
 }
 
+/** Clear streaming buffers and reset generation state after a failure so the
+ *  "thinking…" indicator stops and the single global isGenerating flag is freed
+ *  (otherwise every other conversation stays blocked). */
+function resetAfterGenerationError(svc: any, opts?: { markServerOffline?: boolean }): void {
+  if (opts?.markServerOffline) {
+    const failedServerId = useRemoteServerStore.getState().activeServerId;
+    if (failedServerId) useRemoteServerStore.getState().updateServerHealth(failedServerId, false);
+  }
+  if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
+  svc.tokenBuffer = '';
+  useChatStore.getState().clearStreamingMessage();
+  svc.resetState();
+}
+
 function handleStreamChunk(svc: any, chunk: { content?: string; reasoningContent?: string }): void {
   if (chunk.content) {
     if (!svc.state.streamingContent && svc.remoteTimeToFirstToken === undefined) {
@@ -300,20 +314,14 @@ async function runLiteRTResponseImpl(svc: any, req: GenerationRequest): Promise<
         onError: (err: Error) => {
           if (svc.abortRequested) return;
           logger.error('[LiteRT] sendMessage error:', err.message);
-          if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-          svc.tokenBuffer = '';
-          chatStore.clearStreamingMessage();
-          svc.resetState();
+          resetAfterGenerationError(svc);
         },
       },
       { imageUris, audioUris },
     );
   } catch (error: any) {
     if (svc.abortRequested) return;
-    if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-    svc.tokenBuffer = '';
-    chatStore.clearStreamingMessage();
-    svc.resetState();
+    resetAfterGenerationError(svc);
     throw error;
   }
 }
@@ -368,10 +376,7 @@ export async function generateResponseImpl(
   } catch (error) {
     if (svc.abortRequested) return;
     logger.error('[GenerationService] Generation error:', error);
-    if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-    svc.tokenBuffer = '';
-    chatStore.clearStreamingMessage();
-    svc.resetState();
+    resetAfterGenerationError(svc);
     throw error;
   }
 }
@@ -438,23 +443,14 @@ export async function generateRemoteResponseImpl(
       onError: (error: Error) => {
         if (generationSignal.aborted) return;
         logger.error('[GenerationService] Remote generation error:', error);
-        if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-        svc.tokenBuffer = '';
-        chatStore.clearStreamingMessage();
-        svc.resetState();
+        resetAfterGenerationError(svc);
         throw error;
       },
     });
   } catch (error) {
     if (generationSignal.aborted) return;
     logger.error('[GenerationService] Remote generation error:', error);
-    // Mark server as offline so the Remote Servers screen reflects the failure
-    const failedServerId = useRemoteServerStore.getState().activeServerId;
-    if (failedServerId) useRemoteServerStore.getState().updateServerHealth(failedServerId, false);
-    if (svc.flushTimer) { clearTimeout(svc.flushTimer); svc.flushTimer = null; }
-    svc.tokenBuffer = '';
-    chatStore.clearStreamingMessage();
-    svc.resetState();
+    resetAfterGenerationError(svc, { markServerOffline: true });
     throw error;
   } finally {
     svc.currentRemoteAbortController = null;
@@ -466,34 +462,37 @@ export async function generateRemoteWithToolsImpl(
   req: GenerationWithToolsRequest,
 ): Promise<void> {
   const { conversationId, messages, options } = req;
-  logger.log(`[GenService][DEBUG] generateRemoteWithToolsImpl — conv=${conversationId}, messages=${messages.length}, enabledToolIds=[${options.enabledToolIds.join(', ')}]`);
-  if (!(await prepareGenerationImpl(svc, conversationId))) {
-    logger.log(`[GenService][DEBUG] prepareGeneration returned false, aborting`);
-    return;
-  }
+  if (!(await prepareGenerationImpl(svc, conversationId))) return;
   const provider = svc.getCurrentProvider();
 
   if (!provider) { svc.resetState(); throw new Error('No remote provider available'); }
-  logger.log(`[GenService][DEBUG] Provider ready — type=${provider.type}, capabilities=${JSON.stringify(provider.capabilities)}`);
 
   const { enabledToolIds, projectId, ...callbacks } = options;
 
-  // Use the same tool loop but with remote provider
-  await runToolLoop({
-    conversationId, messages, enabledToolIds, projectId, callbacks,
-    ...buildToolLoopHandlersImpl(svc),
-    forceRemote: true,
-  });
+  try {
+    // Use the same tool loop but with remote provider
+    await runToolLoop({
+      conversationId, messages, enabledToolIds, projectId, callbacks,
+      ...buildToolLoopHandlersImpl(svc),
+      forceRemote: true,
+    });
+  } catch (error) {
+    // Without this the state was left with isGenerating/isThinking=true, so the
+    // "thinking…" indicator spun forever and — because isGenerating is a single
+    // global flag — every other conversation was blocked from generating too.
+    if (svc.abortRequested) return;
+    logger.error('[GenerationService] Remote tool generation error:', error);
+    // Don't mark the server offline here: a runToolLoop failure can be a tool
+    // error or a context-length error the caller recovers from via compaction,
+    // and nothing flips health back to healthy — a false offline would stick.
+    resetAfterGenerationError(svc);
+    throw error;
+  }
 
-  if (svc.abortRequested) {
-    logger.log(`[GenService][DEBUG] Generation was aborted, skipping finalize`);
-  } else {
+  if (!svc.abortRequested) {
     svc.forceFlushTokens();
     const generationTime = svc.state.startTime ? Date.now() - svc.state.startTime : undefined;
-    logger.log(`[GenService][DEBUG] Finalizing — streamingContent length=${svc.state.streamingContent?.length || 0}, generationTime=${generationTime}ms`);
-    useChatStore.getState().finalizeStreamingMessage(
-      conversationId, generationTime, buildGenerationMetaImpl(svc),
-    );
+    useChatStore.getState().finalizeStreamingMessage(conversationId, generationTime, buildGenerationMetaImpl(svc));
     svc.checkSharePrompt();
     svc.resetState();
   }

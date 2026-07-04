@@ -7,8 +7,11 @@ import {
   Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AttachStep } from 'react-native-spotlight-tour';
+import { ModelSelectorModal } from '../../components';
 import { AnimatedEntry } from '../../components/AnimatedEntry';
+import { llmService } from '../../services';
 import { createStyles } from './styles';
 import { useTheme } from '../../theme';
 import { getSlot, SLOTS } from '../../bootstrap/slotRegistry';
@@ -21,9 +24,13 @@ export const NoModelScreen: React.FC<{
   colors: ColorsType;
   navigation: any;
   hasAvailableModels: boolean;
+  showModelSelector: boolean;
   setShowModelSelector: (v: boolean) => void;
-}> = ({ styles, colors, navigation, hasAvailableModels, setShowModelSelector }) => (
-  <View style={styles.container}>
+  onSelectModel: (model: any) => void;
+  onUnloadModel: () => void;
+  isModelLoading: boolean;
+}> = ({ styles, colors, navigation, hasAvailableModels, showModelSelector, setShowModelSelector, onSelectModel, onUnloadModel, isModelLoading }) => (
+  <SafeAreaView style={styles.container} edges={['top']}>
     <View style={styles.header}>
       <View style={styles.headerRow}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -51,7 +58,16 @@ export const NoModelScreen: React.FC<{
         </TouchableOpacity>
       )}
     </View>
-  </View>
+    <ModelSelectorModal
+      visible={showModelSelector}
+      onClose={() => setShowModelSelector(false)}
+      onSelectModel={onSelectModel}
+      onUnloadModel={onUnloadModel}
+      isLoading={isModelLoading}
+      currentModelPath={llmService.getLoadedModelPath()}
+      onSelectionComplete={() => setShowModelSelector(false)}
+    />
+  </SafeAreaView>
 );
 
 export const ChatHeader: React.FC<{
@@ -64,7 +80,8 @@ export const ChatHeader: React.FC<{
   setShowSettingsPanel: (v: boolean) => void;
   setShowProjectSelector: (v: boolean) => void;
   isRemote?: boolean;
-}> = ({ styles, colors, activeConversation, activeProject, navigation, onOpenModels, setShowSettingsPanel, setShowProjectSelector, isRemote }) => (
+  activeModelName?: string;
+}> = ({ styles, colors, activeConversation, activeProject, navigation, onOpenModels, setShowSettingsPanel, setShowProjectSelector, isRemote, activeModelName }) => (
   <View style={styles.header}>
     <View style={styles.headerRow}>
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -81,7 +98,7 @@ export const ChatHeader: React.FC<{
             )}
             <Icon name="layers" size={12} color={colors.textSecondary} style={styles.remoteIcon} />
             <Text style={styles.headerSubtitle} numberOfLines={1} testID="model-loaded-indicator">
-              Models
+              {activeModelName && activeModelName !== 'Unknown' ? activeModelName : 'Models'}
             </Text>
             <Text style={styles.modelSelectorArrow}>▼</Text>
           </TouchableOpacity>
@@ -113,10 +130,11 @@ export const EmptyChat: React.FC<{
   colors: ColorsType;
   activeModel: any;
   activeModelName?: string;
+  serverName?: string;
   activeProject: any;
   setShowProjectSelector: (v: boolean) => void;
   isRemote?: boolean;
-}> = ({ styles, colors, activeModel, activeModelName, activeProject, setShowProjectSelector, isRemote }) => (
+}> = ({ styles, colors, activeModel, activeModelName, serverName, activeProject, setShowProjectSelector, isRemote }) => (
   <View style={styles.emptyChat}>
     <AnimatedEntry index={0} staggerMs={60}>
       <View style={styles.emptyChatIconContainer}>
@@ -128,7 +146,8 @@ export const EmptyChat: React.FC<{
     </AnimatedEntry>
     <AnimatedEntry index={2} staggerMs={60}>
       <Text style={styles.emptyChatText}>
-        Type a message below to begin chatting with {activeModelName || activeModel?.name || 'Unknown'}.
+        Type a message below to begin chatting with {activeModelName || activeModel?.name || 'Unknown'}
+        {serverName ? ` on ${serverName}` : ''}.
       </Text>
     </AnimatedEntry>
     <AnimatedEntry index={3} staggerMs={60}>
