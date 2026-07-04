@@ -163,6 +163,46 @@ describe('hydrateDownloadStore', () => {
     expect(state.downloadIdIndex['dl-mm']).toBe(keys[0]);
   });
 
+  it('retains a completed main GGUF when the mmproj sidecar is waiting_for_network', async () => {
+    backgroundDownloadService.isAvailable.mockReturnValue(true);
+    backgroundDownloadService.getActiveDownloads.mockResolvedValue([
+      {
+        downloadId: 'dl-parent', modelId: 'author/vision', fileName: 'model.gguf',
+        status: 'completed', bytesDownloaded: 1000, totalBytes: 1000,
+        mmProjDownloadId: 'dl-mm', createdAt: 1000,
+      },
+      {
+        downloadId: 'dl-mm', modelId: 'author/vision', fileName: 'model-mmproj.gguf',
+        status: 'waiting_for_network', bytesDownloaded: 100, totalBytes: 500, createdAt: 900,
+      },
+    ]);
+
+    await hydrateDownloadStore();
+    const keys = Object.keys(useDownloadStore.getState().downloads);
+    expect(keys.length).toBe(1); // still an active tail
+    expect(useDownloadStore.getState().downloads[keys[0]].status).toBe('running');
+  });
+
+  it('drops a completed vision download whose mmproj sidecar has terminally failed', async () => {
+    // A dead sidecar is NOT an active download. Dropping lets restore finalize the
+    // GGUF text-only, rather than showing a misleading "Downloading…" card on resume.
+    backgroundDownloadService.isAvailable.mockReturnValue(true);
+    backgroundDownloadService.getActiveDownloads.mockResolvedValue([
+      {
+        downloadId: 'dl-parent', modelId: 'author/vision', fileName: 'model.gguf',
+        status: 'completed', bytesDownloaded: 1000, totalBytes: 1000,
+        mmProjDownloadId: 'dl-mm', createdAt: 1000,
+      },
+      {
+        downloadId: 'dl-mm', modelId: 'author/vision', fileName: 'model-mmproj.gguf',
+        status: 'failed', bytesDownloaded: 100, totalBytes: 500, createdAt: 900,
+      },
+    ]);
+
+    await hydrateDownloadStore();
+    expect(Object.keys(useDownloadStore.getState().downloads).length).toBe(0);
+  });
+
   it('drops a completed vision download once its mmproj sidecar has also completed', async () => {
     backgroundDownloadService.isAvailable.mockReturnValue(true);
     backgroundDownloadService.getActiveDownloads.mockResolvedValue([
