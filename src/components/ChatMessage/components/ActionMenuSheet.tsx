@@ -154,7 +154,7 @@ interface SelectTextSheetProps {
  */
 export function SelectTextSheet({ visible, onClose, content, styles }: SelectTextSheetProps) {
   return (
-    <AppSheet visible={visible} onClose={onClose} title="SELECT TEXT" enableDynamicSizing>
+    <AppSheet visible={visible} onClose={onClose} title="SELECT TEXT" enableDynamicSizing usePortal>
       <View style={styles.selectTextContent}>
         <Text style={styles.selectTextHint}>Long-press to select, then copy.</Text>
         <ScrollView style={styles.selectTextScroll} nestedScrollEnabled>
@@ -194,6 +194,7 @@ export function EditSheet({
       onClose={onClose}
       title="EDIT MESSAGE"
       enableDynamicSizing
+      usePortal
     >
       <View style={styles.editSheetContent}>
         <TextInput
