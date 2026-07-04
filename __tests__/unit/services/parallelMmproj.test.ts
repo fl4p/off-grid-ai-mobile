@@ -711,6 +711,121 @@ describe('Parallel mmproj download', () => {
     });
   });
 
+  describe('watchBackgroundDownload — mmproj move-failure validation', () => {
+    // When the mmproj move fails, the target may already hold a valid mmproj
+    // (a re-download, or a file another model references). Validate the existing
+    // file READ-ONLY (size + GGUF magic): reuse if valid, downgrade to text-only
+    // if not — but never delete it, so this recovery path can't destroy a valid
+    // or shared sidecar.
+    const MMPROJ_PATH = `${MODELS_DIR}/vision-mmproj.gguf`;
+
+    async function setupWithMoveFailure() {
+      stubStartDownload(['42', '43']);
+      const completeCbs = captureCompleteCallbacks();
+      await performBackgroundDownload({
+        modelId: 'test/model',
+        file: visionFile(),
+        modelsDir: MODELS_DIR,
+        backgroundDownloadContext: bgContext,
+        backgroundDownloadMetadataCallback: metadataCallback,
+      });
+      // main (42) move succeeds; mmproj (43) move rejects (target already exists).
+      mockService.moveCompletedDownload.mockImplementation((id: string) =>
+        id === '43'
+          ? Promise.reject(new Error('target exists'))
+          : Promise.resolve(`${MODELS_DIR}/vision.gguf`),
+      );
+      mockedRNFS.exists.mockResolvedValue(true);
+      mockedRNFS.stat.mockResolvedValue({ size: 500_000_000 } as any);
+      const onComplete = jest.fn();
+      watchBackgroundDownload({
+        downloadId: '42',
+        modelsDir: MODELS_DIR,
+        backgroundDownloadContext: bgContext,
+        backgroundDownloadMetadataCallback: metadataCallback,
+        onComplete,
+      });
+      const ctx = bgContext.get('42') as any;
+      return { completeCbs, onComplete, ctx };
+    }
+
+    it('keeps vision when the existing target is a valid GGUF', async () => {
+      const { completeCbs, onComplete, ctx } = await setupWithMoveFailure();
+      (mockedRNFS.read as jest.Mock).mockResolvedValue('GGUF');
+
+      await completeCbs['43']?.({ downloadId: '43', fileName: 'mmproj.gguf' });
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+
+      expect(ctx.mmProjLocalPath).toBe(MMPROJ_PATH);
+      expect(mockedRNFS.unlink).not.toHaveBeenCalledWith(MMPROJ_PATH);
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBe(MMPROJ_PATH);
+    });
+
+    it('downgrades to text-only WITHOUT deleting when the target has bad magic bytes', async () => {
+      const { completeCbs, onComplete, ctx } = await setupWithMoveFailure();
+      (mockedRNFS.read as jest.Mock).mockResolvedValue('XXXX');
+
+      await completeCbs['43']?.({ downloadId: '43', fileName: 'mmproj.gguf' });
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+
+      expect(ctx.mmProjLocalPath).toBeNull();
+      // Recovery path must never delete the existing target (may be shared/valid-but-misread).
+      expect(mockedRNFS.unlink).not.toHaveBeenCalledWith(MMPROJ_PATH);
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBeUndefined();
+    });
+
+    it('downgrades WITHOUT deleting when the target is smaller than expected', async () => {
+      const { completeCbs, onComplete, ctx } = await setupWithMoveFailure();
+      // Good magic but short file (< expected 500MB) → invalid, but not ours to delete.
+      mockedRNFS.stat.mockResolvedValue({ size: 100 } as any);
+      (mockedRNFS.read as jest.Mock).mockResolvedValue('GGUF');
+
+      await completeCbs['43']?.({ downloadId: '43', fileName: 'mmproj.gguf' });
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+
+      expect(ctx.mmProjLocalPath).toBeNull();
+      expect(mockedRNFS.unlink).not.toHaveBeenCalledWith(MMPROJ_PATH);
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBeUndefined();
+    });
+
+    it('keeps vision when the magic read throws (iOS RNFS.read bug)', async () => {
+      const { completeCbs, onComplete, ctx } = await setupWithMoveFailure();
+      // RNFS.read rejects → hasGgufMagic returns null → accept, llama.rn validates on load.
+      (mockedRNFS.read as jest.Mock).mockRejectedValue(new Error('NSInteger bridging error'));
+
+      await completeCbs['43']?.({ downloadId: '43', fileName: 'mmproj.gguf' });
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+
+      expect(ctx.mmProjLocalPath).toBe(MMPROJ_PATH);
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBe(MMPROJ_PATH);
+    });
+
+    it('keeps vision when the magic read returns a short/empty string (iOS RNFS.read bug)', async () => {
+      const { completeCbs, onComplete, ctx } = await setupWithMoveFailure();
+      // A truncated read is inconclusive, not a confirmed-bad file — must not downgrade.
+      (mockedRNFS.read as jest.Mock).mockResolvedValue('');
+
+      await completeCbs['43']?.({ downloadId: '43', fileName: 'mmproj.gguf' });
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+
+      expect(ctx.mmProjLocalPath).toBe(MMPROJ_PATH);
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBe(MMPROJ_PATH);
+    });
+
+    it('downgrades to text-only when the target no longer exists', async () => {
+      const { completeCbs, onComplete, ctx } = await setupWithMoveFailure();
+      mockedRNFS.exists.mockResolvedValue(false);
+
+      await completeCbs['43']?.({ downloadId: '43', fileName: 'mmproj.gguf' });
+      await completeCbs['42']?.({ downloadId: '42', fileName: 'vision.gguf' });
+
+      expect(ctx.mmProjLocalPath).toBeNull();
+      expect(onComplete.mock.calls[0][0].mmProjPath).toBeUndefined();
+    });
+  });
+
   describe('watchBackgroundDownload — already-downloaded recovery', () => {
     it('persists already-downloaded models before firing onComplete', async () => {
       mockedRNFS.exists.mockResolvedValue(true);
