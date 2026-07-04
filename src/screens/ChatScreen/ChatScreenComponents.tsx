@@ -183,7 +183,7 @@ export const EmptyChat: React.FC<{
           color={onlineToolsEnabled ? colors.primary : colors.textMuted}
         />
         <View style={styles.onlineToolsCopy}>
-          <Text style={styles.onlineToolsLabel}>Online tools</Text>
+          <Text style={styles.onlineToolsLabel}>Allow online tools</Text>
           <Text style={styles.onlineToolsSubtext}>
             {onlineToolsEnabled
               ? 'The model can search the web and read links.'
