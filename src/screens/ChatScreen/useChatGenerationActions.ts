@@ -196,6 +196,15 @@ const applyGemma4ThinkToken = (prompt: string, isRemote: boolean, opts?: { isLit
   const llamaWantsThink = !isRemote && llmService.isGemma4Model() && llmService.isThinkingEnabled();
   return (liteRTWantsThink || llamaWantsThink) ? `<|think|>\n${prompt}` : prompt;
 };
+/** Base enabled-tool set for a turn: honours the UI tool gate, then applies the global
+ *  online-tools gate (network tools withheld when the switch is off). Exported so the
+ *  generation call site's gating is directly testable; resolveToolsAndPrompt layers the
+ *  memory + project-search resolution on top of this. */
+export function resolveEnabledTools(deps: GenerationDeps, _conversation: any, ctx: { canUseTools: boolean; isRemote: boolean }): string[] {
+  return ctx.canUseTools
+    ? filterToolsByNetworkAccess(deps.settings.enabledTools || [], deps.settings.onlineToolsEnabled ?? false)
+    : [];
+}
 /** Auto-add a project-scoped tool only when its backing store has >=1 item in scope, re-checked per turn
  *  so mid-session changes take effect on the next message. On a count-query error we fall back to offering
  *  the tool (previous always-on behaviour). */
@@ -215,10 +224,8 @@ async function resolveToolsAndPrompt(deps: GenerationDeps, conversation: any, _m
   // Honour the UI gate: "N/A" (supportsToolCalling === false) means the picker is unreachable, so don't inject tools the user can't disable.
   const canUseTools = deps.supportsToolCalling !== false && (llmService.supportsToolCalling() || isRemote || isLiteRT);
 
-  // Online-tools switch off: withhold network tools so the model can't silently search/fetch.
-  let enabledTools = canUseTools
-    ? filterToolsByNetworkAccess(deps.settings.enabledTools || [], deps.settings.onlineToolsEnabled ?? false)
-    : [];
+  // Base set with the online-tools gate applied (network tools withheld when off).
+  let enabledTools = resolveEnabledTools(deps, conversation, { canUseTools, isRemote });
   if (isRemote) {
     enabledTools = filterMemoryToolNames(enabledTools);
   }

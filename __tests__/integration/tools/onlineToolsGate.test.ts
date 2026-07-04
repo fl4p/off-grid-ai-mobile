@@ -14,6 +14,7 @@ import {
   filterToolsByNetworkAccess,
   getToolsAsOpenAISchema,
 } from '../../../src/services/tools/registry';
+import { resolveEnabledTools } from '../../../src/screens/ChatScreen/useChatGenerationActions';
 
 /** Mirrors generationToolLoop: gate the enabled ids, then build the schema. */
 function schemaForModel(enabledToolIds: string[], onlineToolsEnabled: boolean): string[] {
@@ -57,5 +58,42 @@ describe('online-tools gate (integration)', () => {
 
     expect(names).toContain('run_python');
     expect(names).not.toContain('web_search');
+  });
+
+  // The real generation call site — not just the pure helpers — must apply the gate.
+  describe('resolveEnabledTools (generation call site)', () => {
+    const deps = (enabledTools: string[], onlineToolsEnabled: boolean): any => ({
+      settings: { enabledTools, onlineToolsEnabled },
+    });
+
+    it('drops network tools when the switch is off', () => {
+      const out = resolveEnabledTools(
+        deps(['web_search', 'read_url', 'get_current_datetime'], false),
+        {},
+        { canUseTools: true, isRemote: false },
+      );
+      expect(out).not.toContain('web_search');
+      expect(out).not.toContain('read_url');
+      expect(out).toContain('get_current_datetime');
+    });
+
+    it('keeps network tools when the switch is on', () => {
+      const out = resolveEnabledTools(
+        deps(['web_search', 'read_url'], true),
+        {},
+        { canUseTools: true, isRemote: false },
+      );
+      expect(out).toContain('web_search');
+      expect(out).toContain('read_url');
+    });
+
+    it('offers no tools at all when the UI tool gate is closed', () => {
+      const out = resolveEnabledTools(
+        deps(['web_search', 'get_current_datetime'], true),
+        {},
+        { canUseTools: false, isRemote: false },
+      );
+      expect(out).toEqual([]);
+    });
   });
 });
