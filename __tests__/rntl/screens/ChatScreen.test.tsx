@@ -4398,4 +4398,40 @@ describe('ChatScreen', () => {
       expect(queryByText(/Settings changed/i)).toBeNull();
     });
   });
+
+  // The message FlatList is NOT inverted (newest at the bottom). Setting
+  // autoscrollToTopThreshold on a non-inverted list makes it snap to the real
+  // top when a content-size change lands the anchor near the top - which read as
+  // the chat jumping back to the beginning when a reply finished. Guard against
+  // that config regressing.
+  describe('message list scroll config', () => {
+    it('keeps minIndexForVisible but does not set autoscrollToTopThreshold', () => {
+      const { modelId } = setupFullChat();
+      // The message FlatList only renders when there are messages to show
+      // (an empty conversation renders EmptyChat instead).
+      const conversation = createConversation({
+        modelId,
+        messages: [
+          createUserMessage('Hello from before'),
+          createAssistantMessage('Hi there!'),
+        ],
+      });
+      useChatStore.setState({
+        conversations: [conversation],
+        activeConversationId: conversation.id,
+      });
+      mockRoute.params = { conversationId: conversation.id };
+
+      const { getByText, UNSAFE_getAllByType } = renderChatScreen();
+      // Sanity: the list actually rendered (not the EmptyChat fallback).
+      expect(getByText('Hi there!')).toBeTruthy();
+      const { FlatList } = require('react-native');
+
+      const lists = UNSAFE_getAllByType(FlatList);
+      expect(lists.length).toBeGreaterThan(0);
+      const mvcp = lists[0].props.maintainVisibleContentPosition;
+      expect(mvcp).toEqual({ minIndexForVisible: 0 });
+      expect(mvcp?.autoscrollToTopThreshold).toBeUndefined();
+    });
+  });
 });

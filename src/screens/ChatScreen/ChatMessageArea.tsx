@@ -178,7 +178,12 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           onTouchStart={() => Keyboard.dismiss()}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 100 }}
+          // Non-inverted chat list (newest at the bottom). Keep minIndexForVisible so
+          // content changes above the viewport don't shift the read position, but do NOT
+          // set autoscrollToTopThreshold: on a non-inverted list it snaps to the real top
+          // when a content-size change (e.g. the reply finalizing its markdown) lands the
+          // anchor near the top, which read as the chat jumping back to the beginning.
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           removeClippedSubviews={Platform.OS !== 'android'}
         />
       )}
