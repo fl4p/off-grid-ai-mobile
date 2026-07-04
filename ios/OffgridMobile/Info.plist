@@ -46,12 +46,13 @@
 	<dict>
 		<!-- Remote-model servers (Ollama/LM Studio) are user-configured and usually
 		     plain HTTP. They may live on a LAN, a public IP, or a Tailscale/Headscale
-		     CGNAT address (100.64/10) that NSAllowsLocalNetworking does not cover and
-		     that ATS cannot express as a per-domain exception. Cleartext is only ever
-		     used for a server the user explicitly adds; on-device models use no network. -->
+		     CGNAT address (100.64/10) that ATS cannot express as a per-domain exception.
+		     NSAllowsArbitraryLoads permits the cleartext; it must be the ONLY key here,
+		     because iOS ignores it if NSAllowsLocalNetworking (or the media/web-content
+		     variants) is also present. Arbitrary loads already subsumes local networking.
+		     Cleartext is only ever used for a server the user explicitly adds; on-device
+		     models use no network. -->
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSBonjourServices</key>
