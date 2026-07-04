@@ -1,6 +1,10 @@
 import { getIpAddress } from 'react-native-device-info';
 
-/** Returns true if the IPv4 address belongs to a private (RFC 1918) network */
+/**
+ * Returns true if the IPv4 address belongs to a private network: RFC 1918
+ * (10/8, 172.16/12, 192.168/16) or the RFC 6598 CGNAT range (100.64/10) that
+ * Tailscale/Headscale hand out, which is reachable like a LAN host.
+ */
 export function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.');
   if (parts.length !== 4) return false;
@@ -9,7 +13,8 @@ export function isPrivateIPv4(ip: string): boolean {
   return (
     first === 10 ||
     (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
+    (first === 192 && second === 168) ||
+    (first === 100 && second >= 64 && second <= 127)
   );
 }
 

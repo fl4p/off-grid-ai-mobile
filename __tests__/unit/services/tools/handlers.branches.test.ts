@@ -276,6 +276,50 @@ describe('Tool Handlers — branch coverage', () => {
     });
   });
 
+  // ── isPrivateUrl: SSRF block covers the CGNAT / Tailscale range (100.64/10) ──
+  describe('read_url — private/SSRF blocking', () => {
+    const originalFetch = (globalThis as any).fetch;
+    afterEach(() => { (globalThis as any).fetch = originalFetch; });
+
+    it('blocks a Tailscale CGNAT host and never fetches it', async () => {
+      const fetchSpy = jest.fn();
+      (globalThis as any).fetch = fetchSpy;
+      const result = await runTool('read_url', { url: 'http://100.100.20.30/secret' });
+      expect(result.error).toContain('private/local network');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('blocks the CGNAT upper boundary (100.127.x) but not 100.128.x', async () => {
+      const fetchSpy = jest.fn().mockResolvedValue({
+        ok: true, status: 200, text: jest.fn().mockResolvedValue('<p>public body</p>'),
+      });
+      (globalThis as any).fetch = fetchSpy;
+      const blocked = await runTool('read_url', { url: 'http://100.127.255.255/x' });
+      expect(blocked.error).toContain('private/local network');
+      const allowed = await runTool('read_url', { url: 'http://100.128.0.1/x' });
+      expect(allowed.error).toBeUndefined();
+      expect(allowed.content).toContain('public body');
+    });
+
+    it('is not bypassed by userinfo in the URL (user:pass@host)', async () => {
+      const fetchSpy = jest.fn();
+      (globalThis as any).fetch = fetchSpy;
+      // A naive host regex captures "x" (the username), not the real host.
+      const result = await runTool('read_url', { url: 'http://x:y@100.100.20.30/secret' });
+      expect(result.error).toContain('private/local network');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not block 100.x outside the CGNAT range', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true, status: 200, text: jest.fn().mockResolvedValue('<p>public body</p>'),
+      });
+      const result = await runTool('read_url', { url: 'http://100.63.0.1/page' });
+      expect(result.error).toBeUndefined();
+      expect(result.content).toContain('public body');
+    });
+  });
+
   // ── read_url catch/rethrow logging (line 373) ─────────────────────────────
   describe('read_url — network failure', () => {
     const originalFetch = (globalThis as any).fetch;
