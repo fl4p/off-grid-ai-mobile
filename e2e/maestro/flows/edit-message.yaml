@@ -1,0 +1,21 @@
+# Editing a chat message: long-press a user message opens the action menu,
+# and "Edit" opens the edit sheet with the message text loaded.
+#
+# NOTE: native text selection inside the edit sheet is a known bug (AppSheet is
+# built on RN <Modal>; see e2e/maestro/README.md). Once the AppSheet overlay
+# refactor lands, add a selection assertion here.
+appId: ai.offgridmobile
+---
+- launchApp
+- tapOn:
+    id: "conversation-item-0"
+- assertVisible:
+    id: "user-message"
+- longPressOn:
+    id: "user-message"
+- assertVisible:
+    id: "action-edit"
+- tapOn:
+    id: "action-edit"
+- assertVisible:
+    id: "edit-input"

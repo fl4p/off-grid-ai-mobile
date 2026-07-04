@@ -197,6 +197,7 @@ export function EditSheet({
     >
       <View style={styles.editSheetContent}>
         <TextInput
+          testID="edit-input"
           style={styles.editInput}
           defaultValue={defaultValue}
           onChangeText={onChangeText}
