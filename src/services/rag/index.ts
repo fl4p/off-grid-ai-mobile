@@ -126,6 +126,12 @@ class RagService {
     return ragDatabase.getEnabledDocumentCountByProject(projectId);
   }
 
+  /** Total documents across all projects, for a global "knowledge base size" readout. */
+  async getTotalDocumentCount(): Promise<number> {
+    await this.ensureReady();
+    return ragDatabase.getTotalDocumentCount();
+  }
+
   async toggleDocument(docId: number, enabled: boolean): Promise<void> {
     await this.ensureReady();
     ragDatabase.toggleEnabled(docId, enabled);

@@ -5,12 +5,12 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { ApiKeyInput, Card } from '../components';
+import { AnimatedToggle } from '../components/AnimatedToggle';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors, ThemeShadows } from '../theme';
 import { TYPOGRAPHY, SPACING } from '../constants';
@@ -109,12 +109,11 @@ export const WebSearchSettingsScreen: React.FC = () => {
                 When off, the model can't search the web, open links, or install Python packages, so nothing leaves your device. Turn it on to let these tools reach the network.
               </Text>
             </View>
-            <Switch
+            <AnimatedToggle
               testID="online-tools-switch"
               value={!!onlineToolsEnabled}
-              onValueChange={v => updateSettings({ onlineToolsEnabled: v })}
-              trackColor={{ false: colors.border, true: `${colors.primary}80` }}
-              thumbColor={onlineToolsEnabled ? colors.primary : colors.textMuted}
+              onValueChange={(v: boolean) => updateSettings({ onlineToolsEnabled: v })}
+              accessibilityLabel={`Online tools ${onlineToolsEnabled ? 'on' : 'off'}`}
             />
           </View>
         </Card>

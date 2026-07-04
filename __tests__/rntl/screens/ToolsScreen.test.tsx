@@ -22,10 +22,14 @@ const mockGoBack = jest.fn();
 const mockRoute = { params: undefined as { memoryEnabled?: boolean } | undefined };
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
+  const reactRuntime = jest.requireActual('react');
   return {
     ...actual,
     useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
     useRoute: () => mockRoute,
+    // Run the focus callback on mount (simulates the screen gaining focus)
+    // without needing a NavigationContainer in the test tree.
+    useFocusEffect: (cb: () => void | (() => void)) => reactRuntime.useEffect(() => cb(), []),
   };
 });
 
@@ -149,10 +153,9 @@ describe('ToolsScreen', () => {
   });
 
   it('toggles a tool through the core settings store', () => {
-    const { getAllByRole } = render(<ToolsScreen />);
-    const switches = getAllByRole('switch');
+    const { getByTestId } = render(<ToolsScreen />);
     // web_search + calculator are enabled, get_current_datetime is not.
-    fireEvent(switches[2], 'valueChange', true);
+    fireEvent(getByTestId('tool-picker-switch-get_current_datetime'), 'valueChange', true);
     expect(mockUpdateSettings).toHaveBeenCalledWith({
       enabledTools: ['web_search', 'calculator', 'get_current_datetime'],
     });

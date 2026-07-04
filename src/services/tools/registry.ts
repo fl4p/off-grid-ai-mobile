@@ -6,12 +6,29 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     name: 'web_search',
     displayName: 'Web Search',
     description: 'Search the live web and return real-time result titles, snippets, and URLs. Use this for any question about current events, prices, weather, news, or anything that requires up-to-date information. When the snippet is insufficient, call read_url on the most relevant result URL to get the full page content.',
+    uiDescription: 'Search the live web for current information',
     icon: 'globe',
     requiresNetwork: true,
     parameters: {
       query: {
         type: 'string',
         description: 'Search query',
+        required: true,
+      },
+    },
+  },
+  {
+    id: 'read_url',
+    name: 'read_url',
+    displayName: 'URL Reader',
+    description: 'Fetch the full live content of any URL. Use this after web_search to read the complete text of a result page, or directly when the user shares a link.',
+    uiDescription: 'Read the full content of a web page',
+    icon: 'link',
+    requiresNetwork: true,
+    parameters: {
+      url: {
+        type: 'string',
+        description: 'Full URL to fetch',
         required: true,
       },
     },
@@ -76,6 +93,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     name: 'search_memory',
     displayName: 'Memory Search',
     description: 'Search the user-approved local memory store. Use this for personal preferences, prior research notes, decisions, open questions, and project context before guessing.',
+    uiDescription: 'Search your saved memories',
     icon: 'database',
     parameters: {
       query: {
@@ -90,6 +108,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     name: 'save_memory',
     displayName: 'Save Memory',
     description: 'Save a durable local memory only when the user explicitly asks you to remember something, or when a stable preference, decision, or research note will clearly help later. For laws, taxes, finance, medicine, or other time-sensitive topics, include jurisdiction and as_of_date when known.',
+    uiDescription: 'Save a note to local memory',
     icon: 'save',
     parameters: {
       title: {
@@ -131,6 +150,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     name: 'forget_memory',
     displayName: 'Forget Memory',
     description: 'Delete a saved local memory by id when the user asks you to forget or remove it.',
+    uiDescription: 'Delete a saved memory',
     icon: 'trash-2',
     parameters: {
       memory_id: {
@@ -163,21 +183,6 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
       packages: {
         type: 'string',
         description: 'Optional comma-separated PyPI packages to install before running, e.g. "requests, beautifulsoup4". Omit for numpy/pandas/matplotlib (already installed).',
-      },
-    },
-  },
-  {
-    id: 'read_url',
-    name: 'read_url',
-    displayName: 'URL Reader',
-    description: 'Fetch the full live content of any URL. Use this after web_search to read the complete text of a result page, or directly when the user shares a link.',
-    icon: 'link',
-    requiresNetwork: true,
-    parameters: {
-      url: {
-        type: 'string',
-        description: 'Full URL to fetch',
-        required: true,
       },
     },
   },

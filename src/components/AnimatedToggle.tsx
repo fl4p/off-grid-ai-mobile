@@ -32,7 +32,7 @@ export const AnimatedToggle: React.FC<AnimatedToggleProps> = ({
   testID,
   accessibilityLabel,
 }) => {
-  const { colors } = useTheme();
+  const { colors, shadows } = useTheme();
   const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
 
   useEffect(() => {
@@ -67,6 +67,7 @@ export const AnimatedToggle: React.FC<AnimatedToggleProps> = ({
         <Animated.View
           style={[
             styles.thumb,
+            shadows.small,
             { backgroundColor: colors.background, transform: [{ translateX }] },
           ]}
         />

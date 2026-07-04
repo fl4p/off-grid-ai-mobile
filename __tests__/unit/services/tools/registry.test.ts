@@ -29,6 +29,7 @@ describe('Tool Registry', () => {
       const ids = AVAILABLE_TOOLS.map(t => t.id);
       expect(ids).toEqual([
         'web_search',
+        'read_url',
         'calculator',
         'get_current_datetime',
         'get_device_info',
@@ -37,7 +38,6 @@ describe('Tool Registry', () => {
         'save_memory',
         'forget_memory',
         'run_python',
-        'read_url',
         'read_file',
         'write_file',
         'edit_file',
