@@ -11,13 +11,16 @@ import {
   contextCompactionService,
 } from '../../services';
 import { liteRTService } from '../../services/litert';
+import { memoryService } from '../../services/memory';
+import { filterMemoryToolNames } from '../../services/memory/toolPrivacy';
 import { Message, MediaAttachment, Project, DownloadedModel, DebugInfo, RemoteModel, INFERENCE_BACKENDS } from '../../types';
 import { RootStackParamList } from '../../navigation/types';
 import { ensureModelLoadedFn, ensureTextModelForChatFn, handleModelSelectFn, handleUnloadModelFn, initiateModelLoad, restoreConversationModelFn, useChatImageModelEffects, useChatModelStateSync } from './useChatModelActions';
 import { startGenerationFn, handleSendFn, handleStopFn, handleSelectProjectFn, dispatchGenerationFn } from './useChatGenerationActions';
-import { handleRetryMessageFn, handleEditMessageFn, handleDeleteConversationFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
+import { handleRetryMessageFn, handleEditMessageFn, handleDeleteConversationFn, handleCopyTranscriptFn, handleGenerateImageFromMsgFn } from './useChatMessageHandlers';
 import { getDisplayMessages, getPlaceholderText, ChatMessageItem, StreamingState } from './types';
 import { saveImageToGallery } from './useSaveImage';
+import { resolveMemoryProjectId } from './memoryActions';
 import {
   isSuspiciousRecoveredImageModel,
   isSuspiciousRecoveredTextModel,
@@ -36,6 +39,43 @@ type ActiveModelInfo = {
   /** Remote server id when isRemote; undefined for local models. */
   serverId?: string;
 };
+
+type ActiveModelInfoParams = {
+  activeServerId?: string | null;
+  activeRemoteTextModelId?: string | null;
+  discoveredModels: Record<string, RemoteModel[]>;
+  activeModelId?: string | null;
+  downloadedModels: DownloadedModel[];
+};
+
+function resolveActiveModelInfo(params: ActiveModelInfoParams): ActiveModelInfo {
+  const { activeServerId, activeRemoteTextModelId, discoveredModels, activeModelId, downloadedModels } = params;
+  if (activeServerId && activeRemoteTextModelId) {
+    const serverModels = discoveredModels[activeServerId] || [];
+    const remoteModel = serverModels.find(m => m.id === activeRemoteTextModelId);
+    if (remoteModel) {
+      return {
+        isRemote: true,
+        model: remoteModel,
+        modelId: remoteModel.id,
+        modelName: remoteModel.name,
+        serverId: activeServerId,
+      };
+    }
+    logger.warn('[ChatScreen] Remote model not found:', activeServerId, activeRemoteTextModelId);
+  }
+
+  const localModel = downloadedModels.find(m => m.id === activeModelId);
+  if (localModel) {
+    return {
+      isRemote: false,
+      model: localModel,
+      modelId: localModel.id,
+      modelName: localModel.name,
+    };
+  }
+  return { isRemote: false, model: null, modelId: null, modelName: 'Unknown' };
+}
 
 export const useChatScreen = () => {
   const navigation = useNavigation();
@@ -113,42 +153,20 @@ export const useChatScreen = () => {
     activeConversationId, conversations, createConversation, addMessage,
     updateMessageContent, deleteMessagesAfter, streamingMessage, streamingReasoningContent,
     streamingForConversationId, isStreaming, isThinking, clearStreamingMessage,
-    deleteConversation, setActiveConversation, setConversationProject,
+    deleteConversation, setActiveConversation, setConversationProject, setConversationMemoryEnabled,
   } = useChatStore();
 
   const { projects, getProject } = useProjectStore();
 
   const activeConversation = conversations.find(c => c.id === activeConversationId);
 
-  // Compute active model from either local or remote source
-  const activeModelInfo = useMemo((): ActiveModelInfo => {
-    // Check for remote model first
-    if (activeServerId && activeRemoteTextModelId) {
-      const serverModels = discoveredModels[activeServerId] || [];
-      const remoteModel = serverModels.find(m => m.id === activeRemoteTextModelId);
-      if (remoteModel) {
-        return {
-          isRemote: true,
-          model: remoteModel,
-          modelId: remoteModel.id,
-          modelName: remoteModel.name,
-          serverId: activeServerId,
-        };
-      }
-      logger.warn('[ChatScreen] Remote model not found:', activeServerId, activeRemoteTextModelId);
-    }
-    // Fall back to local model
-    const localModel = downloadedModels.find(m => m.id === activeModelId);
-    if (localModel) {
-      return {
-        isRemote: false,
-        model: localModel,
-        modelId: localModel.id,
-        modelName: localModel.name,
-      };
-    }
-    return { isRemote: false, model: null, modelId: null, modelName: 'Unknown' };
-  }, [activeServerId, activeRemoteTextModelId, discoveredModels, activeModelId, downloadedModels]);
+  const activeModelInfo = useMemo(() => resolveActiveModelInfo({
+    activeServerId,
+    activeRemoteTextModelId,
+    discoveredModels,
+    activeModelId,
+    downloadedModels,
+  }), [activeServerId, activeRemoteTextModelId, discoveredModels, activeModelId, downloadedModels]);
 
   // activeModel is for LOCAL models only (for file path, memory checks, etc.)
   const activeModel = activeModelInfo.isRemote ? undefined : (activeModelInfo.model as DownloadedModel | undefined);
@@ -175,7 +193,7 @@ export const useChatScreen = () => {
     discoveredModels[activeServerId || '']?.length > 0 ||
     Object.values(discoveredModels).some(models => models.length > 0);
 
-  const effectiveProjectId = activeConversation ? activeConversation.projectId : pendingProjectId;
+  const effectiveProjectId = resolveMemoryProjectId(activeConversation, pendingProjectId);
   const activeProject = effectiveProjectId ? getProject(effectiveProjectId) : null;
   const activeImageModel = downloadedImageModels.find(m => m.id === activeImageModelId);
   const imageModelLoaded = !!activeImageModel;
@@ -290,7 +308,8 @@ export const useChatScreen = () => {
     await startGenerationFn(genDeps, { setDebugInfo, targetConversationId, messageText });
   };
   startGenerationRef.current = startGeneration;
-  const enabledTools = supportsToolCalling ? (settings.enabledTools || []) : [];
+  const memoryEnabled = activeConversation?.memoryEnabled !== false && activeProject?.memoryEnabled !== false;
+  const enabledTools = supportsToolCalling ? (memoryEnabled ? settings.enabledTools || [] : filterMemoryToolNames(settings.enabledTools || [])) : [];
   const handleToggleTool = (toolId: string) => {
     const cur = settings.enabledTools || [];
     useAppStore.getState().updateSettings({ enabledTools: cur.includes(toolId) ? cur.filter((id: string) => id !== toolId) : [...cur, toolId] });
@@ -336,6 +355,10 @@ export const useChatScreen = () => {
   const handleSend = (text: string, attachments?: MediaAttachment[], imageMode?: 'auto' | 'force' | 'disabled') =>
     handleSendFn(genDeps, { text, attachments, imageMode, startGeneration, setDebugInfo });
 
+  const handleRememberMessage = useCallback(async (message: Message) => {
+    await memoryService.rememberMessage({ message, projectId: effectiveProjectId });
+  }, [effectiveProjectId]);
+
   // After picking a text model, replay the stashed message (no retype needed).
   const handleModelSelect = async (model: DownloadedModel) => {
     await handleModelSelectFn(modelDeps, model);
@@ -367,11 +390,13 @@ export const useChatScreen = () => {
     isStreaming, isThinking, isCompacting, isGeneratingForThisConversation, hasPendingSettings, handleReloadTextModel, displayMessages, downloadedModels, hasAvailableModels, projects, settings,
     navigation, hardwareService,
     handleSend,
+    handleRememberMessage,
     handleStop: () => handleStopFn(genDeps),
     handleModelSelect,
     handleUnloadModel: () => handleUnloadModelFn(modelDeps),
     handleDeleteConversation: () =>
       handleDeleteConversationFn(genDeps, { activeConversationId, activeConversation, setAlertState }),
+    handleCopyTranscript: () => handleCopyTranscriptFn({ activeConversation, setAlertState }),
     handleCopyMessage: (_content: string) => { },
     handleRetryMessage: (message: Message) =>
       handleRetryMessageFn(message, genDeps, { activeConversationId, hasActiveModel, activeConversation, deleteMessagesAfter, setDebugInfo }),
@@ -389,5 +414,8 @@ export const useChatScreen = () => {
       handleGenerateImageFromMsgFn(prompt, genDeps, { activeConversationId, activeImageModel, setAlertState }),
     handleImagePress: (uri: string) => setViewerImageUri(uri),
     handleSaveImage: () => saveImageToGallery(viewerImageUri, setAlertState),
+    handleSetConversationMemoryEnabled: (enabled: boolean) => {
+      if (activeConversationId) setConversationMemoryEnabled(activeConversationId, enabled);
+    },
   };
 };

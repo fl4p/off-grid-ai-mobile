@@ -20,6 +20,7 @@ import { Conversation } from '../types';
 import { getLastVisibleMessage } from '../utils/messageContent';
 import { RootStackParamList } from '../navigation/types';
 import { KnowledgeBaseSection } from './ProjectDetailKnowledgeBaseSection';
+import { ProjectDetailMemorySection } from './ProjectDetailMemorySection';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RouteProps = RouteProp<RootStackParamList, 'ProjectDetail'>;
@@ -197,6 +198,17 @@ export const ProjectDetailScreen: React.FC = () => {
             setAlertState={setAlertState}
             onNavigateToKb={() => navigation.navigate('KnowledgeBase', { projectId })}
             onDocumentPress={(doc) => navigation.navigate('DocumentPreview', { filePath: doc.path, fileName: doc.name, fileSize: doc.size })}
+          />
+        </View>
+
+        {/* Memory Section */}
+        <View style={styles.memorySection}>
+          <ProjectDetailMemorySection
+            projectId={projectId}
+            colors={colors}
+            styles={styles}
+            setAlertState={setAlertState}
+            onNavigateToMemory={() => navigation.navigate('Memory', { projectId })}
           />
         </View>
 

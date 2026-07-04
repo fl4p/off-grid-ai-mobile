@@ -214,6 +214,106 @@ describe('runToolLoop', () => {
     });
   });
 
+  // ==========================================================================
+  // Forced final response keeps tools declared with tool_choice:'none'.
+  // Sending an empty tools array here would turn off the server-side tool-call
+  // parser, letting a DeepSeek-family model leak raw tool-call tokens as text.
+  // ==========================================================================
+  describe('forced final response (tool/iteration cap)', () => {
+    it('sends the tools with toolChoice "none" on the forced final call, not an empty array', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      // Model keeps requesting tools every turn, so the loop hits MAX_TOOL_ITERATIONS
+      // and forces a final text answer on the last iteration.
+      mockedGenerateResponseWithTools.mockResolvedValue({
+        fullResponse: 'Let me search again.',
+        toolCalls: [makeToolCall()],
+      });
+
+      const ctx = createContext();
+      await runToolLoop(ctx);
+
+      const calls = mockedGenerateResponseWithTools.mock.calls;
+      // generateResponseWithTools(messages, { tools, toolChoice, onStream }) — options is arg[1].
+      const forcedOpts = calls[calls.length - 1][1];
+      // The forced call declares tools (parser stays on) and forbids calling them.
+      expect(forcedOpts.toolChoice).toBe('none');
+      expect(Array.isArray(forcedOpts.tools)).toBe(true);
+      expect(forcedOpts.tools.length).toBeGreaterThan(0);
+      // Earlier (non-final) iterations must NOT force 'none' — they let the model call tools.
+      expect(calls[0][1].toolChoice).toBeUndefined();
+    });
+
+    it('when the forced pass leaks only DSML markup, retries with no tools + an explicit instruction and surfaces the synthesized prose', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      const dsmlLeak =
+        '<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name="web_search">' +
+        '<｜｜DSML｜｜parameter name="query" string="true">portugal crypto PIV</｜｜DSML｜｜parameter>' +
+        '</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>';
+      const synthesized = 'A PIV is a binding ruling from the Portuguese tax authority. Here is the summary.';
+      // Model keeps requesting tools until the cap; on the forced pass it ignores
+      // tool_choice:'none' and leaks ONLY the DSML envelope (no prose); then on the
+      // no-tools synthesis pass it finally answers in prose.
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall()] })
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall()] })
+        .mockResolvedValueOnce({ fullResponse: dsmlLeak, toolCalls: [] })
+        .mockResolvedValueOnce({ fullResponse: synthesized, toolCalls: [] });
+
+      const onFinalResponse = jest.fn();
+      const ctx = createContext({ onFinalResponse });
+      await runToolLoop(ctx);
+
+      const finalText = String(onFinalResponse.mock.calls[onFinalResponse.mock.calls.length - 1]?.[0] ?? '');
+      // The leaked markup never surfaces...
+      expect(finalText).not.toContain('DSML');
+      expect(finalText).not.toContain('invoke name');
+      expect(finalText).not.toContain('｜');
+      // ...and the synthesized prose does.
+      expect(finalText).toBe(synthesized);
+
+      // The synthesis pass drops the tools entirely and appends an explicit
+      // "stop and answer" user instruction so the model writes prose instead of
+      // re-emitting tool-call markup.
+      const calls = mockedGenerateResponseWithTools.mock.calls;
+      const synthCall = calls[calls.length - 1];
+      expect(synthCall[1].tools).toEqual([]);
+      const synthMessages = synthCall[0];
+      const lastMsg = synthMessages[synthMessages.length - 1];
+      expect(lastMsg.role).toBe('user');
+      expect(lastMsg.content).toMatch(/stop searching/i);
+    });
+
+    it('does NOT run the no-tools synthesis pass for LiteRT (it would wipe the native tool-result context)', async () => {
+      // LiteRT rebuilds context from the message array and keys tool results off a
+      // trailing `tool` run; appending the synthesis instruction (and dropping tools to
+      // [] → native session reset) would strip the very results we ask it to summarize.
+      // So the synthesis pass must be skipped on-device.
+      mockAppState = {
+        ...mockAppState,
+        downloadedModels: [{ id: 'litert-1', engine: 'litert' }],
+        activeModelId: 'litert-1',
+      };
+      mockedLiteRTService.isModelLoaded.mockReturnValue(true);
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      // Model emits tool-call markup as text every turn, so the loop hits the cap and
+      // the forced pass comes back with markup-only (no prose).
+      const markup = '<tool_call>{"name":"web_search","arguments":{"query":"portugal"}}</tool_call>';
+      mockedLiteRTService.generateRaw.mockResolvedValue(markup);
+
+      const onFinalResponse = jest.fn();
+      const ctx = createContext({ onFinalResponse });
+      await runToolLoop(ctx);
+
+      // 3 generateRaw calls: iterations 0 and 1, plus the single forced pass 1. A 4th
+      // (the synthesis pass) must NOT happen for LiteRT.
+      expect(mockedLiteRTService.generateRaw).toHaveBeenCalledTimes(3);
+      // The remote/local path is never used on the LiteRT route.
+      expect(mockedGenerateResponseWithTools).not.toHaveBeenCalled();
+      const finalText = String(onFinalResponse.mock.calls[onFinalResponse.mock.calls.length - 1]?.[0] ?? '');
+      expect(finalText).not.toContain('tool_call');
+    });
+  });
+
   describe('LiteRT image forwarding', () => {
     it('forwards all image attachments from the last user message to LiteRT', async () => {
       mockAppState = {
@@ -319,6 +419,29 @@ describe('runToolLoop', () => {
 
       // LLM was called twice (initial + after tool result)
       expect(mockedGenerateResponseWithTools).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not execute structured tool calls that were not routed this turn', async () => {
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({
+          fullResponse: '',
+          toolCalls: [makeToolCall({ id: 'tc-memory', name: 'search_memory', arguments: { query: 'tax' } })],
+        })
+        .mockResolvedValueOnce({
+          fullResponse: 'Answer without memory.',
+          toolCalls: [],
+        });
+
+      const ctx = createContext({ enabledToolIds: ['web_search'] });
+      await runToolLoop(ctx);
+
+      expect(mockExecuteToolCall).not.toHaveBeenCalled();
+      expect(mockAddMessage).not.toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ toolName: 'search_memory' }),
+      );
+      expect(mockedGenerateResponseWithTools.mock.calls[1][1].tools).toEqual([]);
+      expect(ctx.onFinalResponse).toHaveBeenCalledWith('Answer without memory.');
     });
 
     // Text-format tool-call parsing — small local models emit tool calls as text
@@ -564,6 +687,10 @@ describe('runToolLoop', () => {
       let aborted = false;
       const tc1 = makeToolCall({ id: 'tc-1', name: 'tool_a' });
       const tc2 = makeToolCall({ id: 'tc-2', name: 'tool_b' });
+      mockGetToolsAsOpenAISchema.mockReturnValue([
+        { type: 'function', function: { name: 'tool_a' } },
+        { type: 'function', function: { name: 'tool_b' } },
+      ]);
 
       mockExecuteToolCall.mockImplementation(async (call: ToolCall) => {
         if (call.id === 'tc-1') {
@@ -675,6 +802,10 @@ describe('runToolLoop', () => {
 
       const tc1 = makeToolCall({ id: 'tc-1', name: 'tool_a', arguments: { x: 1 } });
       const tc2 = makeToolCall({ id: 'tc-2', name: 'tool_b', arguments: { y: 2 } });
+      mockGetToolsAsOpenAISchema.mockReturnValue([
+        { type: 'function', function: { name: 'tool_a' } },
+        { type: 'function', function: { name: 'tool_b' } },
+      ]);
 
       mockExecuteToolCall
         .mockResolvedValueOnce(makeToolResult({ name: 'tool_a' }))
@@ -753,7 +884,7 @@ describe('runToolLoop', () => {
       mockedGenerateResponseWithTools
         .mockResolvedValueOnce({
           fullResponse: 'Thinking...',
-          toolCalls: [makeToolCall({ id: 'tc-x', name: 'search', arguments: args })],
+          toolCalls: [makeToolCall({ id: 'tc-x', name: 'web_search', arguments: args })],
         })
         .mockResolvedValueOnce({
           fullResponse: 'Done.',
@@ -883,6 +1014,53 @@ describe('runToolLoop', () => {
       expect(ctx.onFinalResponse).toHaveBeenCalledWith('Here is the complete answer.');
       // 2 assistant + 2 tool = 4 messages added
       expect(mockAddMessage).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  // ==========================================================================
+  // Mid-turn steering
+  // ==========================================================================
+  describe('mid-turn steering', () => {
+    it('folds a queued message into the running turn and continues generating', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      // Round 1 requests a tool; after the tool runs the user steers; round 2 answers.
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall({ id: 'tc-1' })] })
+        .mockResolvedValueOnce({ fullResponse: 'final answer including the steer', toolCalls: [] });
+
+      const steerMsg = makeMessage({ role: 'user', content: 'also compare prices' });
+      const drainSteeringMessages = jest.fn()
+        .mockReturnValueOnce([{ display: steerMsg, forModel: steerMsg }])
+        .mockReturnValue([]);
+      const onSteering = jest.fn();
+
+      const ctx = createContext({ drainSteeringMessages, onSteering });
+      await runToolLoop(ctx);
+
+      expect(drainSteeringMessages).toHaveBeenCalled();
+      expect(onSteering).toHaveBeenCalledWith(1);
+      // The steering message is persisted as a real user message in the chat.
+      expect(mockAddMessage).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({ role: 'user', content: 'also compare prices' }),
+      );
+      // The loop continued to a second model call and produced the final answer.
+      expect(mockedGenerateResponseWithTools).toHaveBeenCalledTimes(2);
+      expect(ctx.onFinalResponse).toHaveBeenCalledWith('final answer including the steer');
+    });
+
+    it('is inert when there is nothing queued to steer', async () => {
+      mockExecuteToolCall.mockResolvedValue(makeToolResult());
+      mockedGenerateResponseWithTools
+        .mockResolvedValueOnce({ fullResponse: 'searching', toolCalls: [makeToolCall({ id: 'tc-1' })] })
+        .mockResolvedValueOnce({ fullResponse: 'done', toolCalls: [] });
+
+      const drainSteeringMessages = jest.fn().mockReturnValue([]);
+      const ctx = createContext({ drainSteeringMessages });
+      await runToolLoop(ctx);
+
+      expect(drainSteeringMessages).toHaveBeenCalled();
+      expect(ctx.onFinalResponse).toHaveBeenCalledWith('done');
     });
   });
 
@@ -1033,6 +1211,38 @@ describe('parseToolCallsFromText', () => {
     expect(result.toolCalls[0].name).toBe(name);
     expect(result.toolCalls[0].arguments).toEqual(args);
     if (clean !== undefined) expect(result.cleanText).toBe(clean);
+  });
+
+  // DeepSeek's DSML format: <｜｜DSML｜｜invoke name="fn"><｜｜DSML｜｜parameter name="k" string="true">v...
+  // The fullwidth pipe (U+FF5C) is DeepSeek's special-token delimiter.
+  const M = '｜｜DSML｜｜';
+  it('parses DeepSeek DSML-wrapped invoke/parameter tool calls', () => {
+    const text =
+      `<${M}tool_calls>\n` +
+      `<${M}invoke name="run_python">\n` +
+      `<${M}parameter name="code" string="true">import numpy as np\nprint(np.arange(3))</${M}parameter>\n` +
+      `<${M}parameter name="packages" string="true">numpy</${M}parameter>\n` +
+      `</${M}invoke>\n` +
+      `</${M}tool_calls>`;
+    const result = parseToolCallsFromText(text);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('run_python');
+    expect(result.toolCalls[0].arguments).toEqual({
+      code: 'import numpy as np\nprint(np.arange(3))',
+      packages: 'numpy',
+    });
+    // The whole DSML block (including the outer wrapper tags) is stripped from display.
+    expect(result.cleanText).toBe('');
+  });
+
+  it('strips DSML markup from surrounding prose', () => {
+    const text = `Sure, plotting that now.\n<${M}invoke name="run_python">` +
+      `<${M}parameter name="code" string="true">print(1)</${M}parameter></${M}invoke>`;
+    const result = parseToolCallsFromText(text);
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].arguments).toEqual({ code: 'print(1)' });
+    expect(result.cleanText).toBe('Sure, plotting that now.');
   });
 });
 
@@ -1315,6 +1525,24 @@ describe('runToolLoop – resolveToolCalls via embedded tool_call tags', () => {
       expect.objectContaining({ name: 'web_search' }),
     );
     expect(ctx.onFinalResponse).toHaveBeenCalledWith('Final answer');
+  });
+
+  it('ignores embedded memory tool calls when memory schemas are disabled', async () => {
+    const embeddedResponse = '<tool_call>{"name":"search_memory","arguments":{"query":"tax"}}</tool_call>';
+    mockedGenerateResponseWithTools
+      .mockResolvedValueOnce({ fullResponse: embeddedResponse, toolCalls: [] })
+      .mockResolvedValueOnce({ fullResponse: 'Final answer without memory', toolCalls: [] });
+
+    const ctx = createContext({ enabledToolIds: ['web_search'] });
+    await runToolLoop(ctx);
+
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
+    expect(mockAddMessage).not.toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({ toolName: 'search_memory' }),
+    );
+    expect(mockedGenerateResponseWithTools.mock.calls[1][1].tools).toEqual([]);
+    expect(ctx.onFinalResponse).toHaveBeenCalledWith('Final answer without memory');
   });
 
   it('returns response as-is when <tool_call> tags parse to no valid calls', async () => {
@@ -1601,6 +1829,26 @@ describe('runToolLoop – LiteRT tool call cap', () => {
     expect(mockExecuteToolCall).toHaveBeenCalledTimes(3);
     expect(capResult).toContain('Tool call limit reached');
     expect(capResult).toContain('Answer now');
+  });
+
+  it('rejects native LiteRT memory tool calls when memory schemas are disabled', async () => {
+    let capturedToolHandler: ((name: string, args: Record<string, unknown>) => Promise<string>) | undefined;
+    mockedLiteRTService.generateRaw.mockImplementation(async (_text, _images, handlers) => {
+      capturedToolHandler = handlers?.onToolCall;
+      return 'final answer';
+    });
+
+    const ctx = createContext({ enabledToolIds: ['web_search'] });
+    await runToolLoop(ctx);
+
+    const result = await capturedToolHandler?.('search_memory', { query: 'tax' });
+
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
+    expect(result).toContain('not available');
+    expect(mockAddMessage).not.toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({ toolName: 'search_memory' }),
+    );
   });
 
   it('returns Aborted immediately when context is aborted', async () => {

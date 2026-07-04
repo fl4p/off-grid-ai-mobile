@@ -114,16 +114,31 @@ function processToolCallChunk(
   tc: NonNullable<DeltaShape['tool_calls']>[0],
   state: OpenAIStreamState,
 ): void {
-  if (tc.id) {
-    state.currentToolCall = { id: tc.id, type: 'function', function: { name: '', arguments: '' } };
-    state.toolCalls.push(state.currentToolCall as OpenAIToolCall);
+  // OpenAI streams parallel tool calls INTERLEAVED and keyed by `index` (index 0 frag,
+  // index 1 frag, index 0 frag, …). Accumulate by index so each call's argument
+  // fragments append to the right slot. Models that emit several tool calls at once
+  // (GLM, Kimi, …) otherwise get their JSON arguments concatenated onto one call →
+  // "Unexpected end of JSON input". Fall back to id / last-call for providers that
+  // don't send an index.
+  let target: OpenAIToolCall | undefined;
+  if (typeof tc.index === 'number') {
+    target = state.toolCalls[tc.index];
+    if (!target) {
+      target = { id: tc.id || '', type: 'function', function: { name: '', arguments: '' } };
+      state.toolCalls[tc.index] = target;
+    } else if (tc.id) {
+      target.id = tc.id;
+    }
+  } else if (tc.id) {
+    target = { id: tc.id, type: 'function', function: { name: '', arguments: '' } };
+    state.toolCalls.push(target);
+  } else {
+    target = state.currentToolCall as OpenAIToolCall | undefined;
   }
-  if (tc.function?.name && state.currentToolCall?.function) {
-    state.currentToolCall.function.name = tc.function.name;
-  }
-  if (tc.function?.arguments && state.currentToolCall?.function) {
-    state.currentToolCall.function.arguments += tc.function.arguments;
-  }
+  state.currentToolCall = target ?? null;
+  if (!target?.function) return;
+  if (tc.function?.name) target.function.name = tc.function.name;
+  if (tc.function?.arguments) target.function.arguments += tc.function.arguments;
 }
 
 /**
@@ -291,6 +306,7 @@ export async function generateOllamaChatImpl(
       ...(options.temperature !== undefined && { temperature: options.temperature }),
       // num_predict intentionally omitted — Ollama defaults to -1 (until natural stop).
       // A client-side cap truncates reasoning models mid-<think>.
+      ...(options.limitOutputTokens && options.maxTokens !== undefined && { num_predict: options.maxTokens }),
       ...(options.topP !== undefined && { top_p: options.topP }),
     },
   };

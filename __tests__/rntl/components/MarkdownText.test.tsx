@@ -112,11 +112,79 @@ describe('MarkdownText', () => {
     const { toJSON } = render(<MarkdownText>{longUrl}</MarkdownText>);
     expect(toJSON()).toBeTruthy();
   });
+
+  it('renders emoji in the system font so they are not tofu boxes', () => {
+    const { getByText } = render(
+      <MarkdownText>{'Ah, a classic test message! 😄'}</MarkdownText>
+    );
+    const emojiNode = getByText('😄');
+    const fontFamily = Object.assign(
+      {},
+      ...[].concat(emojiNode.props.style as never).filter(Boolean)
+    ).fontFamily;
+    expect(fontFamily).toMatch(/System|sans-serif/);
+    expect(fontFamily).not.toBe('Menlo');
+  });
+
+  it('keeps emoji in bullet list items rendering as color emoji', () => {
+    const { getByText } = render(
+      <MarkdownText>{'- 🐛 Bugs and edge cases\n- 🔒 Security concerns'}</MarkdownText>
+    );
+    expect(getByText('🐛')).toBeTruthy();
+    expect(getByText('🔒')).toBeTruthy();
+    expect(getByText(/Bugs and edge cases/)).toBeTruthy();
+  });
+});
+
+describe('MarkdownText math', () => {
+  it('renders inline LaTeX as a MathJax node with the raw TeX', () => {
+    const { getByTestId } = render(
+      <MarkdownText>{'the shape of $\\sin(x)$.'}</MarkdownText>
+    );
+    expect(getByTestId('mathjax').props.children).toBe('\\sin(x)');
+  });
+
+  it('renders block LaTeX as a MathJax node', () => {
+    const { getByTestId } = render(
+      <MarkdownText>{'$$\n\\int_0^1 x\\,dx\n$$'}</MarkdownText>
+    );
+    expect(getByTestId('mathjax').props.children).toContain('\\int_0^1');
+  });
+
+  it('does not turn currency into math', () => {
+    const { queryByTestId, getByText } = render(
+      <MarkdownText>{'I paid $5 and $3 more'}</MarkdownText>
+    );
+    expect(queryByTestId('mathjax')).toBeNull();
+    expect(getByText(/I paid \$5 and \$3 more/)).toBeTruthy();
+  });
+
+  it('renders \\(…\\) inline math', () => {
+    const { getByTestId } = render(
+      <MarkdownText>{'the shape of \\(\\sin(x)\\).'}</MarkdownText>
+    );
+    expect(getByTestId('mathjax').props.children).toBe('\\sin(x)');
+  });
+
+  it('renders \\[…\\] block math', () => {
+    const { getByTestId } = render(
+      <MarkdownText>{'\\[a^2 + b^2 = c^2\\]'}</MarkdownText>
+    );
+    expect(getByTestId('mathjax').props.children).toContain('a^2 + b^2 = c^2');
+  });
 });
 
 describe('preprocessMarkdown', () => {
   it('escapes digit*digit patterns', () => {
     expect(preprocessMarkdown('5*5')).toBe(String.raw`5\*5`);
+  });
+
+  it('leaves an asterisk inside inline math untouched', () => {
+    expect(preprocessMarkdown('area $5*3$ units')).toBe('area $5*3$ units');
+  });
+
+  it('escapes multiplication outside math but not inside', () => {
+    expect(preprocessMarkdown('2*2 and $4*4$')).toBe(String.raw`2\*2 and $4*4$`);
   });
 
   it('escapes chained multiplication', () => {

@@ -38,6 +38,30 @@ describe('buildPythonPageHtml', () => {
     expect(html).toContain("type: 'boot_error'");
   });
 
+  it('posts boot heartbeats so a stalled boot can be pinpointed', () => {
+    expect(html).toContain("type: 'booting', phase: 'script'");
+    expect(html).toContain("type: 'booting', phase: 'loading-pyodide'");
+  });
+
+  it('sets up and enters the persistent /workspace, and exposes the fs control ops', () => {
+    expect(html).toContain('WORKSPACE_INIT_SRC');
+    expect(html).toContain('_os.chdir');
+    expect(html).toContain('/workspace');
+    expect(html).toContain('window.__fsSnapshot');
+    expect(html).toContain('window.__fsRestore');
+    expect(html).toContain('window.__fsZip');
+    // Restore clears the workspace first so switching projects can't bleed files.
+    expect(html).toContain('_sh.rmtree');
+  });
+
+  it('exposes __fsReadFile to read one workspace file for the HTML preview, path-confined', () => {
+    expect(html).toContain('window.__fsReadFile');
+    expect(html).toContain('_fs_readfile');
+    // Confined to the workspace and size-capped so it can't read outside or build a huge payload.
+    expect(html).toContain('path escapes the workspace');
+    expect(html).toContain('file too large to preview');
+  });
+
   it('caps stream output at the source and sanitizes surrogates before the bridge', () => {
     expect(html).toContain(`var MAX_STREAM_CHARS = ${PAGE_MAX_STREAM_CHARS}`);
     expect(html).toContain('[output truncated]');

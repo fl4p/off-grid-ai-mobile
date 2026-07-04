@@ -20,6 +20,7 @@ jest.mock('../../../src/services/llm', () => ({
     ),
     getPerformanceSettings: jest.fn().mockReturnValue({ contextLength: 2048 }),
     generateWithMaxTokens: jest.fn().mockResolvedValue('Summary of conversation'),
+    isModelLoaded: jest.fn().mockReturnValue(true),
   },
 }));
 
@@ -31,8 +32,27 @@ jest.mock('../../../src/stores/chatStore', () => ({
   },
 }));
 
+jest.mock('../../../src/stores/remoteServerStore', () => ({
+  useRemoteServerStore: {
+    getState: jest.fn().mockReturnValue({
+      activeServerId: null,
+    }),
+  },
+}));
+
+jest.mock('../../../src/services/providers', () => ({
+  providerRegistry: {
+    hasProvider: jest.fn().mockReturnValue(false),
+    getProvider: jest.fn(),
+  },
+}));
+
+import { providerRegistry } from '../../../src/services/providers';
+import { useRemoteServerStore } from '../../../src/stores/remoteServerStore';
+
 const mockedLlmService = llmService as jest.Mocked<typeof llmService>;
 const mockedUpdateCompactionState = jest.fn();
+const mockedProviderRegistry = providerRegistry as jest.Mocked<typeof providerRegistry>;
 
 /** Mock tokenizer: 10 tokens for 'System', customizable for other text */
 function mockTokenCounts(nonSystemTokens = 500) {
@@ -58,6 +78,10 @@ beforeEach(() => {
   );
   mockedLlmService.getPerformanceSettings.mockReturnValue({ contextLength: 2048 } as any);
   mockedLlmService.generateWithMaxTokens.mockResolvedValue('Summary of conversation');
+  mockedLlmService.isModelLoaded.mockReturnValue(true);
+  (useRemoteServerStore.getState as jest.Mock).mockReturnValue({ activeServerId: null });
+  mockedProviderRegistry.hasProvider.mockReturnValue(false);
+  mockedProviderRegistry.getProvider.mockReturnValue(undefined);
   mockedUpdateCompactionState.mockClear();
   (useChatStore.getState as jest.Mock).mockReturnValue({
     updateCompactionState: mockedUpdateCompactionState,
@@ -73,6 +97,10 @@ describe('isContextFullError', () => {
     ['context window exceeded', true],
     ['context length exceeded', true],
     ['context is full', true],
+    ["This model's maximum context length is 4096 tokens", true],
+    ['maximum number of tokens exceeded', true],
+    ['prompt too long for model', true],
+    ['too many tokens in request', true],
   ])('"%s" → %s', (msg, expected) => {
     const input = typeof msg === 'string' ? new Error(msg) : msg;
     expect(contextCompactionService.isContextFullError(input)).toBe(expected);
@@ -191,6 +219,42 @@ describe('compact', () => {
     expect(userInput!.content).toContain('Previous summary');
   });
 
+  it('uses active remote provider for summarization when no local model is loaded', async () => {
+    mockTokenCounts(900);
+    mockedLlmService.isModelLoaded.mockReturnValue(false);
+    (useRemoteServerStore.getState as jest.Mock).mockReturnValue({ activeServerId: 'remote-1' });
+    const remoteContextLength = 4096;
+    const remoteProvider = {
+      capabilities: { maxContextLength: remoteContextLength },
+      getTokenCount: jest.fn((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
+      generate: jest.fn(async (_messages, options, callbacks) => {
+        expect(options).toMatchObject({
+          maxTokens: Math.floor(remoteContextLength * 0.12),
+          limitOutputTokens: true,
+          enableThinking: false,
+        });
+        callbacks.onToken('Remote ');
+        callbacks.onToken('summary');
+        callbacks.onComplete({ content: 'Remote summary' });
+      }),
+    };
+    mockedProviderRegistry.hasProvider.mockReturnValue(true);
+    mockedProviderRegistry.getProvider.mockReturnValue(remoteProvider as any);
+
+    const messages = [
+      createMessage({ role: 'system', content: 'System' }),
+      createMessage({ id: 'old-1', role: 'user', content: 'old msg' }),
+      createMessage({ id: 'old-2', role: 'assistant', content: 'old reply' }),
+      createMessage({ role: 'user', content: 'latest' }),
+    ];
+
+    const result = await compactWith(messages);
+
+    expect(mockedLlmService.generateWithMaxTokens).not.toHaveBeenCalled();
+    expect(remoteProvider.generate).toHaveBeenCalled();
+    expect(result.find(m => m.id === 'compaction-summary')?.content).toContain('Remote summary');
+  });
+
   it('falls back to trim-only on summarization failure', async () => {
     mockTokenCounts(500);
     mockedLlmService.generateWithMaxTokens.mockRejectedValue(new Error('generation failed'));
@@ -256,6 +320,49 @@ describe('compact', () => {
 
     const result = await compactWith(messages);
     expect(result.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not summarize or retain memory tool calls and results', async () => {
+    mockTokenCounts(500);
+
+    const messages = [
+      createMessage({ id: 'old-user', role: 'user', content: 'old question' }),
+      createMessage({
+        id: 'memory-call',
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: 'tc-memory', name: 'search_memory', arguments: '{"query":"tax"}' },
+          { id: 'tc-web', name: 'web_search', arguments: '{"query":"public"}' },
+        ],
+      }),
+      createMessage({
+        id: 'memory-result',
+        role: 'tool',
+        content: 'PRIVATE TAX MEMORY',
+        toolCallId: 'tc-memory',
+        toolName: 'search_memory',
+      }),
+      createMessage({
+        id: 'web-result',
+        role: 'tool',
+        content: 'PUBLIC WEB RESULT',
+        toolCallId: 'tc-web',
+        toolName: 'web_search',
+      }),
+      createMessage({ id: 'latest', role: 'user', content: 'latest question' }),
+    ];
+
+    const result = await compactWith(messages);
+    const summaryMessages = mockedLlmService.generateWithMaxTokens.mock.calls[0][0];
+    const summaryInput = summaryMessages.find((m: Message) => m.role === 'user')!.content;
+    const resultPayload = JSON.stringify(result);
+
+    expect(summaryInput).not.toContain('PRIVATE TAX MEMORY');
+    expect(summaryInput).not.toContain('search_memory');
+    expect(summaryInput).toContain('PUBLIC WEB RESULT');
+    expect(resultPayload).not.toContain('PRIVATE TAX MEMORY');
+    expect(resultPayload).not.toContain('search_memory');
   });
 });
 

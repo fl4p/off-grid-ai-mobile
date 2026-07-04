@@ -151,6 +151,23 @@ const createActionStyles = (colors: ThemeColors) => ({
     color: colors.error,
     flex: 1,
   },
+  memoryControlRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: colors.background,
+    padding: SPACING.md,
+    borderRadius: 8,
+    marginBottom: SPACING.sm,
+    gap: SPACING.md,
+  },
+  memoryControlText: {
+    flex: 1,
+  },
+  memoryControlDescription: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
   resetButton: {
     backgroundColor: colors.surface,
     padding: SPACING.md,

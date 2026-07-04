@@ -11,7 +11,10 @@ export type RootStackParamList = {
   ProjectEdit: { projectId?: string };
   ProjectChats: { projectId: string };
   KnowledgeBase: { projectId: string };
+  Memory: { projectId?: string } | undefined;
+  MemoryEditor: { projectId?: string; candidateId?: number } | undefined;
   DocumentPreview: { filePath: string; fileName: string; fileSize: number };
+  HtmlPreview: { path: string; projectId?: string; title?: string };
   // Former SettingsStack
   ModelSettings: undefined;
   RemoteServers: undefined;
@@ -24,7 +27,7 @@ export type RootStackParamList = {
   Gallery: { conversationId?: string } | undefined;
   ProDetail: undefined;
   About: undefined;
-  Tools: undefined;
+  Tools: { memoryEnabled?: boolean } | undefined;
 };
 
 // Tab navigator — simple, no sub-stacks

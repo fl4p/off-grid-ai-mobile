@@ -12,6 +12,8 @@ import { createStyles } from './styles';
 import { MessageAttachments } from './components/MessageAttachments';
 import { MessageContent } from './components/MessageContent';
 import { GenerationMeta } from './components/GenerationMeta';
+import { MemoryRecallCollapsible } from './components/MemoryRecallCollapsible';
+import { ErrorMessage } from './components/ErrorMessage';
 import { ToolsSentCollapsible } from './components/ToolsSentCollapsible';
 import { ActionMenuSheet, EditSheet, SelectTextSheet } from './components/ActionMenuSheet';
 import { MarkdownText } from '../MarkdownText';
@@ -26,6 +28,12 @@ function getToolIcon(toolName?: string): string {
     case 'calculator': return 'hash';
     case 'get_current_datetime': return 'clock';
     case 'get_device_info': return 'smartphone';
+    case 'run_python': return 'terminal';
+    case 'read_file': return 'file-text';
+    case 'write_file': return 'file-plus';
+    case 'edit_file': return 'edit-3';
+    case 'list_files': return 'folder';
+    case 'grep': return 'search';
     default: return 'tool';
   }
 }
@@ -40,8 +48,32 @@ function getToolLabel(toolName?: string, content?: string): string {
     case 'calculator': return content || 'Calculated';
     case 'get_current_datetime': return 'Retrieved date/time';
     case 'get_device_info': return 'Retrieved device info';
+    case 'run_python': return 'Python output';
+    case 'read_file': return 'Read file';
+    case 'write_file': return 'Wrote file';
+    case 'edit_file': return 'Edited file';
+    case 'list_files': return 'Listed files';
+    case 'grep': return 'Searched files';
     default: return toolName || 'Tool result';
   }
+}
+
+/**
+ * If a write_file/edit_file result names an .html file, return its workspace path so
+ * the chat can offer to open it in the preview. Parses the fixed result strings from
+ * the fs tool handlers (write: "... to <path> (new file)"; edit: "... in <path>").
+ */
+export function htmlPathFromToolResult(toolName?: string, content?: string): string | null {
+  if (!content) return null;
+  let match: RegExpExecArray | null = null;
+  if (toolName === 'write_file') {
+    match = / to (.+?) \((?:new file|overwrote existing)\)\s*$/.exec(content);
+  } else if (toolName === 'edit_file') {
+    match = / in (.+?)\s*$/.exec(content);
+  }
+  const path = match?.[1]?.trim();
+  if (!path) return null;
+  return /\.html?$/i.test(path) ? path : null;
 }
 
 
@@ -54,27 +86,47 @@ type ToolResultBubbleProps = {
   hasDetails: boolean;
   attachments?: import('../../types').MediaAttachment[];
   onImagePress?: (uri: string) => void;
+  onOpenHtml?: (path: string) => void;
   styles: ReturnType<typeof createStyles>;
   colors: any;
 };
 
+/** How many trailing output lines run_python shows before you tap to expand. */
+const RUN_PYTHON_PREVIEW_LINES = 10;
+
+/** Last `n` lines of `text`, plus how many earlier lines were dropped. */
+function tailPreview(text: string, n: number): { preview: string; hidden: number } {
+  const lines = text.split('\n');
+  if (lines.length <= n) return { preview: text, hidden: 0 };
+  return { preview: lines.slice(-n).join('\n'), hidden: lines.length - n };
+}
+
 const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
-  toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, attachments, onImagePress, styles, colors,
+  toolIcon, toolLabel, toolName, durationLabel, content, hasDetails, attachments, onImagePress, onOpenHtml, styles, colors,
 }) => {
   const [expanded, setExpanded] = useState(false);
+  const htmlPath = onOpenHtml ? htmlPathFromToolResult(toolName, content) : null;
+  // Python output IS the result the user asked for (like a REPL), so show it
+  // inline instead of hiding it behind the collapse — but only the last few lines
+  // (usually the result/summary), so a chatty script doesn't wall off the chat.
+  // Tap to expand to the full captured output. Rendered monospace so program
+  // output isn't reflowed by the markdown renderer. Other tools keep their
+  // one-line label + markdown detail behind the collapse.
+  const python = toolName === 'run_python' && hasDetails ? tailPreview(content, RUN_PYTHON_PREVIEW_LINES) : null;
+  const canExpand = python ? python.hidden > 0 : hasDetails;
   return (
     <View testID="tool-message" style={styles.systemInfoContainer}>
       <TouchableOpacity
         style={styles.toolStatusRow}
-        onPress={hasDetails ? () => setExpanded(!expanded) : undefined}
-        activeOpacity={hasDetails ? 0.6 : 1}
-        disabled={!hasDetails}
+        onPress={canExpand ? () => setExpanded(!expanded) : undefined}
+        activeOpacity={canExpand ? 0.6 : 1}
+        disabled={!canExpand}
       >
         <Icon name={toolIcon} size={13} color={colors.textMuted} />
         <Text style={styles.toolStatusText} numberOfLines={expanded ? undefined : 2} testID={`tool-result-label-${toolName || 'unknown'}`}>
           {toolLabel}{durationLabel}
         </Text>
-        {hasDetails && (
+        {canExpand && (
           <Icon
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={12}
@@ -86,10 +138,34 @@ const ToolResultBubble: React.FC<ToolResultBubbleProps> = ({
       {!!attachments?.length && (
         <MessageAttachments attachments={attachments} isUser={false} onImagePress={onImagePress} styles={styles} colors={colors} />
       )}
-      {expanded && hasDetails && (
+      {htmlPath && (
+        <TouchableOpacity
+          style={styles.openHtmlButton}
+          onPress={() => onOpenHtml?.(htmlPath)}
+          testID="tool-open-html"
+          activeOpacity={0.6}
+        >
+          <Icon name="external-link" size={13} color={colors.primary} />
+          <Text style={styles.openHtmlText}>Open in browser</Text>
+        </TouchableOpacity>
+      )}
+      {python ? (
         <View style={styles.toolDetailContainer}>
-          <MarkdownText dimmed>{content}</MarkdownText>
+          {!expanded && python.hidden > 0 && (
+            <Text style={styles.toolPreviewNote} testID="run-python-hidden-note">
+              {python.hidden} earlier line{python.hidden > 1 ? 's' : ''} hidden - tap to show all
+            </Text>
+          )}
+          <Text style={styles.toolDetailText} testID="run-python-output">
+            {expanded ? content : python.preview}
+          </Text>
         </View>
+      ) : (
+        expanded && hasDetails && (
+          <View style={styles.toolDetailContainer}>
+            <MarkdownText dimmed>{content}</MarkdownText>
+          </View>
+        )
       )}
     </View>
   );
@@ -102,12 +178,18 @@ const RoutedToolsRow: React.FC<{ message: Message; isUser: boolean; isStreaming?
   return <ToolsSentCollapsible names={names} styles={styles} colors={colors} />;
 };
 
-const ToolResultMessage: React.FC<{ message: Message; onImagePress?: (uri: string) => void; styles: any; colors: any }> = ({ message, onImagePress, styles, colors }) => {
+const RecalledMemoriesRow: React.FC<{ message: Message; isUser: boolean; isStreaming?: boolean; styles: any; colors: any }> = ({ message, isUser, isStreaming, styles, colors }) => {
+  const memories = message.generationMeta?.recalledMemories;
+  if (isUser || isStreaming || !memories?.length) return null;
+  return <MemoryRecallCollapsible memories={memories} styles={styles} colors={colors} />;
+};
+
+const ToolResultMessage: React.FC<{ message: Message; onImagePress?: (uri: string) => void; onOpenHtml?: (path: string) => void; styles: any; colors: any }> = ({ message, onImagePress, onOpenHtml, styles, colors }) => {
   const toolIcon = getToolIcon(message.toolName);
   const toolLabel = getToolLabel(message.toolName, message.content);
   const durationLabel = message.generationTimeMs == null ? '' : ` (${message.generationTimeMs}ms)`;
   const hasDetails = !!(message.content && message.content.length > 0 && !message.content.startsWith('No results'));
-  return <ToolResultBubble toolIcon={toolIcon} toolLabel={toolLabel} toolName={message.toolName || 'unknown'} durationLabel={durationLabel} content={message.content} hasDetails={hasDetails} attachments={message.attachments} onImagePress={onImagePress} styles={styles} colors={colors} />;
+  return <ToolResultBubble toolIcon={toolIcon} toolLabel={toolLabel} toolName={message.toolName || 'unknown'} durationLabel={durationLabel} content={message.content} hasDetails={hasDetails} attachments={message.attachments} onImagePress={onImagePress} onOpenHtml={onOpenHtml} styles={styles} colors={colors} />;
 };
 
 const ToolCallMessage: React.FC<{ message: Message; styles: any; colors: any }> = ({ message, styles, colors }) => (
@@ -127,36 +209,6 @@ const ToolCallMessage: React.FC<{ message: Message; styles: any; colors: any }> 
   </View>
 );
 
-const ErrorMessage: React.FC<{
-  message: Message; styles: ReturnType<typeof createStyles>; colors: any;
-}> = ({ message, styles, colors }) => {
-  const [expanded, setExpanded] = useState(false);
-  const hasDetails = !!message.errorDetails;
-  return (
-    <View testID="error-message" style={styles.systemInfoContainer}>
-      <TouchableOpacity
-        testID="error-message-toggle"
-        style={styles.toolStatusRow}
-        onPress={hasDetails ? () => setExpanded(!expanded) : undefined}
-        activeOpacity={hasDetails ? 0.6 : 1}
-        disabled={!hasDetails}
-      >
-        <Icon name="alert-triangle" size={13} color={colors.error} />
-        <Text style={[styles.toolStatusText, { color: colors.error }]} numberOfLines={expanded ? undefined : 3}>
-          {message.content}
-        </Text>
-        {hasDetails && (
-          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={12} color={colors.textMuted} />
-        )}
-      </TouchableOpacity>
-      {expanded && hasDetails && (
-        <View testID="error-details" style={styles.toolDetailContainer}>
-          <MarkdownText dimmed>{message.errorDetails!}</MarkdownText>
-        </View>
-      )}
-    </View>
-  );
-};
 
 const SystemInfoMessage: React.FC<{
   content: string; styles: ReturnType<typeof createStyles>;
@@ -233,6 +285,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   message,
   isStreaming,
   onImagePress,
+  onOpenHtml,
   onCopy,
   onRetry,
   onEdit,
@@ -295,7 +348,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const handleRemember = async () => {
     setShowActionMenu(false);
     try {
-      await onRemember?.(message);
+      await onRemember?.({ ...message, content: displayContent });
       triggerHaptic('notificationSuccess');
       setAlertState(showAlert('Saved to Memory', 'This message is now available to local recall.'));
     } catch (err: any) {
@@ -344,7 +397,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     return <SystemInfoMessage content={displayContent} styles={styles}
       alertState={alertState} onCloseAlert={() => setAlertState(hideAlert())} />;
   }
-  if (message.role === 'tool') return <ToolResultMessage message={message} onImagePress={onImagePress} styles={styles} colors={colors} />;
+  if (message.role === 'tool') return <ToolResultMessage message={message} onImagePress={onImagePress} onOpenHtml={onOpenHtml} styles={styles} colors={colors} />;
   if (message.role === 'assistant' && message.toolCalls?.length) {
     return <ToolCallWithThinking message={message} showThinking={showThinking}
       onToggle={() => setShowThinking(!showThinking)} styles={styles} colors={colors} />;
@@ -383,6 +436,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         />
       </View>
 
+      <RecalledMemoriesRow message={message} isUser={isUser} isStreaming={isStreaming} styles={styles} colors={colors} />
       <RoutedToolsRow message={message} isUser={isUser} isStreaming={isStreaming} styles={styles} colors={colors} />
 
       <MessageMetaRow

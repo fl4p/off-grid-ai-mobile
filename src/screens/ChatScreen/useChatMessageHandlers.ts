@@ -1,7 +1,10 @@
 import { Dispatch, SetStateAction } from 'react';
+import { Clipboard } from 'react-native';
 import { showAlert, AlertState } from '../../components';
 import { Message } from '../../types';
 import { callHook, HOOKS } from '../../bootstrap/hookRegistry';
+import { triggerHaptic } from '../../utils/haptics';
+import { buildTranscript, conversationHasReasoning } from '../../utils/transcript';
 import {
   regenerateResponseFn, executeDeleteConversationFn, handleImageGenerationFn,
 } from './useChatGenerationActions';
@@ -68,6 +71,42 @@ export function handleDeleteConversationFn(
       { text: 'Delete', style: 'destructive', onPress: () => { executeDeleteConversationFn(genDeps).catch(() => {}); } },
     ],
   ));
+}
+
+export function handleCopyTranscriptFn(
+  p: { activeConversation: any; setAlertState: SetState<AlertState> },
+): void {
+  const messages: Message[] = p.activeConversation?.messages || [];
+  // Guard on the rendered transcript, not the raw count: system-info messages
+  // (e.g. "Model loaded") are filtered out, so a chat can have messages yet
+  // still produce an empty transcript.
+  if (buildTranscript(messages).length === 0) {
+    p.setAlertState(showAlert('Nothing to Copy', 'This conversation has no messages yet.'));
+    return;
+  }
+
+  const copy = (includeReasoning: boolean) => {
+    Clipboard.setString(buildTranscript(messages, { includeReasoning }));
+    triggerHaptic('notificationSuccess');
+  };
+
+  // Copy the plain transcript straight away and confirm. When the conversation
+  // contains thinking/reasoning text, offer a one-tap upgrade to include it.
+  // (CustomAlert hides itself after a button's onPress, so we can't chain a
+  // second confirmation alert — copying up front keeps a single alert.)
+  copy(false);
+  if (conversationHasReasoning(messages)) {
+    p.setAlertState(showAlert(
+      'Copied',
+      "Transcript copied to clipboard. Include the model's reasoning too?",
+      [
+        { text: 'Text only', style: 'cancel' },
+        { text: 'Include reasoning', onPress: () => copy(true) },
+      ],
+    ));
+    return;
+  }
+  p.setAlertState(showAlert('Copied', 'Transcript copied to clipboard.'));
 }
 
 export async function handleGenerateImageFromMsgFn(

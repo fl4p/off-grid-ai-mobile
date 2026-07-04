@@ -11,6 +11,7 @@ import {
   buildToolSystemPromptHint,
   buildNoToolsNote,
   buildPromptWithToolNote,
+  resolveEnabledToolIds,
 } from '../../../../src/services/tools/registry';
 
 describe('Tool Registry', () => {
@@ -21,7 +22,8 @@ describe('Tool Registry', () => {
     it('has core tools with correct IDs', () => {
       // Email + calendar tools are pro-gated and live in the pro package
       // (EmailCalendarExtension), so they are not part of the core registry.
-      expect(AVAILABLE_TOOLS).toHaveLength(10);
+      // The 5 Python filesystem tools are hidden companions unlocked by run_python.
+      expect(AVAILABLE_TOOLS).toHaveLength(15);
 
       const ids = AVAILABLE_TOOLS.map(t => t.id);
       expect(ids).toEqual([
@@ -35,7 +37,21 @@ describe('Tool Registry', () => {
         'forget_memory',
         'run_python',
         'read_url',
+        'read_file',
+        'write_file',
+        'edit_file',
+        'list_files',
+        'grep',
       ]);
+    });
+
+    it('marks the Python filesystem tools as hidden, requiresPython companions', () => {
+      const fsIds = ['read_file', 'write_file', 'edit_file', 'list_files', 'grep'];
+      for (const id of fsIds) {
+        const tool = AVAILABLE_TOOLS.find(t => t.id === id)!;
+        expect(tool.hidden).toBe(true);
+        expect(tool.requiresPython).toBe(true);
+      }
     });
 
     it('each tool has required fields (id, name, displayName, description, icon, parameters)', () => {
@@ -53,6 +69,42 @@ describe('Tool Registry', () => {
         expect(tool.parameters).toBeDefined();
         expect(typeof tool.parameters).toBe('object');
       }
+    });
+  });
+
+  // ========================================================================
+  // resolveEnabledToolIds - Python unlocks its filesystem companions
+  // ========================================================================
+  describe('resolveEnabledToolIds', () => {
+    const fsIds = ['read_file', 'write_file', 'edit_file', 'list_files', 'grep'];
+
+    it('is a no-op when run_python is not enabled', () => {
+      expect(resolveEnabledToolIds(['web_search', 'calculator'])).toEqual(['web_search', 'calculator']);
+    });
+
+    it('unlocks the filesystem tools when run_python is enabled', () => {
+      const resolved = resolveEnabledToolIds(['run_python']);
+      expect(resolved).toContain('run_python');
+      for (const id of fsIds) expect(resolved).toContain(id);
+    });
+
+    it('does not duplicate ids already present', () => {
+      const resolved = resolveEnabledToolIds(['run_python', 'read_file']);
+      expect(resolved.filter(id => id === 'read_file')).toHaveLength(1);
+    });
+
+    it('exposes the filesystem tools to the model schema only when Python is on', () => {
+      const withPython = getToolsAsOpenAISchema(['run_python']).map(s => s.function.name);
+      expect(withPython).toEqual(expect.arrayContaining(fsIds));
+
+      const withoutPython = getToolsAsOpenAISchema(['web_search']).map(s => s.function.name);
+      expect(withoutPython).not.toEqual(expect.arrayContaining(fsIds));
+    });
+
+    it('lists the filesystem tools in the text hint when Python is on', () => {
+      const hint = buildToolSystemPromptHint(['run_python']);
+      expect(hint).toContain('read_file');
+      expect(hint).toContain('grep');
     });
   });
 

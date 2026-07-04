@@ -22,6 +22,10 @@ describe('vectorMath', () => {
       expect(dotProduct([5], [3])).toBe(15);
     });
 
+    it('returns 0 for mismatched lengths', () => {
+      expect(dotProduct([1, 2], [3])).toBe(0);
+    });
+
     it('handles large vectors efficiently', () => {
       const a = new Array(384).fill(1);
       const b = new Array(384).fill(2);
@@ -50,6 +54,11 @@ describe('vectorMath', () => {
 
     it('returns 0 when both vectors are zero', () => {
       expect(cosineSimilarity([0, 0], [0, 0])).toBe(0);
+    });
+
+    it('returns 0 for empty or mismatched vectors', () => {
+      expect(cosineSimilarity([], [])).toBe(0);
+      expect(cosineSimilarity([1, 2], [1])).toBe(0);
     });
 
     it('is independent of magnitude', () => {

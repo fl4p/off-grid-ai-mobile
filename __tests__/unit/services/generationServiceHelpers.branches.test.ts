@@ -413,6 +413,67 @@ describe('generateRemoteWithToolsImpl', () => {
     expect(store.finalizeStreamingMessage).not.toHaveBeenCalled();
     expect(svc.forceFlushTokens).not.toHaveBeenCalled();
   });
+
+  it('resets state, marks the server offline and rethrows when the tool loop fails mid-stream', async () => {
+    // Regression: a TLS/network drop on flaky wifi used to leave isGenerating stuck
+    // (red stop button + queued message that never drains) because this path had no
+    // error handling and never reset the service state.
+    mockedGetState.mockReturnValue(liteRTAppState());
+    const { useRemoteServerStore } = require('../../../src/stores');
+    const updateServerHealth = jest.fn();
+    useRemoteServerStore.getState.mockReturnValue({ activeServerId: 'srv-7', updateServerHealth });
+    const store = chatStoreMock();
+    const provider = { type: 'openai', capabilities: { supportsThinking: false } };
+    const svc = makeServiceSvc({
+      getCurrentProvider: () => provider,
+      flushTimer: setTimeout(() => {}, 1000) as any,
+      tokenBuffer: 'partial',
+    });
+    mockedRunToolLoop.mockImplementationOnce(() => Promise.reject(new Error('SSL handshake failed')));
+
+    await expect(
+      generateRemoteWithToolsImpl(svc, {
+        conversationId: 'conv-1',
+        messages: [{ id: '1', timestamp: 0, role: 'user' as const, content: 'hi' }],
+        options: { enabledToolIds: ['web_search'] },
+      }),
+    ).rejects.toThrow('SSL handshake failed');
+
+    // A runToolLoop failure is not a reliable reachability signal (tool error, or a
+    // context error the caller recovers from via compaction) and nothing flips health
+    // back to healthy, so this path must NOT mark the server offline.
+    expect(updateServerHealth).not.toHaveBeenCalled();
+    expect(svc.flushTimer).toBeNull();
+    expect(svc.tokenBuffer).toBe('');
+    expect(store.clearStreamingMessage).toHaveBeenCalled();
+    expect(svc.resetState).toHaveBeenCalled();
+    expect(store.finalizeStreamingMessage).not.toHaveBeenCalled();
+  });
+
+  it('swallows a tool-loop rejection when the request was already aborted', async () => {
+    mockedGetState.mockReturnValue(liteRTAppState());
+    const store = chatStoreMock();
+    const provider = { type: 'openai', capabilities: { supportsThinking: false } };
+    const svc = makeServiceSvc({ getCurrentProvider: () => provider });
+    // prepareGeneration clears abortRequested; stopGeneration set it again before the reject.
+    mockedRunToolLoop.mockImplementationOnce(() => {
+      svc.abortRequested = true;
+      return Promise.reject(new Error('aborted mid-flight'));
+    });
+
+    // abort guard returns before rethrow -> resolves rather than rejecting
+    await expect(
+      generateRemoteWithToolsImpl(svc, {
+        conversationId: 'conv-1',
+        messages: [{ id: '1', timestamp: 0, role: 'user' as const, content: 'hi' }],
+        options: { enabledToolIds: [] },
+      }),
+    ).resolves.toBeUndefined();
+
+    // stopGeneration() owns cleanup in the abort case — don't double-reset here.
+    expect(svc.resetState).not.toHaveBeenCalled();
+    expect(store.finalizeStreamingMessage).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

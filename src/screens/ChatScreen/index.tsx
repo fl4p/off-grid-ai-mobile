@@ -239,10 +239,18 @@ export const ChatScreen: React.FC = () => {
       isGeneratingImage={chat.isGeneratingImage}
       showGenerationDetails={chat.settings.showGenerationDetails}
       onCopy={chat.handleCopyMessage}
+      onRemember={chat.handleRememberMessage}
       onRetry={chat.handleRetryMessage}
       onEdit={chat.handleEditMessage}
       onGenerateImage={chat.handleGenerateImageFromMessage}
       onImagePress={chat.handleImagePress}
+      onOpenHtml={(path) =>
+        rootNavigation.navigate('HtmlPreview', {
+          path,
+          projectId: chat.activeConversation?.projectId,
+          title: path,
+        })
+      }
     />
   );
 
@@ -308,6 +316,8 @@ export const ChatScreen: React.FC = () => {
           handleModelSelect={chat.handleModelSelect}
           handleUnloadModel={chat.handleUnloadModel}
           handleDeleteConversation={chat.handleDeleteConversation}
+          handleSetConversationMemoryEnabled={chat.handleSetConversationMemoryEnabled}
+          handleCopyTranscript={chat.handleCopyTranscript}
           isModelLoading={chat.isModelLoading}
           imageCount={imageCount}
           activeConversationId={chat.activeConversationId}

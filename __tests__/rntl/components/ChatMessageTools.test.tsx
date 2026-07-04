@@ -133,6 +133,22 @@ describe('ChatMessage — Tool message rendering', () => {
       expect(getByTestId('generated-image-content-0')).toBeTruthy();
     });
 
+    it('renders a plot full-width and uncropped (contain), not as a fixed thumbnail', () => {
+      const { getByTestId } = renderToolResult('run_python', '[1 plot shown to the user]', {
+        attachments: [
+          { id: 'p1', type: 'image', uri: 'file:///docs/python-plots/plot-p1.png', mimeType: 'image/png' },
+        ],
+      });
+      const img = getByTestId('generated-image-content-0');
+      // contain (not cover) so the whole figure is visible, and full-width rather
+      // than a 140px square thumbnail.
+      expect(img.props.resizeMode).toBe('contain');
+      const flat = Array.isArray(img.props.style)
+        ? Object.assign({}, ...img.props.style)
+        : img.props.style;
+      expect(flat.width).toBe('100%');
+    });
+
     it('opens the image viewer when a plot is tapped (so it can be saved)', () => {
       const onImagePress = jest.fn();
       const { getByTestId } = renderToolResult(
@@ -143,6 +159,48 @@ describe('ChatMessage — Tool message rendering', () => {
       );
       fireEvent.press(getByTestId('generated-image-content-0'));
       expect(onImagePress).toHaveBeenCalledWith('file:///docs/python-plots/plot-p1.png');
+    });
+
+    it('shows run_python output by default without needing to expand', () => {
+      // Python output is the result the user asked for, so it renders immediately.
+      const { getByText } = renderToolResult('run_python', 'Hello from Python\n[result] 42');
+      expect(getByText(/Hello from Python/)).toBeTruthy();
+    });
+
+    it('keeps other tool output collapsed by default', () => {
+      const { queryByText } = renderToolResult('web_search', 'Detailed search results here');
+      expect(queryByText('Detailed search results here')).toBeNull();
+    });
+
+    it('labels a run_python result "Python output"', () => {
+      const { getByText } = renderToolResult('run_python', 'x = 1');
+      expect(getByText(/Python output/)).toBeTruthy();
+    });
+
+    it('shows only the last 10 lines of long run_python output by default', () => {
+      const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n');
+      const { getByTestId } = renderToolResult('run_python', lines);
+      const shown = getByTestId('run-python-output').props.children as string;
+      // Tail is kept: line 30 is visible, an early line (line 5) is not.
+      expect(shown).toContain('line 30');
+      expect(shown).toContain('line 21');
+      expect(shown).not.toContain('line 5\n');
+      // And the user is told how many lines were folded away.
+      expect(getByTestId('run-python-hidden-note').props.children).toContain(20);
+    });
+
+    it('expands to the full run_python output when tapped', () => {
+      const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n');
+      const { getByTestId, getByText, queryByTestId } = renderToolResult('run_python', lines);
+      fireEvent.press(getByText(/Python output/));
+      expect(getByTestId('run-python-output').props.children).toContain('line 1');
+      expect(queryByTestId('run-python-hidden-note')).toBeNull();
+    });
+
+    it('shows no expand affordance for short run_python output', () => {
+      const { queryByTestId } = renderToolResult('run_python', 'only line');
+      expect(queryByTestId('run-python-hidden-note')).toBeNull();
+      expect(queryByTestId('run-python-output')?.props.children).toBe('only line');
     });
   });
 
@@ -341,6 +399,40 @@ describe('ChatMessage — Tool message rendering', () => {
         const { getByTestId } = render(<ChatMessage message={message} />);
         expect(getByTestId('tool-message')).toBeTruthy();
       });
+    });
+  });
+
+  // ==========================================================================
+  // "Open in browser" affordance for agent-written HTML files
+  // ==========================================================================
+  describe('open-html button', () => {
+    const renderWithOpen = (toolName: string, content: string, onOpenHtml = jest.fn()) => {
+      const message = makeMessage({ role: 'tool', content, toolName });
+      const utils = render(<ChatMessage message={message} onOpenHtml={onOpenHtml} />);
+      return { ...utils, onOpenHtml };
+    };
+
+    it('shows the button and opens the path for a written .html file', () => {
+      const { getByTestId, onOpenHtml } = renderWithOpen('write_file', 'Wrote 1234 bytes to snake.html (new file)');
+      fireEvent.press(getByTestId('tool-open-html'));
+      expect(onOpenHtml).toHaveBeenCalledWith('snake.html');
+    });
+
+    it('shows the button for an edited .html file', () => {
+      const { getByTestId, onOpenHtml } = renderWithOpen('edit_file', 'Made 1 replacement in index.html');
+      fireEvent.press(getByTestId('tool-open-html'));
+      expect(onOpenHtml).toHaveBeenCalledWith('index.html');
+    });
+
+    it('does not show the button for a non-html write', () => {
+      const { queryByTestId } = renderWithOpen('write_file', 'Wrote 10 bytes to main.py (new file)');
+      expect(queryByTestId('tool-open-html')).toBeNull();
+    });
+
+    it('does not show the button when no onOpenHtml handler is provided', () => {
+      const message = makeMessage({ role: 'tool', content: 'Wrote 5 bytes to a.html (new file)', toolName: 'write_file' });
+      const { queryByTestId } = render(<ChatMessage message={message} />);
+      expect(queryByTestId('tool-open-html')).toBeNull();
     });
   });
 });

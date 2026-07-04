@@ -21,6 +21,8 @@ import {
   handleSelectProjectFn,
   dispatchGenerationFn,
 } from '../../../src/screens/ChatScreen/useChatGenerationActions';
+import { resolveBaseSystemPrompt } from '../../../src/screens/ChatScreen/baseSystemPrompt';
+import { APP_CONFIG } from '../../../src/constants';
 import { useRemoteServerStore } from '../../../src/stores/remoteServerStore';
 import { createDownloadedModel } from '../../utils/factories';
 
@@ -95,6 +97,9 @@ jest.mock('../../../src/services/memory', () => ({
   memoryService: {
     searchMemory: jest.fn(() => Promise.resolve([])),
     formatForPrompt: jest.fn(() => '<memory_context>mock memory context</memory_context>'),
+    formatRecallSummaries: jest.fn(() => []),
+    captureCandidateFromMessage: jest.fn(() => Promise.resolve(null)),
+    captureMemoryFromMessage: jest.fn(() => Promise.resolve(null)),
   },
 }));
 
@@ -138,6 +143,9 @@ const mockGetDocsByProject = ragService.getDocumentsByProject as jest.Mock;
 const mockFormatForPrompt = retrievalService.formatForPrompt as jest.Mock;
 const mockSearchMemory = memoryService.searchMemory as jest.Mock;
 const mockFormatMemoryForPrompt = memoryService.formatForPrompt as jest.Mock;
+const mockFormatRecallSummaries = memoryService.formatRecallSummaries as jest.Mock;
+const mockCaptureCandidateFromMessage = memoryService.captureCandidateFromMessage as jest.Mock;
+const mockCaptureMemoryFromMessage = memoryService.captureMemoryFromMessage as jest.Mock;
 
 
 const mockChatStoreGetState = jest.fn(() => ({ conversations: [] as any[], updateCompactionState: jest.fn() }));
@@ -156,7 +164,10 @@ jest.mock('../../../src/components', () => ({
 }));
 
 jest.mock('../../../src/constants', () => ({
-  APP_CONFIG: { defaultSystemPrompt: 'You are a helpful assistant.' },
+  APP_CONFIG: {
+    defaultSystemPrompt: 'You are a helpful assistant.',
+    defaultSystemPromptRemote: 'You are a helpful assistant (remote endpoint).',
+  },
 }));
 
 // ─────────────────────────────────────────────
@@ -189,6 +200,9 @@ beforeEach(() => {
   mockFormatForPrompt.mockReturnValue('<knowledge_base>mock RAG context</knowledge_base>');
   mockSearchMemory.mockResolvedValue([]);
   mockFormatMemoryForPrompt.mockReturnValue('<memory_context>mock memory context</memory_context>');
+  mockFormatRecallSummaries.mockReturnValue([]);
+  mockCaptureCandidateFromMessage.mockResolvedValue(null);
+  mockCaptureMemoryFromMessage.mockResolvedValue(null);
   mockChatStoreGetState.mockReturnValue({ conversations: [], updateCompactionState: jest.fn() });
   mockProjectStoreGetProject.mockReturnValue(null);
 });
@@ -466,7 +480,11 @@ describe('regenerateResponseFn', () => {
       activeConversation: { id: 'conv-1', messages: [userMsg] },
     });
     await regenerateResponseFn(deps, { setDebugInfo: jest.fn(), userMessage: userMsg });
-    expect(mockGenerateResponse).toHaveBeenCalledWith('conv-1', expect.any(Array));
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ recalledMemories: [] }),
+    );
     expect(deps.generatingForConversationRef.current).toBeNull();
   });
 
@@ -671,6 +689,307 @@ describe('dispatchGenerationFn (single routing layer)', () => {
     expect(mockGenerateImage).not.toHaveBeenCalled();
     expect(setPendingMessage).toHaveBeenCalledWith('Hi', undefined);
   });
+
+  it('captures a memory candidate for local text messages when enabled', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer solar permit updates with source links.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, memoryAutoCaptureEnabled: true },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureCandidateFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: 'proj-1',
+    });
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
+  it('saves auto-captured memory directly when full-auto memory is enabled', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer line width 2 for plots by default.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      settings: {
+        ...makeGenerationDeps().settings,
+        memoryAutoCaptureEnabled: true,
+        memoryAutoSaveEnabled: true,
+      },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: 'proj-1',
+    });
+    expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
+  it('handles explicit remember commands locally without calling the model', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'remember: if I ask you to plot sth, use linewidth=2 by default',
+      timestamp: 0,
+    };
+    const assistantMessage = { id: 'msg-command-ack', role: 'assistant' as const, content: 'Saved to memory.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const addMessage = jest.fn((_convId: string, message: any) => (
+      message.role === 'user' ? userMessage : assistantMessage
+    ));
+    const deps = makeGenerationDeps({ addMessage });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: 'proj-1',
+      sourceType: 'chat_command',
+    });
+    expect(addMessage).toHaveBeenCalledWith('conv-1', expect.objectContaining({
+      role: 'assistant',
+      content: 'Saved to memory.',
+    }));
+    expect(startText).not.toHaveBeenCalled();
+    expect(mockGenerateImage).not.toHaveBeenCalled();
+  });
+
+  it('handles explicit remember commands locally even when the active model is remote', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'remember: use linewidth=2 for plots',
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
+  it('handles direct standing memory directives locally without calling the model', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'always use linewidth=2 for plots',
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: userMessage,
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
+  it('handles remember commands with document attachments locally instead of sending them to remote generation', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const attachment = {
+      id: 'doc-1',
+      type: 'document' as const,
+      uri: 'file:///tmp/plot-defaults.md',
+      fileName: 'plot-defaults.md',
+      textContent: 'Always use linewidth=2 when plotting lines.',
+    };
+    const userMessage = {
+      id: 'msg-command-1',
+      role: 'user' as const,
+      content: 'remember:',
+      attachments: [attachment],
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, {
+      text: userMessage.content,
+      attachments: [attachment],
+      conversationId: 'conv-1',
+    }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: expect.objectContaining({
+        id: 'msg-command-1',
+        content: expect.stringContaining('Always use linewidth=2'),
+      }),
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
+  it('does not append document text to inline memory directives', async () => {
+    mockCaptureMemoryFromMessage.mockResolvedValueOnce({ id: 7 });
+    const startText = jest.fn(() => Promise.resolve());
+    const attachment = {
+      id: 'doc-1',
+      type: 'document' as const,
+      uri: 'file:///tmp/private.md',
+      fileName: 'private.md',
+      textContent: 'Private document text.',
+    };
+    const userMessage = {
+      id: 'msg-command-inline',
+      role: 'user' as const,
+      content: 'remember: never use semicolons',
+      attachments: [attachment],
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      addMessage: jest.fn((_convId: string, message: any) => (
+        message.role === 'user' ? userMessage : { id: 'ack', ...message }
+      )),
+    });
+
+    await dispatchGenerationFn(deps, {
+      text: userMessage.content,
+      attachments: [attachment],
+      conversationId: 'conv-1',
+    }, startText);
+
+    expect(mockCaptureMemoryFromMessage).toHaveBeenCalledWith({
+      message: expect.objectContaining({
+        id: 'msg-command-inline',
+        content: 'remember: never use semicolons',
+      }),
+      projectId: undefined,
+      sourceType: 'chat_command',
+    });
+    expect(startText).not.toHaveBeenCalled();
+  });
+
+  it('does not treat combined queued messages as a single explicit remember command', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = {
+      id: 'msg-queued-1',
+      role: 'user' as const,
+      content: 'remember: use linewidth=2\n\nNow plot a sine wave',
+      timestamp: 0,
+    };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, {
+      text: userMessage.content,
+      conversationId: 'conv-1',
+    }, startText);
+
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
+  it('does not auto-capture when conversation memory is disabled', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer project memory to stay off here.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', projectId: 'proj-1', memoryEnabled: false, messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, memoryAutoCaptureEnabled: true },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
+
+  it('does not auto-capture memory candidates for remote text messages', async () => {
+    const startText = jest.fn(() => Promise.resolve());
+    const userMessage = { id: 'msg-1', role: 'user' as const, content: 'I prefer this private note to stay local.', timestamp: 0 };
+    mockChatStoreGetState.mockReturnValue({
+      conversations: [{ id: 'conv-1', messages: [userMessage] }],
+      updateCompactionState: jest.fn(),
+    });
+    const deps = makeGenerationDeps({
+      activeModel: null,
+      activeModelInfo: { isRemote: true, model: null, modelId: 'remote-model', modelName: 'Remote Model' },
+      settings: { ...makeGenerationDeps().settings, memoryAutoCaptureEnabled: true },
+      addMessage: jest.fn(() => userMessage),
+    });
+
+    await dispatchGenerationFn(deps, { text: userMessage.content, conversationId: 'conv-1' }, startText);
+
+    expect(mockCaptureCandidateFromMessage).not.toHaveBeenCalled();
+    expect(mockCaptureMemoryFromMessage).not.toHaveBeenCalled();
+    expect(startText).toHaveBeenCalledWith('conv-1', userMessage.content);
+  });
 });
 
 describe('startGenerationFn', () => {
@@ -756,7 +1075,11 @@ describe('startGenerationFn', () => {
 
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'What time is it?' });
 
-    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), { enabledToolIds: ['get_current_datetime'] });
+    expect(mockGenerateWithTools).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ enabledToolIds: ['get_current_datetime'] }),
+    );
   });
 });
 
@@ -841,6 +1164,32 @@ describe('RAG context injection in startGenerationFn', () => {
     expect(messagesForDebug[0].content).toContain('<memory_context>');
   });
 
+  it('passes recalled memory summaries into assistant generation metadata', async () => {
+    const recalled = [{
+      id: 1,
+      scope: 'project',
+      kind: 'research_note',
+      sourceType: 'manual',
+      jurisdiction: 'United States',
+      asOfDate: '2026-07-03',
+      score: 0.8,
+      reason: 'lexical',
+    }];
+    const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'filing deadline?', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 1, title: 'Tax filing note' }, score: 0.8 }]);
+    mockFormatRecallSummaries.mockReturnValue(recalled);
+    const deps = makeGenerationDeps();
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'filing deadline?' });
+
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ recalledMemories: recalled }),
+    );
+  });
+
   it('does not inject memory context for remote generation', async () => {
     useRemoteServerStore.setState({ activeServerId: 'srv-1', activeRemoteTextModelId: 'gpt-4' });
     const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
@@ -856,6 +1205,11 @@ describe('RAG context injection in startGenerationFn', () => {
     expect(mockSearchMemory).not.toHaveBeenCalled();
     const messagesForDebug = mockGetContextDebugInfo.mock.calls[0][0];
     expect(messagesForDebug[0].content).not.toContain('<memory_context>');
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.any(Array),
+      expect.objectContaining({ recalledMemories: [] }),
+    );
   });
 
   it('injects doc list and RAG context when conversation has a projectId and search returns chunks', async () => {
@@ -956,6 +1310,77 @@ describe('RAG context injection in startGenerationFn', () => {
       enabledToolIds: ['search_knowledge_base', 'search_memory'],
     }));
   });
+
+  it('skips memory recall and tools when conversation memory is disabled', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', memoryEnabled: false, messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, enabledTools: ['search_memory', 'save_memory', 'get_current_datetime'] },
+    });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockSearchMemory).not.toHaveBeenCalled();
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['get_current_datetime', 'search_knowledge_base'],
+    }));
+  });
+
+  it('scrubs previous memory tool history when conversation memory is disabled', async () => {
+    const conv = {
+      id: 'conv-1',
+      projectId: 'proj-1',
+      memoryEnabled: false,
+      messages: [
+        { id: 'u1', role: 'user', content: 'look up my notes', timestamp: 0 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 0,
+          toolCalls: [
+            { id: 'tc-memory', name: 'search_memory', arguments: '{"query":"tax"}' },
+            { id: 'tc-web', name: 'web_search', arguments: '{"query":"public"}' },
+          ],
+        },
+        { id: 't1', role: 'tool', content: 'PRIVATE TAX MEMORY', timestamp: 0, toolCallId: 'tc-memory', toolName: 'search_memory' },
+        { id: 't2', role: 'tool', content: 'PUBLIC WEB RESULT', timestamp: 0, toolCallId: 'tc-web', toolName: 'web_search' },
+        { id: 'u2', role: 'user', content: 'hello', timestamp: 0 },
+      ],
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test' });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+
+    await startGenerationFn(makeGenerationDeps(), { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    const messages = mockGenerateWithTools.mock.calls[0][1];
+    const serialized = JSON.stringify(messages);
+    expect(serialized).not.toContain('PRIVATE TAX MEMORY');
+    expect(serialized).not.toContain('search_memory');
+    expect(serialized).not.toContain('tc-memory');
+    expect(serialized).toContain('PUBLIC WEB RESULT');
+    expect(serialized).toContain('web_search');
+  });
+
+  it('skips memory recall and tools when project memory is disabled', async () => {
+    const conv = { id: 'conv-1', projectId: 'proj-1', messages: [{ id: 'm1', role: 'user', content: 'hello', timestamp: 0 }] };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test', memoryEnabled: false });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+    const deps = makeGenerationDeps({
+      settings: { ...makeGenerationDeps().settings, enabledTools: ['search_memory', 'forget_memory'] },
+    });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hello' });
+
+    expect(mockSearchMemory).not.toHaveBeenCalled();
+    expect(mockGenerateWithTools).toHaveBeenCalledWith('conv-1', expect.any(Array), expect.objectContaining({
+      enabledToolIds: ['search_knowledge_base'],
+    }));
+  });
 });
 
 describe('RAG context injection in regenerateResponseFn', () => {
@@ -985,6 +1410,43 @@ describe('RAG context injection in regenerateResponseFn', () => {
 
     expect(mockGetDocsByProject).not.toHaveBeenCalled();
     expect(mockSearchProject).not.toHaveBeenCalled();
+  });
+
+  it('scrubs previous memory tool history when regenerating with project memory disabled', async () => {
+    const userMsg = { id: 'u2', role: 'user' as const, content: 'hello again', timestamp: 0 };
+    const conv = {
+      id: 'conv-1',
+      projectId: 'proj-1',
+      messages: [
+        { id: 'u1', role: 'user', content: 'look up my notes', timestamp: 0 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          timestamp: 0,
+          toolCalls: [
+            { id: 'tc-memory', name: 'search_memory', arguments: '{"query":"tax"}' },
+            { id: 'tc-web', name: 'web_search', arguments: '{"query":"public"}' },
+          ],
+        },
+        { id: 't1', role: 'tool', content: 'PRIVATE TAX MEMORY', timestamp: 0, toolCallId: 'tc-memory', toolName: 'search_memory' },
+        { id: 't2', role: 'tool', content: 'PUBLIC WEB RESULT', timestamp: 0, toolCallId: 'tc-web', toolName: 'web_search' },
+        userMsg,
+      ],
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    mockProjectStoreGetProject.mockReturnValue({ id: 'proj-1', systemPrompt: 'Be helpful', name: 'Test', memoryEnabled: false });
+    (llmService.supportsToolCalling as jest.Mock).mockReturnValue(true);
+
+    await regenerateResponseFn(makeGenerationDeps(), { setDebugInfo: jest.fn(), userMessage: userMsg });
+
+    const messages = mockGenerateWithTools.mock.calls[0][1];
+    const serialized = JSON.stringify(messages);
+    expect(serialized).not.toContain('PRIVATE TAX MEMORY');
+    expect(serialized).not.toContain('search_memory');
+    expect(serialized).not.toContain('tc-memory');
+    expect(serialized).toContain('PUBLIC WEB RESULT');
+    expect(serialized).toContain('web_search');
   });
 });
 
@@ -1279,12 +1741,22 @@ describe('generateWithCompactionRetry — context full error path', () => {
   });
 
   it('retries with compacted messages on context full error', async () => {
+    const recalled = [{
+      id: 7,
+      scope: 'project',
+      kind: 'research_note',
+      sourceType: 'manual',
+      score: 0.83,
+      reason: 'semantic',
+    }];
     const compactedMsgs = [{ id: 'system', role: 'system', content: 'summary', timestamp: 0 }];
     mockGenerateResponse
       .mockRejectedValueOnce(new Error('context full'))
       .mockResolvedValueOnce(undefined);
     mockIsContextFullError.mockReturnValue(true);
     mockCompact.mockResolvedValue(compactedMsgs);
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 7, title: 'Private title' }, score: 0.83 }]);
+    mockFormatRecallSummaries.mockReturnValue(recalled);
     (llmService.stopGeneration as jest.Mock).mockResolvedValue(undefined);
 
     const conv = { id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'hi', timestamp: 0 }] };
@@ -1293,15 +1765,27 @@ describe('generateWithCompactionRetry — context full error path', () => {
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
     // Second call should be with the compacted messages
     expect(mockGenerateResponse).toHaveBeenCalledTimes(2);
+    expect(mockGenerateResponse).toHaveBeenNthCalledWith(1, 'conv-1', expect.any(Array), expect.objectContaining({ recalledMemories: recalled }));
+    expect(mockGenerateResponse).toHaveBeenNthCalledWith(2, 'conv-1', compactedMsgs, expect.objectContaining({ recalledMemories: recalled }));
     expect(mockIsContextFullError).toHaveBeenCalled();
   });
 
   it('falls back to recent messages when compact throws', async () => {
+    const recalled = [{
+      id: 8,
+      scope: 'global',
+      kind: 'preference',
+      sourceType: 'manual',
+      score: 0.7,
+      reason: 'lexical',
+    }];
     mockGenerateResponse
       .mockRejectedValueOnce(new Error('context full'))
       .mockResolvedValueOnce(undefined);
     mockIsContextFullError.mockReturnValue(true);
     mockCompact.mockRejectedValue(new Error('compact failed'));
+    mockSearchMemory.mockResolvedValue([{ memory: { id: 8, title: 'Private preference' }, score: 0.7 }]);
+    mockFormatRecallSummaries.mockReturnValue(recalled);
     (llmService.stopGeneration as jest.Mock).mockResolvedValue(undefined);
     mockClearKVCache.mockResolvedValue(undefined);
 
@@ -1314,6 +1798,7 @@ describe('generateWithCompactionRetry — context full error path', () => {
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
     expect(mockClearKVCache).toHaveBeenCalledWith(true);
     expect(mockGenerateResponse).toHaveBeenCalledTimes(2);
+    expect(mockGenerateResponse.mock.calls[1][2]).toEqual(expect.objectContaining({ recalledMemories: recalled }));
   });
 });
 
@@ -1338,9 +1823,62 @@ describe('applyCompactionPrefix — compaction state', () => {
     const deps = makeGenerationDeps();
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'new message' });
     // Should have included compaction summary in messages
-    expect(mockGenerateResponse).toHaveBeenCalledWith('conv-1', expect.arrayContaining([
-      expect.objectContaining({ id: 'compaction-summary' }),
-    ]));
+    expect(mockGenerateResponse).toHaveBeenCalledWith(
+      'conv-1',
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'compaction-summary' }),
+      ]),
+      expect.objectContaining({ recalledMemories: [] }),
+    );
+  });
+
+  it('omits persisted compaction summaries for remote generation', async () => {
+    useRemoteServerStore.setState({ activeServerId: 'srv-1', activeRemoteTextModelId: 'gpt-4' });
+    const msgs = [
+      { id: 'm1', role: 'user', content: 'old message', timestamp: 0 },
+      { id: 'm2', role: 'assistant', content: 'old reply', timestamp: 0 },
+      { id: 'm3', role: 'user', content: 'new message', timestamp: 0 },
+    ];
+    const conv = {
+      id: 'conv-1',
+      compactionSummary: 'PRIVATE TAX MEMORY summary',
+      compactionCutoffMessageId: 'm2',
+      messages: msgs,
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    const deps = makeGenerationDeps({
+      activeModelInfo: { isRemote: true, model: null, modelId: 'gpt-4', modelName: 'GPT-4' },
+      activeModel: null,
+    });
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'new message' });
+
+    const messages = mockGenerateResponse.mock.calls[0][1];
+    expect(messages.find((m: { id?: string }) => m.id === 'compaction-summary')).toBeUndefined();
+    expect(JSON.stringify(messages)).not.toContain('PRIVATE TAX MEMORY');
+  });
+
+  it('omits persisted compaction summaries when conversation memory is disabled', async () => {
+    const msgs = [
+      { id: 'm1', role: 'user', content: 'old message', timestamp: 0 },
+      { id: 'm2', role: 'assistant', content: 'old reply', timestamp: 0 },
+      { id: 'm3', role: 'user', content: 'new message', timestamp: 0 },
+    ];
+    const conv = {
+      id: 'conv-1',
+      memoryEnabled: false,
+      compactionSummary: 'PRIVATE TAX MEMORY summary',
+      compactionCutoffMessageId: 'm2',
+      messages: msgs,
+    };
+    mockChatStoreGetState.mockReturnValue({ conversations: [conv], updateCompactionState: jest.fn() });
+    const deps = makeGenerationDeps();
+
+    await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'new message' });
+
+    const messages = mockGenerateResponse.mock.calls[0][1];
+    expect(messages.find((m: { id?: string }) => m.id === 'compaction-summary')).toBeUndefined();
+    expect(JSON.stringify(messages)).not.toContain('PRIVATE TAX MEMORY');
   });
 
   it('includes all messages when cutoffMessageId is not found', async () => {
@@ -1355,5 +1893,26 @@ describe('applyCompactionPrefix — compaction state', () => {
     const deps = makeGenerationDeps();
     await startGenerationFn(deps, { setDebugInfo: jest.fn(), targetConversationId: 'conv-1', messageText: 'hi' });
     expect(mockGenerateResponse).toHaveBeenCalled();
+  });
+});
+
+describe('resolveBaseSystemPrompt', () => {
+  it('picks the local default for an on-device model', () => {
+    expect(resolveBaseSystemPrompt(undefined, false)).toBe(APP_CONFIG.defaultSystemPrompt);
+  });
+
+  it('picks the remote default for a remote endpoint', () => {
+    expect(resolveBaseSystemPrompt(undefined, true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
+  });
+
+  it('always honours a user/project custom prompt, local or remote', () => {
+    const custom = 'You are Bob. Talk like a pirate.';
+    expect(resolveBaseSystemPrompt(custom, false)).toBe(custom);
+    expect(resolveBaseSystemPrompt(custom, true)).toBe(custom);
+  });
+
+  it('treats an empty custom prompt as unset and falls back to the default', () => {
+    expect(resolveBaseSystemPrompt('', false)).toBe(APP_CONFIG.defaultSystemPrompt);
+    expect(resolveBaseSystemPrompt('', true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
   });
 });

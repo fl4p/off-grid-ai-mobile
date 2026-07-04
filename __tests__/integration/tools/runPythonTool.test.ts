@@ -39,7 +39,7 @@ import { executeToolCall } from '../../../src/services/tools/handlers';
 import { getToolsAsOpenAISchema, AVAILABLE_TOOLS } from '../../../src/services/tools/registry';
 import { pythonRuntimeService } from '../../../src/services/python/pythonRuntimeService';
 import { usePythonRuntimeStore } from '../../../src/stores/pythonRuntimeStore';
-import { PYODIDE_VERSION, PYTHON_RUNTIME_MARKER_FILE } from '../../../src/services/python/pyodideManifest';
+import { PYODIDE_VERSION, PYODIDE_MANIFEST_REVISION, PYTHON_RUNTIME_MARKER_FILE } from '../../../src/services/python/pyodideManifest';
 
 const MARKER_PATH = `/docs/pyodide-runtime/${PYTHON_RUNTIME_MARKER_FILE}`;
 
@@ -101,19 +101,26 @@ describe('run_python tool integration', () => {
   it('is exposed to the model through the OpenAI tool schema', () => {
     expect(AVAILABLE_TOOLS.some(t => t.id === 'run_python')).toBe(true);
     const schema = getToolsAsOpenAISchema(['run_python']);
-    expect(schema).toHaveLength(1);
-    expect(schema[0].function.name).toBe('run_python');
-    expect(schema[0].function.parameters.required).toEqual(['code']);
+    const py = schema.find(s => s.function.name === 'run_python')!;
+    expect(py).toBeTruthy();
+    expect(py.function.parameters.required).toEqual(['code']);
+    // Enabling Python also unlocks its filesystem companions in the schema.
+    expect(schema.map(s => s.function.name)).toEqual(
+      expect.arrayContaining(['read_file', 'write_file', 'edit_file', 'list_files', 'grep']),
+    );
   });
 
-  it('returns an install hint when the runtime is missing', async () => {
+  it('kicks off a download and returns an updating hint when the runtime is missing', async () => {
     const result = await executeToolCall({ id: 'c1', name: 'run_python', arguments: { code: 'print(1)' } });
     expect(result.error).toBeUndefined();
-    expect(result.content).toContain('not installed');
+    // Enabled-but-not-installed now self-heals: the handler starts the update and
+    // tells the model it is updating (was the misleading 'not installed' hint).
+    expect(result.content).toContain('updating');
+    expect(result.content).toContain('Settings > Tools');
   });
 
   it('executes code end-to-end through the injection protocol', async () => {
-    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION });
+    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION });
 
     const result = await callToolWithFakePage(
       { id: 'c2', name: 'run_python', arguments: { code: 'print(sum(range(11)))' } },
@@ -127,7 +134,7 @@ describe('run_python tool integration', () => {
   });
 
   it('carries python exceptions back to the model', async () => {
-    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION });
+    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION });
 
     const result = await callToolWithFakePage(
       { id: 'c3', name: 'run_python', arguments: { code: '1/0' } },
@@ -145,7 +152,7 @@ describe('run_python tool integration', () => {
   });
 
   it('keeps interpreter state warm across sequential tool calls', async () => {
-    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION });
+    mockFiles[MARKER_PATH] = JSON.stringify({ version: PYODIDE_VERSION, revision: PYODIDE_MANIFEST_REVISION });
     const codes: string[] = [];
     const run = (code: string) => {
       codes.push(code);

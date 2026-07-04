@@ -29,6 +29,14 @@ jest.mock('react-native-edge-to-edge', () => ({
   NavigationBar: () => null,
 }));
 
+// react-native-webview reaches a native TurboModule at import; stub it so any
+// suite that pulls in a screen using it (HtmlPreview, PythonRuntimeHost, or the
+// whole navigator) loads. Tests that assert WebView props override this locally.
+jest.mock('react-native-webview', () => ({
+  __esModule: true,
+  WebView: () => null,
+}));
+
 // ============================================================================
 // AsyncStorage Mock
 // ============================================================================
@@ -489,6 +497,17 @@ jest.mock('lottie-react-native', () => 'LottieView');
 
 // react-native-linear-gradient mock
 jest.mock('react-native-linear-gradient', () => 'LinearGradient');
+
+// react-native-mathjax-svg bundles the full MathJax es5 build and ships ESM that
+// jest won't transform; mock it with a Text node echoing the TeX so math tokens
+// render deterministically in tests without loading MathJax.
+jest.mock('react-native-mathjax-svg', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  const MathJax = ({ children, color }: { children?: string; color?: string }) =>
+    React.createElement(Text, { testID: 'mathjax', style: { color } }, children);
+  return { __esModule: true, default: MathJax, texToSvg: (tex: string) => tex };
+});
 
 // moti mock (kept for any transitive imports)
 jest.mock('moti', () => ({

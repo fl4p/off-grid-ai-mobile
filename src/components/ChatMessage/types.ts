@@ -4,6 +4,8 @@ export interface ChatMessageProps {
   message: Message;
   isStreaming?: boolean;
   onImagePress?: (uri: string) => void;
+  /** Open an HTML file the agent wrote in the in-app preview (path is workspace-relative). */
+  onOpenHtml?: (path: string) => void;
   onCopy?: (content: string) => void;
   onRetry?: (message: Message) => void;
   onEdit?: (message: Message, newContent: string) => void;

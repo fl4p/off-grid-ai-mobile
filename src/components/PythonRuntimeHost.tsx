@@ -75,6 +75,14 @@ export const PythonRuntimeHost: React.FC = () => {
           pythonRuntimeService.notifyExecutorCrashed('WebView render process gone');
           return true;
         }}
+        // A page-load failure (bad origin, 404 for the served page, iOS ATS block)
+        // would otherwise be invisible until the boot timeout — surface it now.
+        onError={(e: { nativeEvent: { description?: string; code?: number } }) =>
+          pythonRuntimeService.notifyLoadError(`${e.nativeEvent.description ?? 'load error'} (code ${e.nativeEvent.code ?? '?'})`)
+        }
+        onHttpError={(e: { nativeEvent: { statusCode?: number; url?: string } }) =>
+          pythonRuntimeService.notifyLoadError(`HTTP ${e.nativeEvent.statusCode ?? '?'} loading ${e.nativeEvent.url ?? 'page'}`)
+        }
         javaScriptEnabled
         allowsBackForwardNavigationGestures={false}
         setSupportMultipleWindows={false}

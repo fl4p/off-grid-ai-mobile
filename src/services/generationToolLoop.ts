@@ -17,6 +17,10 @@ import type { GenerationOptions, CompletionResult } from './providers/types';
 import logger from '../utils/logger';
 const MAX_TOOL_ITERATIONS = 3;
 const MAX_TOTAL_TOOL_CALLS = 5;
+// Upper bound on how far mid-turn steering can extend the loop, so repeated
+// steering can't spin the model indefinitely within a single turn.
+const MAX_STEERED_ITERATIONS = MAX_TOOL_ITERATIONS * 4;
+const MAX_STEERED_TOTAL_CALLS = MAX_TOTAL_TOOL_CALLS * 4;
 // On-device: above this many tools, run a fast routing pass to pick the relevant ones
 // before generating (small models can't fit many schemas in context). Tunable.
 const TOOL_SELECTION_THRESHOLD = 5;
@@ -143,14 +147,16 @@ function parseGemmaNativeToolCalls(text: string): { cleanText: string; toolCalls
   return { cleanText: cleanText.trim(), toolCalls };
 }
 
-/** Parse <invoke name="fn"><parameter name="k">v</parameter></invoke> blocks (minimax, Anthropic-style). */
+/** Parse <invoke name="fn"><parameter name="k">v</parameter></invoke> blocks (minimax, Anthropic-style).
+ *  The `[^>]*` after name tolerates extra attributes some models add, e.g. DeepSeek's
+ *  `<parameter name="code" string="true">`. */
 function parseInvokeBlocks(text: string, toolCalls: ToolCall[], matchedRanges: [number, number][]): void {
-  const invokePattern = /<invoke\s+name="([^"]+)">([\s\S]*?)<\/invoke>/g;
+  const invokePattern = /<invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/invoke>/g;
   let match;
   while ((match = invokePattern.exec(text)) !== null) {
     const name = match[1];
     const args: Record<string, any> = {};
-    const paramPattern = /<parameter\s+name="([^"]+)">([\s\S]*?)<\/parameter>/g;
+    const paramPattern = /<parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/parameter>/g;
     let pm;
     while ((pm = paramPattern.exec(match[2])) !== null) { args[pm[1]] = pm[2].trim(); }
     toolCalls.push({ id: `text-tc-${Date.now()}-${toolCalls.length}`, name, arguments: args });
@@ -158,8 +164,25 @@ function parseInvokeBlocks(text: string, toolCalls: ToolCall[], matchedRanges: [
   }
 }
 
+/**
+ * DeepSeek wraps tool-call tags in its DSML special token using fullwidth pipes,
+ * e.g. `<｜｜DSML｜｜invoke name="run_python">…</｜｜DSML｜｜invoke>`. Strip the marker
+ * (and the now-plain outer <tool_calls> wrapper) so the tags reduce to the standard
+ * <invoke>/<parameter> forms the parser below already understands.
+ */
+const DSML_MARKER = /｜{1,2}DSML｜{1,2}/g;
+function hasDsmlMarkup(text: string): boolean {
+  return /｜{1,2}DSML/.test(text);
+}
+function stripDsmlMarker(text: string): string {
+  if (!hasDsmlMarkup(text)) return text;
+  return text.replace(DSML_MARKER, '').replace(/<\/?tool_calls>/g, '');
+}
+
 /** Parse tool calls from text output (fallback for small models). Supports JSON, XML, and invoke formats. */
 export function parseToolCallsFromText(text: string): { cleanText: string; toolCalls: ToolCall[] } {
+  // Normalize DeepSeek's DSML-wrapped tags to the standard <invoke>/<parameter> forms first.
+  text = stripDsmlMarker(text);
   const toolCalls: ToolCall[] = [];
   const matchedRanges: [number, number][] = [];
 
@@ -203,6 +226,15 @@ export function parseToolCallsFromText(text: string): { cleanText: string; toolC
   for (const [start, end] of matchedRanges) { cleanText = cleanText.slice(0, start) + cleanText.slice(end); }
   return { cleanText: cleanText.trim(), toolCalls };
 }
+/**
+ * A steering message split into its two forms, mirroring the normal send path:
+ * `display` is the short user-typed text shown in the chat bubble; `forModel`
+ * carries the full context (e.g. appended document text) sent to the model.
+ */
+export interface SteeringMessage {
+  display: Message;
+  forModel: Message;
+}
 export interface ToolLoopCallbacks {
   onToolCallStart?: (name: string, args: Record<string, any>) => void;
   onToolCallComplete?: (name: string, result: ToolResult) => void;
@@ -221,6 +253,13 @@ export interface ToolLoopContext {
   onFinalResponse: (content: string) => void;
   /** Reports the tool names sent to the model this turn (built-in + routed MCP/ext). */
   onToolsRouted?: (names: string[]) => void;
+  /** Mid-turn steering: return user messages queued for this conversation while the
+   *  loop was running, so they can be folded into the current turn between tool
+   *  calls. Returns [] when there is nothing to inject. Each entry keeps the
+   *  display and model-context forms separate (see SteeringMessage). */
+  drainSteeringMessages?: () => SteeringMessage[];
+  /** Notifies that `count` steering messages were injected (e.g. to reset UI thinking state). */
+  onSteering?: (count: number) => void;
   forceRemote?: boolean;
 }
 function normalizeStreamChunk(data: StreamChunk): StreamToken {
@@ -231,14 +270,48 @@ function getLastUserQuery(messages: Message[]): string {
     if (messages[i].role === 'user' && messages[i].content.trim()) return messages[i].content.trim();
   return '';
 }
-async function executeToolCalls(ctx: ToolLoopContext, toolCalls: import('./tools/types').ToolCall[], loopMessages: Message[]): Promise<void> {
+
+function getSchemaToolName(schema: any): string | undefined {
+  return typeof schema?.function?.name === 'string' ? schema.function.name : undefined;
+}
+
+function buildAllowedToolNameSet(schemas: any[]): Set<string> {
+  return new Set(schemas.map(getSchemaToolName).filter(Boolean) as string[]);
+}
+
+function isToolCallAllowed(name: string, allowedToolNames: Set<string>): boolean {
+  return allowedToolNames.has(name);
+}
+
+function filterAllowedToolCalls(toolCalls: ToolCall[], allowedToolNames: Set<string>): ToolCall[] {
+  const allowed: ToolCall[] = [];
+  for (const toolCall of toolCalls) {
+    if (isToolCallAllowed(toolCall.name, allowedToolNames)) {
+      allowed.push(toolCall);
+    } else {
+      logger.warn(`[ToolLoop] Ignoring unavailable tool call: ${toolCall.name}`);
+    }
+  }
+  return allowed;
+}
+
+type ToolExecutionState = {
+  loopMessages: Message[];
+  allowedToolNames: Set<string>;
+};
+
+async function executeToolCalls(ctx: ToolLoopContext, toolCalls: import('./tools/types').ToolCall[], state: ToolExecutionState): Promise<void> {
   const chatStore = useChatStore.getState();
   const exts = getToolExtensions();
   for (const tc of toolCalls) {
     if (ctx.isAborted()) break;
+    if (!isToolCallAllowed(tc.name, state.allowedToolNames)) {
+      logger.warn(`[ToolLoop] Skipping unavailable tool execution: ${tc.name}`);
+      continue;
+    }
     // Small models often call web_search with empty args — use user's message as fallback
     if (tc.name === 'web_search' && (!tc.arguments.query || typeof tc.arguments.query !== 'string' || !tc.arguments.query.trim())) {
-      const fallbackQuery = getLastUserQuery(loopMessages);
+      const fallbackQuery = getLastUserQuery(state.loopMessages);
       if (fallbackQuery) {
         tc.arguments = { ...tc.arguments, query: fallbackQuery };
       }
@@ -255,7 +328,7 @@ async function executeToolCalls(ctx: ToolLoopContext, toolCalls: import('./tools
       // Media the tool produced for the user (e.g. run_python matplotlib plots).
       attachments: result.attachments,
     };
-    loopMessages.push(toolResultMsg);
+    state.loopMessages.push(toolResultMsg);
     chatStore.addMessage(ctx.conversationId, toolResultMsg);
   }
 }
@@ -268,7 +341,7 @@ function isNonRetryableError(msg: string): boolean {
 /** Call remote LLM provider with tools */
 async function callRemoteLLMWithTools(
   messages: Message[], tools: any[],
-  opts?: { onStream?: (data: StreamToken) => void; disableThinking?: boolean },
+  opts?: { onStream?: (data: StreamToken) => void; disableThinking?: boolean; toolChoice?: 'auto' | 'none' },
 ): Promise<{ fullResponse: string; toolCalls: ToolCall[] }> {
   const activeServerId = useRemoteServerStore.getState().activeServerId;
   if (!activeServerId) throw new Error('No remote provider active');
@@ -276,7 +349,7 @@ async function callRemoteLLMWithTools(
   if (!provider) throw new Error('Remote provider not found');
   const settings = useAppStore.getState().settings;
   const thinkingEnabled = !opts?.disableThinking && settings.thinkingEnabled && provider.capabilities.supportsThinking;
-  const options: GenerationOptions = { temperature: settings.temperature, maxTokens: settings.maxTokens, topP: settings.topP, tools, enableThinking: thinkingEnabled };
+  const options: GenerationOptions = { temperature: settings.temperature, maxTokens: settings.maxTokens, topP: settings.topP, tools, toolChoice: opts?.toolChoice, enableThinking: thinkingEnabled };
   let _fullContent = '', toolCalls: ToolCall[] = [];
   const onStream = opts?.onStream;
   return new Promise((resolve, reject) => {
@@ -311,12 +384,12 @@ async function callRemoteLLMWithTools(
 async function callLocalWithRetry(
   messages: Message[],
   tools: any[],
-  onStream?: (data: StreamToken) => void,
+  opts?: { onStream?: (data: StreamToken) => void; toolChoice?: 'auto' | 'none' },
 ): Promise<{ fullResponse: string; toolCalls: ToolCall[] }> {
   let lastError: any;
   for (let attempt = 0; attempt < MAX_LLM_RETRIES; attempt++) {
     try {
-      return await llmService.generateResponseWithTools(messages, { tools, onStream });
+      return await llmService.generateResponseWithTools(messages, { tools, toolChoice: opts?.toolChoice, onStream: opts?.onStream });
     } catch (e: any) {
       lastError = e;
       const msg = e?.message || String(e) || '';
@@ -370,12 +443,16 @@ export function buildLiteRTHistory(messages: Message[]): Array<{ role: 'user' | 
     .filter(h => h.content.trim() !== '');
 }
 
-function buildLiteRTToolCallHandler(ctx: ToolLoopContext, conversationId: string) {
+function buildLiteRTToolCallHandler(ctx: ToolLoopContext, conversationId: string, allowedToolNames: Set<string>) {
   // Per-turn counter: this closure is rebuilt once per generation, so it resets each new
   // message and the native loop reuses it for every tool call within the turn.
   let toolCallCount = 0;
   return async (name: string, args: Record<string, unknown>): Promise<string> => {
     if (ctx.isAborted()) return 'Aborted';
+    if (!isToolCallAllowed(name, allowedToolNames)) {
+      logger.warn(`[ToolLoop] LiteRT ignored unavailable tool call: ${name}`);
+      return `Tool "${name}" is not available in this chat. Answer without using it.`;
+    }
     toolCallCount++;
     if (toolCallCount > MAX_LITERT_TOOL_CALLS) {
       return `Tool call limit reached (${MAX_LITERT_TOOL_CALLS} per response). Do not call any more tools. Answer now using the information you already have.`;
@@ -398,6 +475,12 @@ function buildLiteRTToolCallHandler(ctx: ToolLoopContext, conversationId: string
   };
 }
 
+// NOTE: LiteRT runs the whole tool→model cycle natively inside a single
+// generateRaw() call, so runToolLoop's mid-turn steering injection point (between
+// JS iterations) is never reached for LiteRT. Steering messages sent during a
+// LiteRT turn are not lost — they fall back to the post-turn queue drain and
+// become the next turn. Folding steering into an in-flight native loop would
+// require polling drainSteeringMessages inside buildLiteRTToolCallHandler.
 async function callLiteRTForLoop(
   conversationId: string,
   messages: Message[],
@@ -426,7 +509,8 @@ async function callLiteRTForLoop(
     return { fullResponse: '', toolCalls: [] };
   }
   await liteRTService.prepareConversation(conversationId, systemPrompt, { samplerConfig, tools, history });
-  const onToolCall = ctx ? buildLiteRTToolCallHandler(ctx, conversationId) : undefined;
+  const allowedToolNames = buildAllowedToolNameSet(tools);
+  const onToolCall = ctx ? buildLiteRTToolCallHandler(ctx, conversationId, allowedToolNames) : undefined;
   const handlers = {
     onToken: (token: string) => onStream?.({ content: token }),
     onReasoning: (token: string) => onStream?.({ reasoningContent: token }),
@@ -510,13 +594,13 @@ function augmentSystemPromptForTools(
   return [...messages.slice(0, sysIdx), updated, ...messages.slice(sysIdx + 1)];
 }
 
-interface CallLLMOptions { onStream?: (data: StreamToken) => void; forceRemote?: boolean; disableThinking?: boolean; conversationId?: string; ctx?: ToolLoopContext; }
+interface CallLLMOptions { onStream?: (data: StreamToken) => void; forceRemote?: boolean; disableThinking?: boolean; conversationId?: string; ctx?: ToolLoopContext; toolChoice?: 'auto' | 'none'; }
 
 /** Call LLM with retry+backoff for transient native context errors. */
 async function callLLMWithRetry(
   messages: Message[],
   tools: any[],
-  { onStream, forceRemote, disableThinking, conversationId, ctx }: CallLLMOptions = {},
+  { onStream, forceRemote, disableThinking, conversationId, ctx, toolChoice }: CallLLMOptions = {},
 ): Promise<{ fullResponse: string; toolCalls: ToolCall[] }> {
   // Append tool-use behavioral guidance to the system prompt when tools are present.
   // Only covers the "when and how" — schemas are injected separately by each engine.
@@ -537,16 +621,17 @@ async function callLLMWithRetry(
     return callLiteRTForLoop(conversationId, augmentedMessages, { tools, onStream, ctx });
   }
   if (useRemote) {
-    try { return await callRemoteLLMWithTools(augmentedMessages, tools, { onStream, disableThinking }); }
+    try { return await callRemoteLLMWithTools(augmentedMessages, tools, { onStream, disableThinking, toolChoice }); }
     catch (e: any) { throw new Error(e?.message || String(e) || 'Remote LLM error'); }
   }
-  return callLocalWithRetry(augmentedMessages, tools, onStream);
+  return callLocalWithRetry(augmentedMessages, tools, { onStream, toolChoice });
 }
 
 /** Detect if text contains any tool call pattern (various model formats). */
 function containsToolCallMarkup(text: string): boolean {
   return text.includes('<tool_call>') ||
     text.includes('<invoke') ||
+    hasDsmlMarkup(text) ||
     /\w+:tool_call/.test(text) ||
     text.includes('<function_call>');
 }
@@ -620,14 +705,88 @@ function emitFinalResponse(ctx: ToolLoopContext, state: ToolLoopState, displayRe
   }
 }
 
-/** Force a final text-only generation (no tools) when iteration/call caps are hit. */
-async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, loopMessages: Message[]): Promise<void> {
+/** Run one forced-final generation pass and return the cleaned result. Clears any
+ *  live-streamed tool-call markup so the caller can replace it with cleaned text. */
+async function runForcedPass(
+  ctx: ToolLoopContext,
+  state: ToolLoopState,
+  req: { loopMessages: Message[]; tools: any[]; toolChoice?: 'auto' | 'none' },
+): Promise<{ effectiveToolCalls: ToolCall[]; displayResponse: string }> {
   state.streamedContent = '';
   state.reasoningContent = '';
+  // NB: firstTokenFired is reset once per forceFinalTextResponse (before pass 1), not
+  // per sub-pass — otherwise a second pass that streams would re-fire onThinkingDone /
+  // onFirstToken for the same logical turn (double-counting any TTFT metric).
+  const onStream = buildStreamHandler(ctx, state);
+  const { fullResponse, toolCalls } = await callLLMWithRetry(req.loopMessages, req.tools, {
+    onStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx, toolChoice: req.toolChoice,
+  });
+  const resolved = resolveToolCalls(fullResponse, toolCalls);
+  if (resolved.effectiveToolCalls.length > 0 && state.streamedContent) {
+    // Leaked markup was streamed live — clear it so cleaned text can replace it.
+    ctx.onStreamReset?.();
+    useChatStore.getState().setStreamingMessage('');
+    state.streamedContent = '';
+  }
+  return resolved;
+}
+
+/**
+ * Explicit "stop and answer" turn for the synthesis pass. DeepSeek-family models
+ * (e.g. opencode zen big-pickle) emit tool-call markup even with NO tools declared
+ * and tool_choice:'none' — the request-level levers don't reach their intent to keep
+ * searching. A direct instruction turn does: it tells the model, in-band, that it has
+ * enough and must write prose now. Kept explicit about the markup so it does not just
+ * emit `<｜｜DSML｜｜…>` tokens that we would then strip to nothing.
+ */
+const FORCE_SYNTHESIS_INSTRUCTION =
+  'Stop searching. You now have enough information. Using only the tool results already gathered above, write your complete final answer for the user now, in plain prose. Do not call any tools and do not output any tool-call syntax.';
+
+/**
+ * Force a final text answer when the iteration/call cap is hit. Guards against a
+ * model that wants to keep calling tools leaking its raw tool-call tokens
+ * (e.g. DeepSeek's `<｜｜DSML｜｜invoke …>`) as visible text, in three layers:
+ *  1. Keep the tools declared and send tool_choice:'none' rather than an empty tools
+ *     array — an empty array turns off the server-side tool-call parser, and a
+ *     compliant endpoint then produces prose instead.
+ *  2. Some endpoints (e.g. opencode zen big-pickle) ignore tool_choice:'none' and
+ *     still emit ONLY tool-call markup with no prose. We're at the cap, so we never
+ *     execute those calls and we strip the markup so raw tokens never reach the user.
+ *  3. When that first pass yields no prose (just stripped markup), retry with no tools
+ *     AND an explicit in-band instruction to stop and synthesize. The request-level
+ *     tool_choice:'none' doesn't reach a DeepSeek model's intent to keep searching, but
+ *     a direct "answer now from what you have" turn does — otherwise the user dead-ends
+ *     on the generic fallback despite the data we gathered.
+ *
+ * Layer 3 is remote-only. LiteRT does native tool calling (no server-side parser gated
+ * on `tools`), so it never has the "endpoint ignored tool_choice" problem; worse, its
+ * message→context rebuild (buildLiteRTSendText/History) keys tool results off a trailing
+ * `tool` run, and dropping `tools` to [] forces a native session reset — so appending the
+ * synthetic instruction turn would strip the very tool results we ask it to synthesize
+ * from. We skip the synthesis pass for LiteRT and let pass 1's result (or the fallback)
+ * stand, which is the pre-existing on-device behavior.
+ */
+async function forceFinalTextResponse(ctx: ToolLoopContext, state: ToolLoopState, req: { loopMessages: Message[]; tools: any[] }): Promise<void> {
   state.firstTokenFired = false;
-  const forcedOnStream = buildStreamHandler(ctx, state);
-  const { fullResponse: forcedResponse } = await callLLMWithRetry(loopMessages, [], { onStream: forcedOnStream, forceRemote: ctx.forceRemote, disableThinking: true, conversationId: ctx.conversationId, ctx });
-  emitFinalResponse(ctx, state, forcedResponse);
+  let { effectiveToolCalls, displayResponse } = await runForcedPass(ctx, state, {
+    loopMessages: req.loopMessages, tools: req.tools, toolChoice: 'none',
+  });
+
+  // The endpoint ignored tool_choice:'none' and returned only tool-call markup. Retry
+  // with no tools and an explicit instruction so it synthesizes from the gathered results.
+  // Remote path only — see layer-3 note above for why LiteRT is excluded.
+  const litertActive = isLiteRTActive() && !!ctx.conversationId;
+  if (!displayResponse && effectiveToolCalls.length > 0 && !litertActive) {
+    const synthMessages: Message[] = [...req.loopMessages, {
+      id: `force-final-${Date.now()}`, role: 'user', content: FORCE_SYNTHESIS_INSTRUCTION, timestamp: Date.now(),
+    }];
+    ({ effectiveToolCalls, displayResponse } = await runForcedPass(ctx, state, {
+      loopMessages: synthMessages, tools: [],
+    }));
+  }
+
+  const finalText = displayResponse || 'I could not find any results for that.';
+  emitFinalResponse(ctx, state, finalText);
 }
 
 /**
@@ -694,19 +853,28 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
   const extSchemas = getToolExtensions().flatMap(e => e.getOpenAISchemas?.() ?? []);
 
   const effectiveSchemas = await selectEffectiveSchemas(ctx, builtInSchemas, extSchemas);
+  const allowedToolNames = buildAllowedToolNameSet(effectiveSchemas);
   ctx.onToolsRouted?.(effectiveSchemas.map((s: any) => s?.function?.name).filter(Boolean));
 
   const loopMessages = [...ctx.messages];
   let totalToolCalls = 0;
+  // Budgets grow when the user steers mid-turn: a fresh instruction deserves a
+  // fresh allowance of tool iterations/calls so the model can actually act on it.
+  // Capped so a steering storm can't loop unbounded.
+  let iterationBudget = MAX_TOOL_ITERATIONS;
+  let totalCallCap = MAX_TOTAL_TOOL_CALLS;
   const state: ToolLoopState = { firstTokenFired: false, thinkingDoneFired: false, streamedContent: '', reasoningContent: '' };
-  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+  for (let iteration = 0; iteration < iterationBudget; iteration++) {
     if (ctx.isAborted()) {
       break;
     }
 
-    // Hit iteration or total-call cap — force one final text-only generation (no tools)
-    if (iteration === MAX_TOOL_ITERATIONS - 1 || totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
-      await forceFinalTextResponse(ctx, state, loopMessages);
+    // Hit iteration or total-call cap — force one final text answer. Tools stay
+    // declared with tool_choice:'none' and any leaked tool-call markup is stripped
+    // from the result (see forceFinalTextResponse) so raw tokens never reach the user.
+    // Caps are the steering-aware mutable budgets (grow when the user steers mid-turn).
+    if (iteration === iterationBudget - 1 || totalToolCalls >= totalCallCap) {
+      await forceFinalTextResponse(ctx, state, { loopMessages, tools: effectiveSchemas });
       return;
     }
 
@@ -717,7 +885,8 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
     const { fullResponse, toolCalls } = await callLLMWithRetry(loopMessages, effectiveSchemas, { onStream, forceRemote: ctx.forceRemote, conversationId: ctx.conversationId, ctx });
 
     const { effectiveToolCalls, displayResponse } = resolveToolCalls(fullResponse, toolCalls);
-    const cappedToolCalls = effectiveToolCalls.slice(0, MAX_TOTAL_TOOL_CALLS - totalToolCalls);
+    const allowedToolCalls = filterAllowedToolCalls(effectiveToolCalls, allowedToolNames);
+    const cappedToolCalls = allowedToolCalls.slice(0, totalCallCap - totalToolCalls);
     totalToolCalls += cappedToolCalls.length;
 
     // No tool calls → model gave a final text response
@@ -749,7 +918,23 @@ export async function runToolLoop(ctx: ToolLoopContext): Promise<void> {
     loopMessages.push(assistantMsg);
     chatStore.addMessage(ctx.conversationId, assistantMsg);
 
-    await executeToolCalls(ctx, cappedToolCalls, loopMessages);
+    await executeToolCalls(ctx, cappedToolCalls, { loopMessages, allowedToolNames });
+
+    // Mid-turn steering: if the user sent messages for this conversation while the
+    // tools ran, fold them into the turn now so the model reacts to them on the
+    // next call (instead of them becoming a separate turn after this one). Skip when
+    // aborted so we don't persist a user turn that will never get a reply. Grant a
+    // fresh iteration/call allowance so the new instruction can actually be acted on.
+    const steeringMessages = ctx.isAborted() ? [] : (ctx.drainSteeringMessages?.() ?? []);
+    if (steeringMessages.length > 0) {
+      for (const steerMsg of steeringMessages) {
+        loopMessages.push(steerMsg.forModel); // full context (incl. attachment text) for the model
+        chatStore.addMessage(ctx.conversationId, steerMsg.display); // short user-typed text in the bubble
+      }
+      iterationBudget = Math.min(iterationBudget + MAX_TOOL_ITERATIONS, MAX_STEERED_ITERATIONS);
+      totalCallCap = Math.min(totalCallCap + MAX_TOTAL_TOOL_CALLS, MAX_STEERED_TOTAL_CALLS);
+      ctx.onSteering?.(steeringMessages.length);
+    }
 
     chatStore.setIsThinking(true);
     // The pause exists to let an on-device llama context settle between the tool

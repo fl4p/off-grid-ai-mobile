@@ -117,6 +117,11 @@ export const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  memorySection: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    minHeight: 150,
+  },
   sectionContent: {
     flex: 1,
   },
@@ -248,5 +253,44 @@ export const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
   kbDocDelete: {
     padding: SPACING.sm,
     marginLeft: SPACING.sm,
+  },
+  memoryRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  memoryPreviewIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginRight: SPACING.md,
+  },
+  memoryPreviewInfo: {
+    flex: 1,
+  },
+  memoryPreviewHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginBottom: SPACING.xs,
+  },
+  memoryPreviewTitle: {
+    ...TYPOGRAPHY.body,
+    color: colors.text,
+    flex: 1,
+    marginRight: SPACING.sm,
+  },
+  memoryPreviewScope: {
+    ...TYPOGRAPHY.labelSmall,
+    color: colors.textMuted,
+  },
+  memoryPreviewBody: {
+    ...TYPOGRAPHY.bodySmall,
+    color: colors.textSecondary,
   },
 });

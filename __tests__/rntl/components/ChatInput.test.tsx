@@ -45,6 +45,7 @@ jest.mock('../../../src/services/documentService', () => ({
   documentService: {
     get isSupported() { return mockIsSupported; },
     get processDocumentFromPath() { return mockProcessDocument; },
+    getSupportedExtensions: () => ['.txt', '.md', '.pdf', '.png', '.jpg'],
   },
 }));
 

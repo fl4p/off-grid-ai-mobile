@@ -1,17 +1,52 @@
 import React, { useCallback, useMemo } from 'react';
 import { Linking, Text } from 'react-native';
-import Markdown from '@ronradtke/react-native-markdown-display';
+import Markdown, { MarkdownIt } from '@ronradtke/react-native-markdown-display';
 import { useTheme } from '../theme';
 import type { ThemeColors } from '../theme';
 import { TYPOGRAPHY, SPACING, FONTS } from '../constants';
+import { markdownItMath } from '../utils/markdownItMath';
+import { MathText } from './MathText';
+import { renderEmojiRuns } from './EmojiText';
+
+/**
+ * markdown-it instance extended with the `$…$` / `$$…$$` math tokenizer. Built
+ * once (identity is stable) so the Markdown component doesn't rebuild its parser
+ * on every render.
+ */
+const markdownItInstance = MarkdownIt({ typographer: true }).use(markdownItMath);
+
+/**
+ * Matches math spans — `$$…$$` / `\[…\]` blocks and `$…$` / `\(…\)` inline — so
+ * they can be left untouched by the asterisk escaping below.
+ */
+const MATH_SPAN_RE =
+  /\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$(?:\\\$|[^$])+?\$/g;
 
 /**
  * Escape asterisks used as multiplication operators (digit*digit) so
  * markdown-it doesn't treat them as emphasis markers.
  * Lookahead handles chains like 5*5*5*5 in a single pass.
  */
-export function preprocessMarkdown(text: string): string {
+function escapeMultiplicationAsterisks(text: string): string {
   return text.replaceAll(/(\d)\*(?=\d)/g, String.raw`$1\*`);
+}
+
+/**
+ * Apply the asterisk escaping only outside math spans — inside `$…$`/`$$…$$` the
+ * asterisk is a TeX operator and must reach MathJax verbatim (escaping it to
+ * `\*` would corrupt the formula).
+ */
+export function preprocessMarkdown(text: string): string {
+  let result = '';
+  let last = 0;
+  for (const match of text.matchAll(MATH_SPAN_RE)) {
+    const index = match.index ?? 0;
+    result += escapeMultiplicationAsterisks(text.slice(last, index));
+    result += match[0];
+    last = index + match[0].length;
+  }
+  result += escapeMultiplicationAsterisks(text.slice(last));
+  return result;
 }
 
 /** Custom link rule — renders as inline Text so it wraps correctly inside list items */
@@ -46,6 +81,13 @@ const selectableRules = {
       {children}
     </Text>
   ),
+  // Mirror the library's default `text` rule but render emoji in the system font
+  // so they show as color emoji instead of the tofu `?` box under monospace Menlo.
+  text: (node: any, _children: any, ...[, styles, inheritedStyles = {}]: any[]) => (
+    <Text key={node.key} style={[inheritedStyles, styles.text]}>
+      {renderEmojiRuns(node.content, node.key)}
+    </Text>
+  ),
   fence: (node: any, _children: any, ...[, styles, inheritedStyles = {}]: any[]) => (
     <Text key={node.key} style={[inheritedStyles, styles.fence]} selectable>
       {trimTrailingNewline(node.content)}
@@ -57,6 +99,24 @@ const selectableRules = {
     </Text>
   ),
 };
+
+const MATH_FONT_SIZE = TYPOGRAPHY.body.fontSize ?? 14;
+
+/**
+ * Render `$…$` / `$$…$$` math tokens (produced by markdownItMath) as MathJax SVG.
+ * node.content holds the raw TeX; MathText handles color, sizing, and the
+ * invalid-TeX fallback.
+ */
+function createMathRules(color: string) {
+  return {
+    math_inline: (node: any) => (
+      <MathText key={node.key} tex={node.content} color={color} fontSize={MATH_FONT_SIZE} />
+    ),
+    math_block: (node: any) => (
+      <MathText key={node.key} tex={node.content} color={color} fontSize={MATH_FONT_SIZE} block />
+    ),
+  };
+}
 
 interface MarkdownTextProps {
   children: string;
@@ -76,13 +136,23 @@ export function MarkdownText({ children, dimmed }: MarkdownTextProps) {
   }, []);
 
   const processed = useMemo(() => preprocessMarkdown(children), [children]);
+  const textColor = dimmed ? colors.textSecondary : colors.text;
   const rules = useMemo(
-    () => ({ link: createLinkRule(handleLinkPress), ...selectableRules }),
-    [handleLinkPress],
+    () => ({
+      link: createLinkRule(handleLinkPress),
+      ...selectableRules,
+      ...createMathRules(textColor),
+    }),
+    [handleLinkPress, textColor],
   );
 
   return (
-    <Markdown style={markdownStyles} onLinkPress={handleLinkPress} rules={rules}>
+    <Markdown
+      style={markdownStyles}
+      onLinkPress={handleLinkPress}
+      rules={rules}
+      markdownit={markdownItInstance}
+    >
       {processed}
     </Markdown>
   );

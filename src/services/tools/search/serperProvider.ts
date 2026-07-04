@@ -1,4 +1,20 @@
-import type { SearchProvider, SearchResult } from './types';
+import type { KeyValidationResult, SearchProvider, SearchResult } from './types';
+
+const SERPER_ENDPOINT = 'https://google.serper.dev/search';
+
+/** Shared request builder so search() and validateSerperKey() stay in sync. */
+function serperRequest(apiKey: string, body: { q: string; num: number }, signal?: AbortSignal): Promise<Response> {
+  return fetch(SERPER_ENDPOINT, {
+    method: 'POST',
+    signal,
+    headers: {
+      'X-API-KEY': apiKey.trim(),
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+}
 
 /** Shape of the Serper (google.serper.dev) response fields we consume. */
 type SerperResponse = {
@@ -23,16 +39,7 @@ export function createSerperProvider(apiKey: string): SearchProvider {
       if (!apiKey.trim()) {
         throw new Error('Serper key is missing. Add it in Settings > Web Search.');
       }
-      const response = await fetch('https://google.serper.dev/search', {
-        method: 'POST',
-        signal,
-        headers: {
-          'X-API-KEY': apiKey.trim(),
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ q: query, num: 10 }),
-      });
+      const response = await serperRequest(apiKey, { q: query, num: 10 }, signal);
       if (response.status === 401 || response.status === 403) {
         throw new Error(`Serper rejected the API key (${response.status}). Check it in Settings > Web Search.`);
       }
@@ -50,6 +57,30 @@ export function createSerperProvider(apiKey: string): SearchProvider {
 
 /** Metadata for the settings UI. */
 export const SERPER_LABEL = 'Serper (Google)';
+
+/**
+ * Check a candidate Serper key with a minimal (num:1) query. Distinguishes a
+ * rejected key (401/403 -> invalid) from a transient failure (offline, rate
+ * limit, 5xx -> unknown) so the UI can tell the user which one happened.
+ */
+export async function validateSerperKey(apiKey: string, signal?: AbortSignal): Promise<KeyValidationResult> {
+  if (!apiKey.trim()) {
+    return { status: 'invalid', message: 'Enter an API key.' };
+  }
+  try {
+    const response = await serperRequest(apiKey, { q: 'ping', num: 1 }, signal);
+    if (response.status === 401 || response.status === 403) {
+      return { status: 'invalid', message: `Serper rejected this key (${response.status}).` };
+    }
+    if (!response.ok) {
+      const detail = await safeErrorDetail(response);
+      return { status: 'unknown', message: `Couldn't verify the key (Serper returned ${response.status})${detail}.` };
+    }
+    return { status: 'valid' };
+  } catch {
+    return { status: 'unknown', message: "Couldn't reach serper.dev to verify the key." };
+  }
+}
 
 /** Best-effort extraction of an error message from a failed response body. */
 async function safeErrorDetail(response: Response): Promise<string> {

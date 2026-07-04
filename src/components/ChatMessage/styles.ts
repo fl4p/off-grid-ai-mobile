@@ -55,6 +55,38 @@ const createBubbleStyles = (colors: ThemeColors) => ({
     color: colors.textSecondary,
     lineHeight: 16,
   },
+  toolPreviewNote: {
+    fontSize: 11,
+    fontFamily: FONTS.mono,
+    color: colors.textMuted,
+    marginBottom: 4,
+  },
+  openHtmlButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'flex-start' as const,
+    gap: 6,
+    marginTop: 6,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: SPACING.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  openHtmlText: {
+    fontSize: 12,
+    color: colors.primary,
+  },
+  memoryRecallItem: {
+    gap: 2,
+    paddingVertical: 4,
+  },
+  memoryRecallMetaText: {
+    fontSize: 11,
+    fontFamily: FONTS.mono,
+    color: colors.textMuted,
+    lineHeight: 16,
+  },
   bubble: {
     maxWidth: '85%' as const,
     borderRadius: 8,

@@ -5,7 +5,9 @@ import Icon from 'react-native-vector-icons/Feather';
 import { AnimatedListItem } from '../../../components/AnimatedListItem';
 import { useTheme, useThemedStyles } from '../../../theme';
 import { createStyles } from '../styles';
-import { Conversation } from '../../../types';
+import { Conversation, DownloadedModel, RemoteModel } from '../../../types';
+import { resolveConversationModelName } from '../../conversationModelLabel';
+import { useProjectStore } from '../../../stores';
 import { getLastVisibleMessage } from '../../../utils/messageContent';
 
 function formatDate(dateStr: string): string {
@@ -31,6 +33,8 @@ type Props = {
   onContinueChat: (conversationId: string) => void;
   onDeleteConversation: (conversation: Conversation) => void;
   onSeeAll: () => void;
+  downloadedModels: DownloadedModel[];
+  discoveredModels: Record<string, RemoteModel[]>;
 };
 
 export const RecentConversations: React.FC<Props> = ({
@@ -39,9 +43,12 @@ export const RecentConversations: React.FC<Props> = ({
   onContinueChat,
   onDeleteConversation,
   onSeeAll,
+  downloadedModels,
+  discoveredModels,
 }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
+  const getProject = useProjectStore(state => state.getProject);
 
   const renderRightActions = (conversation: Conversation) => (
     <TouchableOpacity
@@ -61,44 +68,67 @@ export const RecentConversations: React.FC<Props> = ({
           <Text style={styles.seeAll}>See all</Text>
         </TouchableOpacity>
       </View>
-      {conversations.map((conv, index) => (
-        <Swipeable
-          key={conv.id}
-          renderRightActions={() => renderRightActions(conv)}
-          overshootRight={false}
-          containerStyle={styles.swipeableContainer}
-        >
-          <AnimatedListItem
-            index={index}
-            staggerMs={40}
-            trigger={focusTrigger}
-            style={styles.conversationItem}
-            onPress={() => onContinueChat(conv.id)}
-            testID={`conversation-item-${index}`}
+      {conversations.map((conv, index) => {
+        const modelName = resolveConversationModelName(conv, downloadedModels, discoveredModels);
+        const projectName = conv.projectId ? getProject(conv.projectId)?.name : undefined;
+        return (
+          <Swipeable
+            key={conv.id}
+            renderRightActions={() => renderRightActions(conv)}
+            overshootRight={false}
+            containerStyle={styles.swipeableContainer}
           >
-            <View style={styles.conversationInfo}>
-              <View style={styles.conversationHeader}>
-                <Text style={styles.conversationTitle} numberOfLines={1}>
-                  {conv.title}
-                </Text>
-                <Text style={styles.conversationMeta}>
-                  {formatDate(conv.updatedAt)}
-                </Text>
-              </View>
-              {(() => {
-                const lastMsg = getLastVisibleMessage(conv.messages);
-                if (!lastMsg) return null;
-                return (
-                  <Text style={styles.conversationPreview} numberOfLines={1}>
-                    {lastMsg.role === 'user' ? 'You: ' : ''}{lastMsg.content}
+            <AnimatedListItem
+              index={index}
+              staggerMs={40}
+              trigger={focusTrigger}
+              style={styles.conversationItem}
+              onPress={() => onContinueChat(conv.id)}
+              testID={`conversation-item-${index}`}
+            >
+              <View style={styles.conversationInfo}>
+                <View style={styles.conversationHeader}>
+                  <Text style={styles.conversationTitle} numberOfLines={1}>
+                    {conv.title}
                   </Text>
-                );
-              })()}
-            </View>
-            <Icon name="chevron-right" size={14} color={colors.textMuted} />
-          </AnimatedListItem>
-        </Swipeable>
-      ))}
+                  <Text style={styles.conversationMeta}>
+                    {formatDate(conv.updatedAt)}
+                  </Text>
+                </View>
+                {(() => {
+                  const lastMsg = getLastVisibleMessage(conv.messages);
+                  if (!lastMsg) return null;
+                  return (
+                    <Text style={styles.conversationPreview} numberOfLines={1}>
+                      {lastMsg.role === 'user' ? 'You: ' : ''}{lastMsg.content}
+                    </Text>
+                  );
+                })()}
+                {(modelName || projectName) && (
+                  <View style={styles.conversationModelRow}>
+                    {modelName && (
+                      <>
+                        <Icon name="layers" size={10} color={colors.textMuted} style={styles.conversationModelIcon} />
+                        <Text style={styles.conversationModelName} numberOfLines={1}>{modelName}</Text>
+                      </>
+                    )}
+                    {modelName && projectName && (
+                      <Text style={styles.conversationMetaSeparator}>·</Text>
+                    )}
+                    {projectName && (
+                      <>
+                        <Icon name="folder" size={10} color={colors.primary} style={styles.conversationProjectIcon} />
+                        <Text style={styles.conversationProjectName} numberOfLines={1}>{projectName}</Text>
+                      </>
+                    )}
+                  </View>
+                )}
+              </View>
+              <Icon name="chevron-right" size={14} color={colors.textMuted} />
+            </AnimatedListItem>
+          </Swipeable>
+        );
+      })}
     </View>
   );
 };

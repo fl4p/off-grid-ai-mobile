@@ -264,6 +264,8 @@ describe('appStore', () => {
       expect(settings.topP).toBe(0.9);
       expect(settings.contextLength).toBe(4096);
       expect(settings.imageGenerationMode).toBe('auto');
+      expect(settings.memoryAutoCaptureEnabled).toBe(false);
+      expect(settings.memoryAutoSaveEnabled).toBe(false);
       // Test env is iOS, so GPU is enabled by default
       expect(settings.enableGpu).toBe(true);
     });
@@ -309,6 +311,21 @@ describe('appStore', () => {
       expect(settings.imageSteps).toBe(30);
       expect(settings.imageGuidanceScale).toBe(8.5);
       expect(settings.imageWidth).toBe(768);
+    });
+
+    it('supports full-auto memory only while auto-capture is enabled', () => {
+      const { updateSettings } = useAppStore.getState();
+
+      updateSettings({ memoryAutoSaveEnabled: true });
+      expect(getAppState().settings.memoryAutoSaveEnabled).toBe(false);
+
+      updateSettings({ memoryAutoCaptureEnabled: true, memoryAutoSaveEnabled: true });
+      expect(getAppState().settings.memoryAutoCaptureEnabled).toBe(true);
+      expect(getAppState().settings.memoryAutoSaveEnabled).toBe(true);
+
+      updateSettings({ memoryAutoCaptureEnabled: false });
+      expect(getAppState().settings.memoryAutoCaptureEnabled).toBe(false);
+      expect(getAppState().settings.memoryAutoSaveEnabled).toBe(false);
     });
   });
 
@@ -1272,6 +1289,17 @@ describe('appStore', () => {
       );
       // Should be set to something (not undefined)
       expect(result.settings.inferenceBackend).toBeDefined();
+    });
+
+    it('clears stale full-auto memory when auto-capture is disabled', () => {
+      const merge = getMergeFn();
+      const result = merge(
+        { settings: { memoryAutoCaptureEnabled: false, memoryAutoSaveEnabled: true } },
+        useAppStore.getState(),
+      );
+
+      expect(result.settings.memoryAutoCaptureEnabled).toBe(false);
+      expect(result.settings.memoryAutoSaveEnabled).toBe(false);
     });
 
     it('resets checklistDismissed when checklist is incomplete', () => {

@@ -130,6 +130,78 @@ describe('buildGenerationMetaImpl — remote provider path', () => {
     expect(meta.modelName).toBe('Remote Model');
     expect(meta.tokensPerSecond).toBeUndefined();
   });
+
+  it('does not attach recall metadata to remote generation metadata', () => {
+    const { useRemoteServerStore } = require('../../../src/stores');
+    useRemoteServerStore.getState.mockReturnValue({
+      getActiveServer: () => ({ name: 'Remote Server' }),
+      activeServerId: 'srv-1',
+      updateServerHealth: jest.fn(),
+    });
+
+    const svc = {
+      isUsingRemoteProvider: () => true,
+      state: { streamingContent: 'remote answer', startTime: Date.now() - 1000 },
+      totalReasoningLength: 0,
+      remoteTimeToFirstToken: undefined,
+      currentRuntimeMeta: {
+        recalledMemories: [{
+          id: 7,
+          scope: 'project',
+          kind: 'research_note',
+          sourceType: 'manual',
+          score: 0.72,
+          reason: 'lexical',
+        }],
+      },
+    };
+
+    const meta = buildGenerationMetaImpl(svc);
+
+    expect(meta.gpuBackend).toBe('Remote');
+    expect(meta.recalledMemories).toBeUndefined();
+  });
+});
+
+describe('buildGenerationMetaImpl — memory recall metadata', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('attaches recalled memory summaries without requiring memory bodies', () => {
+    const { llmService } = require('../../../src/services/llm');
+    llmService.getGpuInfo.mockReturnValue({ gpu: false, gpuBackend: 'CPU', gpuLayers: 0 });
+    llmService.getPerformanceStats.mockReturnValue({
+      lastTokensPerSecond: 10,
+      lastDecodeTokensPerSecond: 12,
+      lastTimeToFirstToken: 0.4,
+      lastGenerationTime: 3,
+      lastTokenCount: 30,
+    });
+    mockedGetState.mockReturnValue({
+      downloadedModels: [{ id: 'llm-1', name: 'Llama-3', engine: 'llama' }],
+      activeModelId: 'llm-1',
+      settings: {},
+    });
+
+    const recall = [{
+      id: 7,
+      scope: 'project',
+      kind: 'research_note',
+      sourceType: 'manual',
+      score: 0.72,
+      reason: 'lexical',
+    }];
+    const svc = {
+      isUsingRemoteProvider: () => false,
+      state: { streamingContent: 'answer', startTime: Date.now() - 1000 },
+      currentRuntimeMeta: { recalledMemories: recall },
+    };
+
+    const meta = buildGenerationMetaImpl(svc);
+
+    expect(meta.recalledMemories).toEqual(recall);
+    expect(JSON.stringify(meta.recalledMemories)).not.toContain('Portugal tax note');
+    expect(JSON.stringify(meta.recalledMemories)).not.toContain('matchedTerms');
+  });
 });
 
 describe('buildGenerationMetaImpl — llama.cpp path', () => {

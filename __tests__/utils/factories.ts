@@ -97,6 +97,7 @@ export interface ConversationFactoryOptions {
   id?: string;
   title?: string;
   modelId?: string;
+  serverId?: string;
   messages?: Message[];
   createdAt?: string;
   updatedAt?: string;
@@ -107,6 +108,7 @@ export const createConversation = (options: ConversationFactoryOptions = {}): Co
   id: options.id ?? generateId('conv'),
   title: options.title ?? 'Test Conversation',
   modelId: options.modelId ?? 'test-model-id',
+  serverId: options.serverId,
   messages: options.messages ?? [],
   createdAt: options.createdAt ?? new Date().toISOString(),
   updatedAt: options.updatedAt ?? new Date().toISOString(),

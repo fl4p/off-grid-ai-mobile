@@ -19,11 +19,13 @@ import { PRO_TOOLS_SCREEN } from '../../../src/hooks/useIsProActive';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
+const mockRoute = { params: undefined as { memoryEnabled?: boolean } | undefined };
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
   return {
     ...actual,
     useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
+    useRoute: () => mockRoute,
   };
 });
 
@@ -66,12 +68,15 @@ jest.mock('../../../src/components/CustomAlert', () => {
 
 const mockPythonInstall = jest.fn(async (..._args: any[]) => { });
 const mockPythonRefreshStatus = jest.fn(async (..._args: any[]) => { });
+const mockExportZip = jest.fn(async (..._args: any[]) => 'UEsDBBQ=');
 jest.mock('../../../src/services/python/pythonRuntimeService', () => ({
   pythonRuntimeService: {
     install: (...args: any[]) => mockPythonInstall(...args),
     refreshStatus: (...args: any[]) => mockPythonRefreshStatus(...args),
+    exportProjectZip: (...args: any[]) => mockExportZip(...args),
   },
 }));
+jest.mock('react-native-fs', () => ({ DocumentDirectoryPath: '/docs', writeFile: jest.fn(async () => { }) }));
 
 jest.mock('react-native-vector-icons/Feather', () => {
   const { Text } = require('react-native');
@@ -97,6 +102,7 @@ describe('ToolsScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     _clearScreensForTesting();
+    mockRoute.params = undefined;
     mockEnabledTools = ['web_search', 'calculator'];
     usePythonRuntimeStore.setState({
       status: 'not_installed',
@@ -111,10 +117,15 @@ describe('ToolsScreen', () => {
   });
 
   it('renders the page header and every free tool row', () => {
-    const { getByText, getByTestId } = render(<ToolsScreen />);
+    const { getByText, getByTestId, queryByTestId } = render(<ToolsScreen />);
     expect(getByText('Tools')).toBeTruthy();
     for (const tool of AVAILABLE_TOOLS) {
-      expect(getByTestId(`tool-picker-row-${tool.id}`)).toBeTruthy();
+      if (tool.hidden) {
+        // Hidden companions (Python filesystem tools) are not their own rows.
+        expect(queryByTestId(`tool-picker-row-${tool.id}`)).toBeNull();
+      } else {
+        expect(getByTestId(`tool-picker-row-${tool.id}`)).toBeTruthy();
+      }
     }
   });
 
@@ -145,6 +156,18 @@ describe('ToolsScreen', () => {
     expect(mockUpdateSettings).toHaveBeenCalledWith({
       enabledTools: ['web_search', 'calculator', 'get_current_datetime'],
     });
+  });
+
+  it('hides memory tool rows when chat memory is disabled', () => {
+    mockRoute.params = { memoryEnabled: false };
+    mockEnabledTools = ['web_search', 'search_memory', 'save_memory', 'forget_memory'];
+
+    const { getByTestId, queryByTestId } = render(<ToolsScreen />);
+
+    expect(getByTestId('tool-picker-row-web_search')).toBeTruthy();
+    expect(queryByTestId('tool-picker-row-search_memory')).toBeNull();
+    expect(queryByTestId('tool-picker-row-save_memory')).toBeNull();
+    expect(queryByTestId('tool-picker-row-forget_memory')).toBeNull();
   });
 
   it('navigates back when the back button is pressed', () => {
@@ -204,6 +227,53 @@ describe('ToolsScreen', () => {
       usePythonRuntimeStore.setState({ status: 'downloading', downloadProgress: 0.42 });
       const utils = render(<ToolsScreen />);
       expect(utils.getByText('Downloading Python runtime... 42%')).toBeTruthy();
+    });
+
+    it('shows the export-workspace button only once Python is installed', () => {
+      const notInstalled = render(<ToolsScreen />);
+      expect(notInstalled.queryByTestId('tools-export-workspace')).toBeNull();
+      notInstalled.unmount();
+
+      usePythonRuntimeStore.setState({ status: 'installed' });
+      const installed = render(<ToolsScreen />);
+      expect(installed.getByTestId('tools-export-workspace')).toBeTruthy();
+    });
+
+    it('exports the workspace as a zip and opens the share sheet when tapped', async () => {
+      const { Share } = require('react-native');
+      const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
+      usePythonRuntimeStore.setState({ status: 'installed' });
+      const utils = render(<ToolsScreen />);
+      fireEvent.press(utils.getByTestId('tools-export-workspace'));
+      await waitFor(() => expect(mockExportZip).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(shareSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'file:///docs/python-workspace.zip' }),
+      ));
+      shareSpy.mockRestore();
+    });
+
+    it('shows the short one-line description in the row, not the full model instructions', () => {
+      const utils = render(<ToolsScreen />);
+      expect(utils.getByText(/Run Python 3\.12 on-device with numpy, pandas, and matplotlib/)).toBeTruthy();
+      // The long model-facing description must not wall off the settings list.
+      expect(utils.queryByText(/sandboxed on-device interpreter/)).toBeNull();
+    });
+
+    it('re-downloads automatically when Python is enabled but not installed', async () => {
+      // A bundled-asset update invalidates a prior install: the tool is still
+      // enabled but the runtime is gone. The screen should heal it without the
+      // user having to toggle off and on.
+      mockEnabledTools = ['web_search', 'run_python'];
+      usePythonRuntimeStore.setState({ status: 'not_installed' });
+      render(<ToolsScreen />);
+      await waitFor(() => expect(mockPythonInstall).toHaveBeenCalledTimes(1));
+    });
+
+    it('does not auto-download when Python is not enabled', () => {
+      mockEnabledTools = ['web_search', 'calculator'];
+      usePythonRuntimeStore.setState({ status: 'not_installed' });
+      render(<ToolsScreen />);
+      expect(mockPythonInstall).not.toHaveBeenCalled();
     });
   });
 });
