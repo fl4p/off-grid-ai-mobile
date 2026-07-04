@@ -40,13 +40,12 @@ The runner auto-detects the booted simulator UDID and passes `--device`.
 | `flows/smoke.yaml` | App launches, Home renders, a chat opens (navigation smoke) |
 | `flows/edit-message.yaml` | Long-press a user message → action menu → Edit sheet opens |
 
-### Known issue documented by these flows
+### Text selection in sheets
 Native text selection (tap-to-place-cursor, double-tap word select, dragging the
-selection handles) does **not** work inside `AppSheet` because it is built on RN
-`<Modal>`, which iOS hosts in a separate `UIWindow` that breaks `UITextInteraction`.
-`flows/edit-message.yaml` drives the edit sheet open; a follow-up assertion on
-working selection should be enabled once the AppSheet → in-root-overlay refactor
-lands.
+selection handles) breaks inside an RN `<Modal>`, which iOS hosts in a separate
+`UIWindow`. `AppSheet` therefore supports a `usePortal` prop (used by the edit
+and select-text sheets) that renders into the app's own window via `@gorhom/portal`
+instead of `<Modal>`, which restores selection. Verified with the harness.
 
 ## Adding a flow
 Target elements by `testID` (surfaces as `id:` in Maestro). Dump the current tree

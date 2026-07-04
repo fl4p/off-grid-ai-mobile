@@ -8,6 +8,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { ActivityIndicator, View, StyleSheet, LogBox } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { PortalProvider } from '@gorhom/portal';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { AppNavigator } from './src/navigation';
@@ -293,6 +294,11 @@ function App() {
   return (
     <GestureHandlerRootView style={styles.flex}>
       <SafeAreaProvider>
+        {/* PortalProvider hosts sheets that must render in the app's own window
+            (not an RN <Modal>, which iOS puts in a separate UIWindow that breaks
+            TextInput selection). Placed under SafeAreaProvider so portalled
+            sheets still resolve safe-area insets. */}
+        <PortalProvider>
         <SystemBars style={isDark ? 'light' : 'dark'} />
         {AppRoot ? <AppRoot /> : null}
         <NavigationContainer
@@ -329,6 +335,7 @@ function App() {
           <AppNavigator />
         </NavigationContainer>
         <PythonRuntimeHost />
+        </PortalProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
