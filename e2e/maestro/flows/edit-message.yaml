@@ -1,9 +1,11 @@
 # Editing a chat message: long-press a user message opens the action menu,
 # and "Edit" opens the edit sheet with the message text loaded.
 #
-# NOTE: native text selection inside the edit sheet is a known bug (AppSheet is
-# built on RN <Modal>; see e2e/maestro/README.md). Once the AppSheet overlay
-# refactor lands, add a selection assertion here.
+# Native text selection inside the edit sheet works again since the sheet renders
+# via a Portal instead of an RN <Modal> (see AppSheet `usePortal`). Verified
+# manually with an onSelectionChange probe: tapping mid-text moves the caret
+# (sel -1 -> a mid index). A permanent selection assertion needs a stable a11y
+# signal for the caret, which Maestro doesn't expose cleanly yet.
 appId: ai.offgridmobile
 ---
 - launchApp
