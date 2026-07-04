@@ -5,8 +5,18 @@
 **Never push directly to `main`.** All changes must go through a pull request:
 
 0. Always create a branch specific to the change before committing: `feat/`, `fix/`, `docs/`, `chore/`, `test/`, etc.
-1. Push the branch and open a PR — never `git push origin main`.
+1. Push the branch and open a PR - never `git push origin main`.
 2. If you find yourself on `main`, create a branch first: `git checkout -b <branch-name>`.
+
+### Branch topology (avoid divergence)
+
+Getting this wrong is how `main` and a long-lived integration branch silently forked into a 25-file conflict. Rules:
+
+3. **Branch off `main`, never off another feature branch or an integration branch.** Stacking a PR on unmerged work means its diff carries the parent's commits too.
+4. **Never squash-merge a branch that is based on anything other than `main`.** A squash of a stacked branch pulls the whole hidden lineage into `main` under one title, rewrites SHAs, and makes every sibling branch start conflicting. If a branch must build on another, land the parent first, then rebase onto `main`; only squash a branch whose only ancestor is `main`.
+5. **No long-lived integration branches.** Do not accumulate features on a persistent `integration/*` branch that drifts from `main` - integrate through short-lived PRs into `main` instead. A staging branch, if any, must stay a fast-forward of `main`, never a divergent fork.
+6. **Delete branches on merge, prune stale ones.** A merged branch's content lives on `main`; keeping the branch (or dozens of abandoned ones hundreds of commits behind) only breeds redundant/superseded PRs. Enable auto-delete-on-merge and prune periodically.
+7. **Before opening a PR, check the feature isn't already on `main`** (it may have arrived via an unexpected squash lineage). `git log main..HEAD --oneline` should show only your commits; if `main` already contains the change, close as superseded instead of re-merging.
 
 ## Copy & Content Standards
 
@@ -90,13 +100,19 @@ Always write **both** unit tests and integration tests for new features and sign
 
 Do not consider a feature complete with only unit tests. Integration tests catch wiring bugs, incorrect data flow between layers, and lifecycle issues that unit tests miss.
 
+### Known test blind spots (a passing suite is not proof)
+
+- **The test renderer does not enforce every RN invariant.** RNTL runs on `react-test-renderer`, which does NOT throw "Text strings must be rendered within a `<Text>`" the way the real device renderer does. A guaranteed on-device crash (a bare `0` leaking from `cond && <JSX>` where `cond` is a number) passed the whole suite. Never write `value && <JSX>` with a non-boolean `value`; coerce with `!!(value)` or `value > 0`. An ESLint `react/jsx-no-leaked-render` rule is the real guard here.
+- **Mock the clock in timing tests.** Tests that rewind `lastUpdate` by a fixed delta but read real `Date.now()` for the current time are flaky (e.g. the download-speed EMA tests). Use `jest.spyOn(Date, 'now')` / fake timers so the elapsed interval is deterministic.
+- **Cover hot paths that merges touch.** A duplicated `finalizeStreamingMessage` (double-finalize) slipped through `tsc` and the suite because nothing asserted it runs exactly once. When a success/finalize path is reconciled or refactored, assert call counts (`toHaveBeenCalledTimes(1)`), not just that it happened.
+
 ## Push = Create PR + Address Review
 
 When the user says "push" (or any equivalent like "ship it", "send it", "push this"), follow this full workflow:
 
 ### Before pushing
 0. Write tests for any new or changed logic if they don't already exist.
-1. Run `npm run lint && npx tsc --noEmit && npm test` — fix any failures before continuing.
+1. Run `npm run lint && npx tsc --noEmit && npm test` and fix any failures before continuing. **These gates are NOT enforced by the pre-commit hook** (it only blocks commits to `main`), so running them yourself is mandatory, not optional - broken code will otherwise reach `main`.
 2. Commit all staged changes with a descriptive message.
 3. Ensure you are NOT on `main`. If you are, create an appropriately named branch first: `git checkout -b feat/...` or `fix/...` or `chore/...` etc.
 
@@ -130,6 +146,8 @@ The repo has three automated reviewers on every PR. After pushing, loop until al
 4. Re-run local quality gates (`npm run lint && npm test && npx tsc --noEmit`)
 5. Push fixes, comment `/gemini review` on the PR to re-trigger Gemini
 6. Repeat until all three reviewers pass with no blocking issues
+
+**Do not merge a PR before CI is green.** Merging early is how real defects reached `main` this session (an app-crashing render bug, a regressed button, integrity gaps) - the automated reviewers exist to catch exactly these, so wait for them. The only exception is an explicit user instruction to merge now; if you take it, say plainly that you merged without waiting for CI.
 ## Pulling App Data & Chat Transcripts (debug builds)
 
 Chats persist via zustand -> AsyncStorage; the RAG knowledge base is SQLite. Both are directly readable for E2E verification (e.g. asserting OCR'd attachment text reached the model).
@@ -168,3 +186,4 @@ Several agent sessions work on this repo simultaneously. Rules to avoid stepping
 4. **The primary checkout owns the live app.** Only one session runs Metro (port 8081) and deploys to the simulator/device. Saving files in the primary tree hot-refreshes the running app - mid-edit saves tear it. If you only need tests, use your own worktree.
 5. **Serialize native builds.** Do not run gradle/xcodebuild against the same tree concurrently with another session, and never kill a native build mid-write (this corrupts .cxx/intermediates and costs an hour of rebuilds). Check `ps` for running builds first.
 6. **Coordinate over channels.** Use the channel skill (`/tmp/claude-channels`) to hand off findings, claim files, or request a deploy from the primary-tree owner, instead of editing the same files.
+7. **Claim the issue/PR before you start work on it.** Two sessions independently fixed the same generation bug (`resetAfterGenerationError` vs `tearDownFailedRemoteGeneration`) - wasted effort plus a merge conflict. Before starting on an issue, announce it on the channel (e.g. "claiming #9") and check no one else has; assign yourself on GitHub if possible. Prefer one branch per issue so the same fix does not land twice under different names.
