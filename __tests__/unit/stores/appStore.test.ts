@@ -185,6 +185,68 @@ describe('appStore', () => {
   });
 
   // ============================================================================
+  // Model capabilities cache (issue #42)
+  // ============================================================================
+  describe('modelCapabilities', () => {
+    it('starts empty', () => {
+      expect(getAppState().modelCapabilities).toEqual({});
+    });
+
+    it('setModelCapability stores capability keyed by model id', () => {
+      useAppStore.getState().setModelCapability('gemma', { toolCalling: true, thinking: false });
+
+      expect(getAppState().modelCapabilities.gemma).toEqual({ toolCalling: true, thinking: false });
+    });
+
+    it('setModelCapability overwrites a previous value for the same model', () => {
+      const { setModelCapability } = useAppStore.getState();
+      setModelCapability('gemma', { toolCalling: false, thinking: false });
+      setModelCapability('gemma', { toolCalling: true, thinking: true });
+
+      expect(getAppState().modelCapabilities.gemma).toEqual({ toolCalling: true, thinking: true });
+    });
+
+    it('setModelCapability is a no-op (same object reference) when unchanged', () => {
+      const { setModelCapability } = useAppStore.getState();
+      setModelCapability('gemma', { toolCalling: true, thinking: false });
+      const before = getAppState().modelCapabilities;
+      setModelCapability('gemma', { toolCalling: true, thinking: false });
+
+      expect(getAppState().modelCapabilities).toBe(before);
+    });
+
+    it('removeDownloadedModel drops the cached capability for that model', () => {
+      const { addDownloadedModel, removeDownloadedModel, setModelCapability } = useAppStore.getState();
+      addDownloadedModel(createDownloadedModel({ id: 'gemma' }));
+      setModelCapability('gemma', { toolCalling: true, thinking: false });
+
+      removeDownloadedModel('gemma');
+
+      expect(getAppState().modelCapabilities.gemma).toBeUndefined();
+    });
+
+    it('setDownloadedModels prunes capabilities for models no longer present', () => {
+      const { setDownloadedModels, setModelCapability } = useAppStore.getState();
+      setModelCapability('keep', { toolCalling: true, thinking: false });
+      setModelCapability('gone', { toolCalling: true, thinking: true });
+
+      setDownloadedModels([createDownloadedModel({ id: 'keep' })]);
+
+      expect(getAppState().modelCapabilities.keep).toEqual({ toolCalling: true, thinking: false });
+      expect(getAppState().modelCapabilities.gone).toBeUndefined();
+    });
+
+    it('setDownloadedModels with an empty list keeps cached capabilities (transient scan guard)', () => {
+      const { setDownloadedModels, setModelCapability } = useAppStore.getState();
+      setModelCapability('gemma', { toolCalling: true, thinking: false });
+
+      setDownloadedModels([]);
+
+      expect(getAppState().modelCapabilities.gemma).toEqual({ toolCalling: true, thinking: false });
+    });
+  });
+
+  // ============================================================================
   // Active Model
   // ============================================================================
   describe('activeModel', () => {
