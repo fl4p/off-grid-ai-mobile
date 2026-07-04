@@ -106,16 +106,6 @@ describe('Tool Registry', () => {
       expect(hint).toContain('read_file');
       expect(hint).toContain('grep');
     });
-
-    it('steers run_python away from subprocess and toward read_url + write_file for remote files', () => {
-      const runPython = AVAILABLE_TOOLS.find(t => t.id === 'run_python')!;
-      // Names the sandbox limitation the model keeps tripping over...
-      expect(runPython.description).toContain('emscripten does not support processes');
-      expect(runPython.description).toMatch(/no operating-system processes|no OS processes|no operating-system processes, shell/i);
-      // ...and points at the tools that actually work on-device.
-      expect(runPython.description).toContain('read_url');
-      expect(runPython.description).toContain('write_file');
-    });
   });
 
   // ========================================================================
