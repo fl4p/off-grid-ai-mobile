@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Switch, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import RNFS from 'react-native-fs';
 import { shareLocalFile } from '../../utils/shareFile';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { RouteProp, useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import IconMC from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme, useThemedStyles } from '../../theme';
@@ -14,7 +14,6 @@ import { useAppStore } from '../../stores';
 import { useRemoteServerStore } from '../../stores/remoteServerStore';
 import { usePythonRuntimeStore } from '../../stores/pythonRuntimeStore';
 import { pythonRuntimeService } from '../../services/python/pythonRuntimeService';
-import { ragService } from '../../services/rag';
 import { useOpenProTools } from '../../hooks/useOpenProTools';
 import { CustomAlert, showAlert, hideAlert, AlertState, initialAlertState } from '../../components/CustomAlert';
 import type { ThemeColors, ThemeShadows } from '../../theme';
@@ -51,7 +50,6 @@ export const ToolsScreen: React.FC = () => {
   const pythonProgress = usePythonRuntimeStore(st => st.downloadProgress);
   const [alertState, setAlertState] = useState<AlertState>(initialAlertState);
   const [exportingWorkspace, setExportingWorkspace] = useState(false);
-  const [kbDocCount, setKbDocCount] = useState<number | null>(null);
   // The tool-count warning is about small on-device models getting confused by
   // too many tools; remote (server) models don't have that limitation. Use the
   // validated getter (checks the model still exists in the discovered list) so a
@@ -62,18 +60,6 @@ export const ToolsScreen: React.FC = () => {
   useEffect(() => {
     pythonRuntimeService.refreshStatus().catch(() => { });
   }, []);
-
-  // Refetch on focus (not just mount) so the Knowledge Base count reflects
-  // documents added while this screen stayed mounted under a pushed screen.
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      ragService.getTotalDocumentCount()
-        .then(count => { if (active) setKbDocCount(count); })
-        .catch(() => { });
-      return () => { active = false; };
-    }, []),
-  );
 
   const enableTool = (toolId: string) => {
     const cur = useAppStore.getState().settings.enabledTools || [];
@@ -212,17 +198,9 @@ export const ToolsScreen: React.FC = () => {
         {visibleTools.map(tool => {
           const isEnabled = visibleEnabledTools.includes(tool.id);
           const isPythonDownloading = tool.id === 'run_python' && pythonStatus === 'downloading';
-          const isKnowledgeBase = tool.id === 'search_knowledge_base';
-          let description: string;
-          if (isPythonDownloading) {
-            description = `Downloading Python runtime... ${Math.round(pythonProgress * 100)}%`;
-          } else if (isKnowledgeBase && kbDocCount !== null) {
-            description = kbDocCount === 0
-              ? 'No documents yet'
-              : `${kbDocCount} document${kbDocCount === 1 ? '' : 's'}`;
-          } else {
-            description = tool.uiDescription || tool.description;
-          }
+          const description = isPythonDownloading
+            ? `Downloading Python runtime... ${Math.round(pythonProgress * 100)}%`
+            : (tool.uiDescription || tool.description);
           return (
             <View key={tool.id} style={styles.toolRow} testID={`tool-picker-row-${tool.id}`}>
               <View style={styles.toolIcon}>
