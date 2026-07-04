@@ -123,6 +123,114 @@ describe('hydrateDownloadStore', () => {
     expect(Object.keys(useDownloadStore.getState().downloads).length).toBe(0);
   });
 
+  it('retains a completed main GGUF whose mmproj sidecar is still downloading', async () => {
+    backgroundDownloadService.isAvailable.mockReturnValue(true);
+    backgroundDownloadService.getActiveDownloads.mockResolvedValue([
+      {
+        downloadId: 'dl-parent',
+        modelId: 'author/vision',
+        fileName: 'model.gguf',
+        status: 'completed', // main GGUF finished...
+        bytesDownloaded: 1000,
+        totalBytes: 1000,
+        combinedTotalBytes: 1500,
+        mmProjDownloadId: 'dl-mm',
+        createdAt: 1000,
+      },
+      {
+        downloadId: 'dl-mm',
+        modelId: 'author/vision',
+        fileName: 'model-mmproj.gguf',
+        status: 'running', // ...but the sidecar is still in flight
+        bytesDownloaded: 100,
+        totalBytes: 500,
+        createdAt: 900,
+      },
+    ]);
+
+    await hydrateDownloadStore();
+
+    const state = useDownloadStore.getState();
+    const keys = Object.keys(state.downloads);
+    expect(keys.length).toBe(1); // NOT dropped
+    const entry = state.downloads[keys[0]];
+    // Surfaced as an active download (not 'completed') so the card stays visible
+    // during the mmproj tail, and the main-complete flag is preserved.
+    expect(entry.status).toBe('running');
+    expect(entry.mainDownloadComplete).toBe(true);
+    expect(entry.mmProjStatus).toBe('running');
+    // mmproj events still route to this entry after rehydration.
+    expect(state.downloadIdIndex['dl-mm']).toBe(keys[0]);
+  });
+
+  it('retains a completed main GGUF when the mmproj sidecar is waiting_for_network', async () => {
+    backgroundDownloadService.isAvailable.mockReturnValue(true);
+    backgroundDownloadService.getActiveDownloads.mockResolvedValue([
+      {
+        downloadId: 'dl-parent', modelId: 'author/vision', fileName: 'model.gguf',
+        status: 'completed', bytesDownloaded: 1000, totalBytes: 1000,
+        mmProjDownloadId: 'dl-mm', createdAt: 1000,
+      },
+      {
+        downloadId: 'dl-mm', modelId: 'author/vision', fileName: 'model-mmproj.gguf',
+        status: 'waiting_for_network', bytesDownloaded: 100, totalBytes: 500, createdAt: 900,
+      },
+    ]);
+
+    await hydrateDownloadStore();
+    const keys = Object.keys(useDownloadStore.getState().downloads);
+    expect(keys.length).toBe(1); // still an active tail
+    expect(useDownloadStore.getState().downloads[keys[0]].status).toBe('running');
+  });
+
+  it('drops a completed vision download whose mmproj sidecar has terminally failed', async () => {
+    // A dead sidecar is NOT an active download. Dropping lets restore finalize the
+    // GGUF text-only, rather than showing a misleading "Downloading…" card on resume.
+    backgroundDownloadService.isAvailable.mockReturnValue(true);
+    backgroundDownloadService.getActiveDownloads.mockResolvedValue([
+      {
+        downloadId: 'dl-parent', modelId: 'author/vision', fileName: 'model.gguf',
+        status: 'completed', bytesDownloaded: 1000, totalBytes: 1000,
+        mmProjDownloadId: 'dl-mm', createdAt: 1000,
+      },
+      {
+        downloadId: 'dl-mm', modelId: 'author/vision', fileName: 'model-mmproj.gguf',
+        status: 'failed', bytesDownloaded: 100, totalBytes: 500, createdAt: 900,
+      },
+    ]);
+
+    await hydrateDownloadStore();
+    expect(Object.keys(useDownloadStore.getState().downloads).length).toBe(0);
+  });
+
+  it('drops a completed vision download once its mmproj sidecar has also completed', async () => {
+    backgroundDownloadService.isAvailable.mockReturnValue(true);
+    backgroundDownloadService.getActiveDownloads.mockResolvedValue([
+      {
+        downloadId: 'dl-parent',
+        modelId: 'author/vision',
+        fileName: 'model.gguf',
+        status: 'completed',
+        bytesDownloaded: 1000,
+        totalBytes: 1000,
+        mmProjDownloadId: 'dl-mm',
+        createdAt: 1000,
+      },
+      {
+        downloadId: 'dl-mm',
+        modelId: 'author/vision',
+        fileName: 'model-mmproj.gguf',
+        status: 'completed',
+        bytesDownloaded: 500,
+        totalBytes: 500,
+        createdAt: 900,
+      },
+    ]);
+
+    await hydrateDownloadStore();
+    expect(Object.keys(useDownloadStore.getState().downloads).length).toBe(0);
+  });
+
   it('keeps latest entry when duplicate keys exist', async () => {
     backgroundDownloadService.isAvailable.mockReturnValue(true);
     backgroundDownloadService.getActiveDownloads.mockResolvedValue([

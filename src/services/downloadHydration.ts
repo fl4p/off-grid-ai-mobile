@@ -1,5 +1,5 @@
 import { backgroundDownloadService } from './backgroundDownloadService';
-import { useDownloadStore, DownloadEntry, DownloadStatus, ModelType } from '../stores/downloadStore';
+import { useDownloadStore, DownloadEntry, DownloadStatus, ModelType, isActiveStatus } from '../stores/downloadStore';
 import { makeModelKey, ModelKey } from '../utils/modelKey';
 import { BackgroundDownloadStatus } from '../types';
 import logger from '../utils/logger';
@@ -59,14 +59,31 @@ function isImageRow(r: NativeDownloadRow): boolean {
   return r.modelType === 'image' || (r.modelId?.startsWith('image:') ?? false);
 }
 
+// A vision model's main GGUF can finish while its mmproj sidecar is still
+// transferring (the two download in parallel). True only when this row's sidecar
+// exists in the snapshot and is still ACTIVELY downloading (running / pending /
+// waiting_for_network). A failed/cancelled sidecar is NOT active: dropping such a
+// row lets restore finalize the GGUF text-only (repair-vision affordance) instead
+// of showing a misleading "Downloading…" card for a dead sidecar on resume.
+function hasActiveMmProj(row: NativeDownloadRow, rows: NativeDownloadRow[]): boolean {
+  if (!row.mmProjDownloadId) return false;
+  const mm = rows.find(r => r.downloadId === row.mmProjDownloadId);
+  return !!mm && isActiveStatus(mapNativeStatus(mm.status));
+}
+
 function getParentRows(rows: NativeDownloadRow[], mmProjIds: Set<string>): NativeDownloadRow[] {
   return rows.filter(r =>
     !mmProjIds.has(r.downloadId) &&
     !isMmProjFileName(r.fileName) &&
     r.status !== 'cancelled' &&
     // Keep COMPLETED image rows — native finished but JS finalization (unzip+register)
-    // may not have run. Text COMPLETED rows are safe to drop (already in AsyncStorage).
-    !(r.status === 'completed' && !isImageRow(r)),
+    // may not have run. Also keep a COMPLETED vision main GGUF whose mmproj sidecar
+    // is still actively downloading: the model is not finalized yet, so dropping it
+    // would make the whole download vanish from the Download Manager during the
+    // sidecar tail (and orphan the mmproj events). Text COMPLETED rows, and vision
+    // rows whose sidecar has finished/failed/cancelled, are safe to drop (already
+    // registered, or restore finalizes them text-only).
+    !(r.status === 'completed' && !isImageRow(r) && !hasActiveMmProj(r, rows)),
   );
 }
 
@@ -107,7 +124,18 @@ function toDownloadEntry(
   // COMPLETED image rows need JS-side finalization — surface as 'processing'
   // so the UI shows them and restoreProcessingImageDownloads can re-finalize.
   const imageCompleted = isImageRow(row) && row.status === 'completed';
-  const status = imageCompleted ? 'processing' : mapNativeStatus(row.status);
+  // A completed main GGUF is only retained here when its mmproj sidecar is still
+  // in flight (see getParentRows). Surface it as an ACTIVE 'running' download —
+  // the overall download isn't finished while the sidecar streams — so the card
+  // stays visible and the mmproj tail keeps rendering. The explicit
+  // mainDownloadComplete flag mirrors the live in-memory state so setStatus can
+  // still clear a stale shared speed if the sidecar then stalls.
+  const mainCompleted = row.status === 'completed' && !isImageRow(row);
+  const status = imageCompleted
+    ? 'processing'
+    : mainCompleted
+      ? 'running'
+      : mapNativeStatus(row.status);
 
   return {
     modelKey,
@@ -121,6 +149,7 @@ function toDownloadEntry(
     totalBytes: row.totalBytes ?? 0,
     combinedTotalBytes: combinedTotal,
     progress: computeProgress(downloadedBytes, row.totalBytes ?? 0, combinedTotal),
+    mainDownloadComplete: mainCompleted || undefined,
     mmProjDownloadId,
     mmProjBytesDownloaded,
     mmProjStatus,
