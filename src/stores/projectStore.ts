@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Project } from '../types';
+import { DEFAULT_PROJECT_SYSTEM_PROMPT } from '../constants';
 import { generateId } from '../utils/generateId';
 import { ragService } from '../services/rag';
 import { memoryService } from '../services/memory';
@@ -24,7 +25,7 @@ const DEFAULT_PROJECTS: Project[] = [
     id: 'default-assistant',
     name: 'General Assistant',
     description: 'A helpful, concise AI assistant for everyday tasks',
-    systemPrompt: 'You are a helpful AI assistant running locally on the user\'s device. Be concise and helpful. Focus on providing accurate information and solving the user\'s problems efficiently.',
+    systemPrompt: DEFAULT_PROJECT_SYSTEM_PROMPT,
     icon: '#6366F1', // Indigo
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

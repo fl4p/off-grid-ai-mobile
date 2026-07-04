@@ -22,7 +22,7 @@ import {
   dispatchGenerationFn,
 } from '../../../src/screens/ChatScreen/useChatGenerationActions';
 import { resolveBaseSystemPrompt } from '../../../src/screens/ChatScreen/baseSystemPrompt';
-import { APP_CONFIG } from '../../../src/constants';
+import { APP_CONFIG, DEFAULT_SETTINGS_SYSTEM_PROMPT, DEFAULT_PROJECT_SYSTEM_PROMPT } from '../../../src/constants';
 import { useRemoteServerStore } from '../../../src/stores/remoteServerStore';
 import { createDownloadedModel } from '../../utils/factories';
 
@@ -170,6 +170,8 @@ jest.mock('../../../src/constants', () => ({
     defaultSystemPrompt: 'You are a helpful assistant.',
     defaultSystemPromptRemote: 'You are a helpful assistant (remote endpoint).',
   },
+  DEFAULT_SETTINGS_SYSTEM_PROMPT: 'You are a helpful assistant running locally. Be concise.',
+  DEFAULT_PROJECT_SYSTEM_PROMPT: 'You are a helpful assistant running locally. Be concise. Focus on accuracy.',
 }));
 
 // ─────────────────────────────────────────────
@@ -1923,7 +1925,7 @@ describe('resolveBaseSystemPrompt', () => {
     expect(resolveBaseSystemPrompt(undefined, true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
   });
 
-  it('always honours a user/project custom prompt, local or remote', () => {
+  it('always honours a genuinely user-authored prompt, local or remote', () => {
     const custom = 'You are Bob. Talk like a pirate.';
     expect(resolveBaseSystemPrompt(custom, false)).toBe(custom);
     expect(resolveBaseSystemPrompt(custom, true)).toBe(custom);
@@ -1932,5 +1934,25 @@ describe('resolveBaseSystemPrompt', () => {
   it('treats an empty custom prompt as unset and falls back to the default', () => {
     expect(resolveBaseSystemPrompt('', false)).toBe(APP_CONFIG.defaultSystemPrompt);
     expect(resolveBaseSystemPrompt('', true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
+  });
+
+  // The core bug: the app SEEDS settings + the built-in project with a "running
+  // locally" prompt, so 'customPrompt' is usually a default the user never touched.
+  it.each([
+    ['settings seed', DEFAULT_SETTINGS_SYSTEM_PROMPT],
+    ['project seed', DEFAULT_PROJECT_SYSTEM_PROMPT],
+  ])('swaps the app %s for the honest remote default on a remote endpoint', (_label, seed) => {
+    expect(resolveBaseSystemPrompt(seed, true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
+  });
+
+  it.each([
+    ['settings seed', DEFAULT_SETTINGS_SYSTEM_PROMPT],
+    ['project seed', DEFAULT_PROJECT_SYSTEM_PROMPT],
+  ])('keeps the app %s unchanged on a local model', (_label, seed) => {
+    expect(resolveBaseSystemPrompt(seed, false)).toBe(seed);
+  });
+
+  it('recognises a seed even with surrounding whitespace', () => {
+    expect(resolveBaseSystemPrompt(`  ${DEFAULT_SETTINGS_SYSTEM_PROMPT}  `, true)).toBe(APP_CONFIG.defaultSystemPromptRemote);
   });
 });

@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceInfo, DownloadedModel, ModelRecommendation, ONNXImageModel, ImageGenerationMode, AutoDetectMethod, CacheType, InferenceBackend, INFERENCE_BACKENDS, LiteRTBackend, GeneratedImage } from '../types';
 import type { SearchProviderId } from '../services/tools/search';
+import { DEFAULT_SETTINGS_SYSTEM_PROMPT } from '../constants';
 
 function isUnknownLike(value: string): boolean {
   const normalized = value.trim().toLowerCase();
@@ -152,7 +153,7 @@ const DEFAULT_CHECKLIST: OnboardingChecklist = {
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
-  systemPrompt: 'You are a helpful AI assistant running locally on the user\'s device. Be concise and helpful.',
+  systemPrompt: DEFAULT_SETTINGS_SYSTEM_PROMPT,
   temperature: 0.7,
   maxTokens: 1024,
   topP: 0.9,
