@@ -41,6 +41,7 @@ export const resetStores = (): void => {
     deviceInfo: null,
     modelRecommendation: null,
     downloadedModels: [],
+    modelCapabilities: {},
     activeModelId: null,
     lastTextModelId: null,
     isLoadingModel: false,
