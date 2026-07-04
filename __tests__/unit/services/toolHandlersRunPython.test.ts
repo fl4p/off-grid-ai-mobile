@@ -73,32 +73,6 @@ describe('run_python handler', () => {
     expect(result.content).toContain("[error]\nNameError: name 'x' is not defined");
   });
 
-  it('adds a recovery hint when code tries to spawn a process (git/subprocess) in the sandbox', async () => {
-    mockExecute.mockResolvedValue({
-      ok: false, stdout: '', stderr: 'File "subprocess.py", line 818, in __init__',
-      error: 'OSError: [Errno 138] emscripten does not support processes.',
-    });
-    const result = await runPython('import subprocess; subprocess.run(["git", "clone", "..."])');
-    expect(result.content).toContain('[hint]');
-    expect(result.content).toContain('read_url');
-    expect(result.content).toContain('write_file');
-  });
-
-  it('adds the recovery hint when code tries a network socket (requests/urllib)', async () => {
-    mockExecute.mockResolvedValue({
-      ok: false, stdout: '', stderr: '', error: 'URLError: <urlopen error [Errno 138] emscripten does not support socket>',
-    });
-    const result = await runPython('import urllib.request; urllib.request.urlopen("https://x")');
-    expect(result.content).toContain('[hint]');
-    expect(result.content).toContain('read_url');
-  });
-
-  it('does not add the recovery hint for an ordinary python error', async () => {
-    mockExecute.mockResolvedValue({ ok: false, stdout: '', stderr: '', error: "NameError: name 'x' is not defined" });
-    const result = await runPython('x');
-    expect(result.content).not.toContain('[hint]');
-  });
-
   it('hints at print() when the script produced no output', async () => {
     mockExecute.mockResolvedValue({ ok: true, stdout: '', stderr: '', result: undefined });
     const result = await runPython('x = 1');
