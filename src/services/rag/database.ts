@@ -209,6 +209,16 @@ class RagDatabase {
     return (result.rows ?? []) as unknown as RagDocument[];
   }
 
+  getEnabledDocumentCountByProject(projectId: string): number {
+    const db = this.getDb();
+    const result = db.executeSync(
+      'SELECT COUNT(*) as count FROM rag_documents WHERE project_id = ? AND enabled = 1',
+      [projectId]
+    );
+    const rows = (result.rows ?? []) as unknown as { count: number }[];
+    return rows.length > 0 ? rows[0].count : 0;
+  }
+
   toggleEnabled(docId: number, enabled: boolean): void {
     const db = this.getDb();
     db.executeSync('UPDATE rag_documents SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, docId]);
