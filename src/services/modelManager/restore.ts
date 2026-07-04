@@ -42,8 +42,14 @@ async function resolveMmProjState(
     totalBytes: mmProjDownload?.totalBytes,
   });
 
-  if (mmProjDownload?.status === 'failed') {
-    logger.warn('[ModelManager] mmproj download failed while app was dead, vision will not be available');
+  if (mmProjDownload?.status === 'failed' || mmProjDownload?.status === 'cancelled') {
+    // Both are terminal: the sidecar will never finish on its own. Treat it as
+    // "nothing left to wait for" and let restore finalize the GGUF text-only,
+    // rather than deadlocking finalization forever on a dead sidecar row.
+    logger.warn('[ModelManager] mmproj download did not complete while app was dead, vision will not be available', {
+      mmProjDownloadId,
+      nativeStatus: mmProjDownload.status,
+    });
     return true;
   }
 

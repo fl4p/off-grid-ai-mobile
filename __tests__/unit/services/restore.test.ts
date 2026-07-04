@@ -306,4 +306,69 @@ describe('restoreInProgressDownloads', () => {
     expect(bgContext.has('10')).toBe(true);
     expect(bgContext.has('20')).toBe(true);
   });
+
+  // ========================================================================
+  // mmproj sidecar terminal-state resolution
+  // ========================================================================
+
+  // A terminal (failed OR cancelled) sidecar must resolve to mmProjCompleted:true
+  // so restore finalizes the GGUF text-only. Treating only 'failed' as terminal
+  // left a 'cancelled' sidecar falling through to mmProjCompleted:false, which
+  // deadlocked finalization forever (the main model waited on a sidecar that
+  // would never finish).
+  it.each([
+    ['failed'],
+    ['cancelled'],
+  ])('finalizes text-only when the mmproj sidecar is %s (no deadlock)', async (mmStatus) => {
+    mockService.getActiveDownloads.mockResolvedValue([
+      makeActiveDownload({
+        downloadId: '99',
+        fileName: 'vision.gguf',
+        totalBytes: 4_000_000_000,
+        combinedTotalBytes: 4_500_000_000,
+        mmProjDownloadId: 'mm-99',
+      }) as any,
+      makeActiveDownload({
+        downloadId: 'mm-99',
+        status: mmStatus,
+        fileName: 'vision-mmproj.gguf',
+        bytesDownloaded: 100,
+        totalBytes: 500_000_000,
+      }) as any,
+    ]);
+
+    await callRestore({ metadataCallback: null });
+
+    const ctx = bgContext.get('99') as any;
+    expect(ctx).toBeDefined();
+    expect(ctx.mmProjCompleted).toBe(true);
+    // A terminal sidecar has nothing left to stream, so no progress listener
+    // is registered for it (only the main download's listener is wired).
+    expect(ctx.removeMmProjProgressListener).toBeUndefined();
+  });
+
+  it('keeps waiting (mmProjCompleted:false) when the mmproj sidecar is still running', async () => {
+    mockService.getActiveDownloads.mockResolvedValue([
+      makeActiveDownload({
+        downloadId: '99',
+        fileName: 'vision.gguf',
+        totalBytes: 4_000_000_000,
+        combinedTotalBytes: 4_500_000_000,
+        mmProjDownloadId: 'mm-99',
+      }) as any,
+      makeActiveDownload({
+        downloadId: 'mm-99',
+        status: 'running',
+        fileName: 'vision-mmproj.gguf',
+        bytesDownloaded: 100,
+        totalBytes: 500_000_000,
+      }) as any,
+    ]);
+
+    await callRestore({ metadataCallback: null });
+
+    const ctx = bgContext.get('99') as any;
+    expect(ctx.mmProjCompleted).toBe(false);
+    expect(ctx.removeMmProjProgressListener).toBeDefined();
+  });
 });
