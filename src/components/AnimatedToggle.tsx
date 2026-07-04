@@ -32,7 +32,7 @@ export const AnimatedToggle: React.FC<AnimatedToggleProps> = ({
   testID,
   accessibilityLabel,
 }) => {
-  const { colors, shadows } = useTheme();
+  const { colors } = useTheme();
   const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
 
   useEffect(() => {
@@ -67,8 +67,11 @@ export const AnimatedToggle: React.FC<AnimatedToggleProps> = ({
         <Animated.View
           style={[
             styles.thumb,
-            shadows.small,
-            { backgroundColor: colors.background, transform: [{ translateX }] },
+            // A subtle border (not boxShadow) gives the thumb contrast against
+            // the low-contrast "off" track. boxShadow on an Animated.View that
+            // also has an interpolated transform crashes Android's New Arch, so
+            // keep any decoration to plain border/background props here.
+            { backgroundColor: colors.background, borderColor: colors.borderLight, transform: [{ translateX }] },
           ]}
         />
       </Animated.View>
@@ -88,6 +91,7 @@ const styles = StyleSheet.create({
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   disabled: {
     opacity: 0.5,
