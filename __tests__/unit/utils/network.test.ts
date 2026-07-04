@@ -37,6 +37,14 @@ describe('network utils', () => {
       ['192.168.0.1', true],
       ['192.168.1.100', true],
       ['192.168.255.255', true],
+      // 100.64-127.x.x (CGNAT / Tailscale, RFC 6598)
+      ['100.64.0.1', true],
+      ['100.100.100.100', true],
+      ['100.127.255.255', true],
+      // 100.x outside 64-127 is public
+      ['100.63.255.255', false],
+      ['100.128.0.1', false],
+      ['100.0.0.1', false],
       // Public IPs
       ['8.8.8.8', false],
       ['1.1.1.1', false],
