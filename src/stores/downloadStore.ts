@@ -324,6 +324,13 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
             ...entry,
             mmProjStatus: status as DownloadStatus,
             errorMessage: mmProjErrorMessage,
+            // The download speed/anchor is a single combined (bytes, time)
+            // value shared by the GGUF and mmproj streams. When the GGUF has
+            // already finished and only the sidecar is still transferring, a
+            // sidecar pause/stop is the sole stall signal — clear the rate here
+            // too so the card never shows a frozen stale speed. A real resume
+            // re-seeds a fresh anchor on the next byte event.
+            ...(status !== 'running' ? { downloadSpeed: 0, lastSpeedUpdate: undefined, speedAnchorBytes: undefined } : {}),
           },
         },
       };

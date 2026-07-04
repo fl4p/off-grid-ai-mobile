@@ -353,6 +353,40 @@ describe('setStatus', () => {
       expect(entry.speedAnchorBytes).toBeUndefined();
     },
   );
+
+  // Vision models download a GGUF plus an mmproj sidecar sharing one combined
+  // (bytes, time) speed anchor. When the GGUF has already finished, entry.status
+  // stays 'running' and the ONLY stall signal is the sidecar's own status. A
+  // sidecar pause/stop must clear the shared speed too, or the card freezes a
+  // stale rate on a download that is no longer moving bytes.
+  it.each(['waiting_for_network', 'retrying', 'failed'] as const)(
+    'clears the shared downloadSpeed and anchor when the mmproj sidecar goes %s',
+    (status) => {
+      useDownloadStore.getState().add(makeEntry({
+        status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345, speedAnchorBytes: 1000,
+        mmProjDownloadId: 'dl-mm',
+      }));
+      useDownloadStore.getState().setStatus('dl-mm', status);
+      const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+      expect(entry.status).toBe('running'); // main entry unaffected
+      expect(entry.mmProjStatus).toBe(status);
+      expect(entry.downloadSpeed).toBe(0);
+      expect(entry.lastSpeedUpdate).toBeUndefined();
+      expect(entry.speedAnchorBytes).toBeUndefined();
+    },
+  );
+
+  it('keeps the shared downloadSpeed while the mmproj sidecar is still running', () => {
+    useDownloadStore.getState().add(makeEntry({
+      status: 'running', downloadSpeed: 5000, lastSpeedUpdate: 12345, speedAnchorBytes: 1000,
+      mmProjDownloadId: 'dl-mm',
+    }));
+    useDownloadStore.getState().setStatus('dl-mm', 'running');
+    const entry = useDownloadStore.getState().downloads['author/model/model.gguf'];
+    expect(entry.mmProjStatus).toBe('running');
+    expect(entry.downloadSpeed).toBe(5000);
+    expect(entry.speedAnchorBytes).toBe(1000);
+  });
 });
 
 describe('setProcessing / setCompleted', () => {
