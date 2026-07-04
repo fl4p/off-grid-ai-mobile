@@ -28,6 +28,7 @@ export interface DownloadEntry {
   progress: number
   downloadSpeed?: number
   lastSpeedUpdate?: number
+  speedAnchorBytes?: number
   mmProjDownloadId?: string
   mmProjBytesDownloaded?: number
   mmProjStatus?: DownloadStatus
@@ -53,26 +54,86 @@ export function isActiveStatus(status: DownloadStatus): boolean {
 }
 
 /**
- * Compute a smoothed download speed (bytes/sec) using an exponential moving
- * average. Returns 0 on the first sample (no baseline to diff against).
+ * Minimum real-time window (ms) to measure download speed over. Progress events
+ * do NOT arrive at a steady cadence: Android delivers them through a WorkManager
+ * WorkInfo observer that coalesces `setProgress` writes and flushes several at
+ * once, and the RN bridge batches native->JS calls. So the gap between two
+ * *adjacent* events can collapse to ~1ms while the byte delta is a full chunk —
+ * dividing one by the other yields a wildly inflated speed (observed: ~150 MB/s
+ * reported for a real ~5 MB/s download). Measuring over a real window instead
+ * makes the elapsed-time term reflect true wall-clock time regardless of how
+ * the intermediate events were delivered.
+ */
+const SPEED_WINDOW_MS = 500;
+
+/**
+ * Compute a smoothed download speed (bytes/sec) anchored to a (bytes, time)
+ * sample, recomputed only once at least SPEED_WINDOW_MS of real time has
+ * elapsed since the anchor. Returns the (possibly held) speed plus the anchor
+ * to persist for the next event. Speed is EMA-smoothed across windows.
  */
 function computeDownloadSpeed(opts: {
-  prevCombined: number;
+  anchorBytes: number | undefined;
+  anchorTime: number | undefined;
   newCombined: number;
-  prevTimestamp: number | undefined;
   now: number;
   prevSpeed: number | undefined;
-}): number {
-  const { prevCombined, newCombined, prevTimestamp, now, prevSpeed } = opts;
-  if (!prevTimestamp) return 0;
-  const deltaBytes = newCombined - prevCombined;
-  const deltaMs = now - prevTimestamp;
-  if (deltaMs <= 0 || deltaBytes < 0) return prevSpeed ?? 0;
+}): { speed: number; anchorBytes: number; anchorTime: number } {
+  const { anchorBytes, anchorTime, newCombined, now, prevSpeed } = opts;
+  const held = prevSpeed ?? 0;
+  // First sample (or after a reset): seed the anchor, no speed yet.
+  if (anchorTime == null || anchorBytes == null) {
+    return { speed: held, anchorBytes: newCombined, anchorTime: now };
+  }
+  const deltaBytes = newCombined - anchorBytes;
+  const deltaMs = now - anchorTime;
+  // Re-anchor and hold when the sample is unusable rather than divide by a bad
+  // delta: bytes went backwards (resume / out-of-order event), or the wall clock
+  // jumped backwards (NTP correction, manual change) making deltaMs negative —
+  // Date.now() is not monotonic, and without this a backward jump would trap us
+  // in the sub-window branch forever, freezing a stale rate.
+  if (deltaBytes < 0 || deltaMs < 0) {
+    return { speed: held, anchorBytes: newCombined, anchorTime: now };
+  }
+  // Too little real time has passed to measure reliably (a coalesced burst of
+  // events): hold the last speed AND keep the anchor put, so the next event
+  // that crosses the window measures byte-delta over true elapsed time. A
+  // zero-byte delta that DOES cross the window is a real stall (iOS re-polls the
+  // same byte count every 1.5s while a connection hangs) and correctly falls
+  // through to compute instantSpeed = 0, decaying the EMA toward 0. The
+  // completion echo — where onAnyComplete re-reports a finished GGUF's final
+  // bytes while its mmproj sidecar is still going — is kept off this path
+  // entirely by its caller (updateProgressBytesOnly), so it never injects a
+  // spurious 0.
+  if (deltaMs < SPEED_WINDOW_MS) {
+    return { speed: held, anchorBytes, anchorTime };
+  }
   const instantSpeed = (deltaBytes / deltaMs) * 1000;
   const alpha = 0.3;
-  return prevSpeed && prevSpeed > 0
+  const speed = prevSpeed && prevSpeed > 0
     ? prevSpeed * (1 - alpha) + instantSpeed * alpha
     : instantSpeed;
+  return { speed, anchorBytes: newCombined, anchorTime: now };
+}
+
+/**
+ * Build the mutable fields for a progress update. Shared by updateProgress
+ * (touchSpeed=true, feeds the speed EMA) and updateProgressBytesOnly
+ * (touchSpeed=false, bytes/progress only — used for completion echoes).
+ */
+function progressPatch(entry: DownloadEntry, opts: { bytes: number; total: number; touchSpeed: boolean }): Partial<DownloadEntry> {
+  const { bytes, total, touchSpeed } = opts;
+  const combinedTotal = entry.combinedTotalBytes || total;
+  const mmProjBytes = entry.mmProjBytesDownloaded ?? 0;
+  const progress = combinedTotal > 0 ? (bytes + mmProjBytes) / combinedTotal : 0;
+  const base: Partial<DownloadEntry> = { bytesDownloaded: bytes, totalBytes: total, progress, status: 'running' };
+  if (!touchSpeed) return base;
+  const now = Date.now();
+  const { speed, anchorBytes, anchorTime } = computeDownloadSpeed({
+    anchorBytes: entry.speedAnchorBytes, anchorTime: entry.lastSpeedUpdate,
+    newCombined: bytes + mmProjBytes, now, prevSpeed: entry.downloadSpeed,
+  });
+  return { ...base, downloadSpeed: speed, lastSpeedUpdate: anchorTime, speedAnchorBytes: anchorBytes };
 }
 
 interface DownloadStoreState {
@@ -86,6 +147,7 @@ interface DownloadStoreState {
   add: (entry: DownloadEntry) => void
   setMmProjDownloadId: (modelKey: ModelKey, mmProjDownloadId: string) => void
   updateProgress: (downloadId: string, bytes: number, total: number) => void
+  updateProgressBytesOnly: (downloadId: string, bytes: number, total: number) => void
   updateMmProjProgress: (mmProjDownloadId: string, bytes: number) => void
   setStatus: (downloadId: string, status: DownloadStatus, error?: { message: string; code?: string }) => void
   setProcessing: (downloadId: string) => void
@@ -189,27 +251,20 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     if (!modelKey) return state;
     const entry = state.downloads[modelKey];
     if (!entry || entry.downloadId !== downloadId) return state;
-    const combinedTotal = entry.combinedTotalBytes || total;
-    const mmProjBytes = entry.mmProjBytesDownloaded ?? 0;
-    const progress = combinedTotal > 0 ? (bytes + mmProjBytes) / combinedTotal : 0;
-    const now = Date.now();
-    const prevCombined = entry.bytesDownloaded + (entry.mmProjBytesDownloaded ?? 0);
-    const newCombined = bytes + mmProjBytes;
-    const speed = computeDownloadSpeed({ prevCombined, newCombined, prevTimestamp: entry.lastSpeedUpdate, now, prevSpeed: entry.downloadSpeed });
-    return {
-      downloads: {
-        ...state.downloads,
-        [modelKey]: {
-          ...entry,
-          bytesDownloaded: bytes,
-          totalBytes: total,
-          progress,
-          status: 'running',
-          downloadSpeed: speed,
-          lastSpeedUpdate: now,
-        },
-      },
-    };
+    return { downloads: { ...state.downloads, [modelKey]: { ...entry, ...progressPatch(entry, { bytes, total, touchSpeed: true }) } } };
+  }),
+
+  // Updates bytes/progress WITHOUT feeding the speed EMA. The completion path
+  // (onAnyComplete) re-reports a finished file's final byte count; routing that
+  // through the speed calc would inject a spurious 0 B/s sample (zero byte-delta
+  // over real elapsed time) and sag the displayed rate while a vision model's
+  // mmproj sidecar is still transferring.
+  updateProgressBytesOnly: (downloadId, bytes, total) => set(state => {
+    const modelKey = state.downloadIdIndex[downloadId];
+    if (!modelKey) return state;
+    const entry = state.downloads[modelKey];
+    if (!entry || entry.downloadId !== downloadId) return state;
+    return { downloads: { ...state.downloads, [modelKey]: { ...entry, ...progressPatch(entry, { bytes, total, touchSpeed: false }) } } };
   }),
 
   updateMmProjProgress: (mmProjDownloadId, bytes) => set(state => {
@@ -230,9 +285,8 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     const combinedTotal = entry.combinedTotalBytes || entry.totalBytes;
     const progress = combinedTotal > 0 ? (entry.bytesDownloaded + bytes) / combinedTotal : 0;
     const now = Date.now();
-    const prevCombined = entry.bytesDownloaded + (entry.mmProjBytesDownloaded ?? 0);
     const newCombined = entry.bytesDownloaded + bytes;
-    const speed = computeDownloadSpeed({ prevCombined, newCombined, prevTimestamp: entry.lastSpeedUpdate, now, prevSpeed: entry.downloadSpeed });
+    const { speed, anchorBytes, anchorTime } = computeDownloadSpeed({ anchorBytes: entry.speedAnchorBytes, anchorTime: entry.lastSpeedUpdate, newCombined, now, prevSpeed: entry.downloadSpeed });
     return {
       downloads: {
         ...state.downloads,
@@ -242,7 +296,8 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
           mmProjStatus: 'running',
           progress,
           downloadSpeed: speed,
-          lastSpeedUpdate: now,
+          lastSpeedUpdate: anchorTime,
+          speedAnchorBytes: anchorBytes,
         },
       },
     };
@@ -278,7 +333,13 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
         ...state.downloads,
         [modelKey]: {
           ...entry, status, errorMessage: error?.message, errorCode: error?.code,
-          ...(status === 'failed' || status === 'cancelled' ? { downloadSpeed: 0, lastSpeedUpdate: undefined } : {}),
+          // Any transition that isn't actively flowing bytes must drop the
+          // speed and anchor, so the UI never shows a frozen stale rate while
+          // paused (waiting_for_network / retrying) or stopped (failed /
+          // cancelled). A real resume re-seeds a fresh anchor on the next byte
+          // event — measuring across the outage gap would otherwise depress the
+          // first post-resume reading.
+          ...(status !== 'running' ? { downloadSpeed: 0, lastSpeedUpdate: undefined, speedAnchorBytes: undefined } : {}),
         },
       },
     };
@@ -290,7 +351,7 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     const entry = state.downloads[modelKey];
     if (!entry) return state;
     return {
-      downloads: { ...state.downloads, [modelKey]: { ...entry, status: 'processing', downloadSpeed: 0, lastSpeedUpdate: undefined } },
+      downloads: { ...state.downloads, [modelKey]: { ...entry, status: 'processing', downloadSpeed: 0, lastSpeedUpdate: undefined, speedAnchorBytes: undefined } },
     };
   }),
 
@@ -302,7 +363,7 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
     return {
       downloads: {
         ...state.downloads,
-        [modelKey]: { ...entry, status: 'completed', progress: 1, downloadSpeed: 0, lastSpeedUpdate: undefined },
+        [modelKey]: { ...entry, status: 'completed', progress: 1, downloadSpeed: 0, lastSpeedUpdate: undefined, speedAnchorBytes: undefined },
       },
     };
   }),
@@ -346,6 +407,7 @@ export const useDownloadStore = create<DownloadStoreState>((set) => ({
           progress: 0,
           downloadSpeed: 0,
           lastSpeedUpdate: undefined,
+          speedAnchorBytes: undefined,
           errorMessage: undefined,
           errorCode: undefined,
           // Preserve mmproj identity fields so the UI still knows this is a

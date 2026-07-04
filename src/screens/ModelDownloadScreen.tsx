@@ -102,6 +102,53 @@ const LiteRTModelCard: React.FC<LiteRTCardProps> = ({ file, index, curatedEntry,
   />
 );
 
+/**
+ * Device card showing the model, live available memory, and total (max) RAM.
+ * Self-contained so the 3s memory poll only re-renders this subtree — not the
+ * parent's model-card list. Subscribes to `deviceInfo` with a narrow selector
+ * and owns the interval; the parent's init effect seeds the cache first.
+ */
+const DeviceMemoryCard: React.FC = () => {
+  const styles = useThemedStyles(createStyles);
+  const deviceInfo = useAppStore(s => s.deviceInfo);
+  const setDeviceInfo = useAppStore(s => s.setDeviceInfo);
+
+  // Available memory changes as other apps and the OS come and go, so keep it
+  // live: re-read every few seconds while this screen is open. refreshMemoryInfo
+  // mutates and returns the cached object, so spread into a new reference to
+  // trigger a store update + re-render.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const info = await hardwareService.refreshMemoryInfo();
+        if (!cancelled) setDeviceInfo({ ...info });
+      } catch (error) {
+        logger.warn('Failed to refresh memory info:', error);
+      }
+    };
+    const interval = setInterval(tick, 3000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [setDeviceInfo]);
+
+  return (
+    <Card style={styles.deviceCard}>
+      <View style={styles.deviceInfo}>
+        <Text style={styles.deviceLabel}>Your Device</Text>
+        <Text style={styles.deviceValue}>{deviceInfo?.deviceModel}</Text>
+      </View>
+      <View style={styles.deviceInfo}>
+        <Text style={styles.deviceLabel}>Available Memory</Text>
+        <Text style={styles.deviceValue}>{hardwareService.formatBytes(deviceInfo?.availableMemory || 0)}</Text>
+      </View>
+      <View style={styles.deviceInfo}>
+        <Text style={styles.deviceLabel}>Total RAM</Text>
+        <Text style={styles.deviceValue}>{hardwareService.formatBytes(deviceInfo?.totalMemory || 0)}</Text>
+      </View>
+    </Card>
+  );
+};
+
 export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [recommendedModels, setRecommendedModels] = useState<typeof RECOMMENDED_MODELS>([]);
@@ -118,7 +165,14 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
 
-  const { deviceInfo, setDeviceInfo, setModelRecommendation, addDownloadedModel, downloadedModels } = useAppStore();
+  // Narrow selectors, not a whole-store `useAppStore()` destructure: otherwise the
+  // 3s setDeviceInfo tick in DeviceMemoryCard produces a new store reference and
+  // re-renders this whole screen (and every model card) every 3s, defeating the
+  // point of isolating the poll in its own component.
+  const setDeviceInfo = useAppStore(s => s.setDeviceInfo);
+  const setModelRecommendation = useAppStore(s => s.setModelRecommendation);
+  const addDownloadedModel = useAppStore(s => s.addDownloadedModel);
+  const downloadedModels = useAppStore(s => s.downloadedModels);
   const storeDownloads = useDownloadStore(s => s.downloads);
   const servers = useRemoteServerStore((s) => s.servers);
   const discoveredModels = useRemoteServerStore((s) => s.discoveredModels);
@@ -350,16 +404,7 @@ export const ModelDownloadScreen: React.FC<Props> = ({ navigation }) => {
 
           <Text style={styles.sectionTitle}>Download to Your Device</Text>
 
-          <Card style={styles.deviceCard}>
-            <View style={styles.deviceInfo}>
-              <Text style={styles.deviceLabel}>Your Device</Text>
-              <Text style={styles.deviceValue}>{deviceInfo?.deviceModel}</Text>
-            </View>
-            <View style={styles.deviceInfo}>
-              <Text style={styles.deviceLabel}>Available Memory</Text>
-              <Text style={styles.deviceValue}>{hardwareService.formatBytes(deviceInfo?.availableMemory || 0)}</Text>
-            </View>
-          </Card>
+          <DeviceMemoryCard />
 
           {liteRTFiles.map((file, index) => {
             const modelKey = makeModelKey(LITERT_PARENT_ID, file.name);
